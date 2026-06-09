@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:server"],
+      "port": 3030
+    },
+    {
+      "name": "client",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:client"],
+      "port": 5175
+    },
+    {
+      "name": "trace-app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/assaf/Documents/trace-app/server.js"],
+      "port": 4178
+    }
+  ]
+}

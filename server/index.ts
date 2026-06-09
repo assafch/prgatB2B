@@ -1,0 +1,528 @@
+// prgatB2B server entry — Express, all routes mounted here.
+
+import 'dotenv/config';
+import express, { type Request, type Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+import { db } from './db.js';
+import {
+  bootstrapAdmin,
+  clearSessionCookie,
+  createSession,
+  destroySession,
+  equalizeLoginTiming,
+  loadUser,
+  requireAdmin,
+  requireAuth,
+  requireCustomer,
+  setSessionCookie,
+  verifyPassword,
+  type AuthedRequest,
+} from './auth.js';
+import { COOKIE } from './auth.js';
+import * as cookie from 'cookie';
+import {
+  getProduct,
+  listFamiliesLocal,
+  queryCatalog,
+  refreshCatalogFromPriority,
+  refreshCustomerPricing,
+} from './catalog.js';
+import {
+  clearCart,
+  getCart,
+  getLocalOrder,
+  listLocalOrders,
+  listPriorityOrders,
+  OrderError,
+  reorderToCart,
+  setCartLine,
+  submitOrder,
+} from './orders.js';
+import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
+import { createLead, listLeads, updateLeadStatus } from './leads.js';
+import { getPriorityConfig, listCustomers } from './priority.js';
+import { getAccountSummary, getInvoices } from './finance.js';
+import {
+  bulkUpdate,
+  deleteImage,
+  exportCsv,
+  getProductAdmin,
+  importCsv,
+  listProductsAdmin,
+  patchProduct,
+  saveImage,
+  upload,
+  UPLOADS_DIR,
+} from './products.js';
+
+const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+
+app.set('trust proxy', 1);
+app.disable('x-powered-by'); // don't advertise Express
+
+// Security headers on every response. The strict CSP/HSTS are production-only so
+// they don't break the Vite dev server (HMR uses inline scripts, eval, websockets).
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "img-src 'self' data: blob:",
+        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self'",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+      ].join('; ')
+    );
+  }
+  next();
+});
+
+app.use(express.json({ limit: '2mb' }));
+app.use(loadUser);
+
+// Public uploads (product images). Cached aggressively since filenames are content-hashed.
+app.use(
+  '/uploads',
+  express.static(UPLOADS_DIR, {
+    maxAge: '7d',
+    etag: true,
+  })
+);
+
+// ---------- Health ----------
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString() });
+});
+
+// ---------- Auth ----------
+const loginLimiter = rateLimit({ windowMs: 60_000, max: 10 });
+// Throttle unauthenticated, state-changing / probe-able public endpoints
+// (invite lookup + accept, lead capture) to deter token brute-force and spam.
+const publicLimiter = rateLimit({ windowMs: 60_000, max: 20 });
+
+app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) => {
+  const { username, password } = (req.body || {}) as { username?: string; password?: string };
+  if (!username || !password) {
+    res.status(400).json({ error: 'missing_credentials' });
+    return;
+  }
+  const user = db
+    .prepare(`SELECT * FROM users WHERE username = ? AND status = 'active'`)
+    .get(username) as any;
+  if (!user) {
+    // Burn the same time as a real bcrypt check so response timing can't reveal
+    // whether the username exists (anti-enumeration).
+    await equalizeLoginTiming(password);
+    res.status(401).json({ error: 'invalid_credentials' });
+    return;
+  }
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) {
+    res.status(401).json({ error: 'invalid_credentials' });
+    return;
+  }
+  const token = createSession(user.id, req.ip, req.headers['user-agent']);
+  setSessionCookie(res, token);
+  db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id);
+  res.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      custname: user.custname,
+      cust_desc: user.cust_desc,
+    },
+  });
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const raw = req.headers.cookie;
+  if (raw) {
+    const parsed = cookie.parse(raw);
+    const token = parsed[COOKIE];
+    if (token) destroySession(token);
+  }
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
+  if (!req.user) {
+    res.json({ user: null });
+    return;
+  }
+  res.json({
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      role: req.user.role,
+      custname: req.user.custname,
+      cust_desc: req.user.cust_desc,
+    },
+  });
+});
+
+// ---------- Invites (public) ----------
+app.get('/api/invites/:token', publicLimiter, (req, res) => {
+  const inv = getInvite(req.params.token);
+  if (!inv) {
+    res.status(404).json({ error: 'invite_invalid' });
+    return;
+  }
+  res.json({ custname: inv.custname, cust_desc: inv.cust_desc, email: inv.email, phone: inv.phone });
+});
+
+app.post('/api/invites/:token/accept', publicLimiter, async (req: AuthedRequest, res) => {
+  const { username, password } = (req.body || {}) as { username?: string; password?: string };
+  if (!username || !password || password.length < 8) {
+    res.status(400).json({ error: 'weak_password_or_missing_username' });
+    return;
+  }
+  try {
+    const { userId } = await acceptInvite(req.params.token, username, password);
+    const token = createSession(userId, req.ip, req.headers['user-agent']);
+    setSessionCookie(res, token);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ---------- Leads (public) ----------
+app.post('/api/leads', publicLimiter, (req, res) => {
+  const id = createLead(req.body || {});
+  res.json({ id });
+});
+
+// ---------- Customer ----------
+app.get('/api/catalog', requireCustomer, (req: AuthedRequest, res) => {
+  const { q, family, page, pageSize } = req.query;
+  const result = queryCatalog(req.user!.custname, {
+    q: typeof q === 'string' ? q : undefined,
+    family: typeof family === 'string' ? family : undefined,
+    page: page ? Number(page) : undefined,
+    pageSize: pageSize ? Number(pageSize) : undefined,
+  });
+  res.json(result);
+});
+
+app.get('/api/catalog/families', requireCustomer, (_req, res) => {
+  res.json({ families: listFamiliesLocal() });
+});
+
+app.get('/api/catalog/:partname', requireCustomer, (req: AuthedRequest, res) => {
+  const prod = getProduct(req.params.partname, req.user!.custname);
+  if (!prod) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json(prod);
+});
+
+app.get('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
+  res.json(getCart(req.user!.id, req.user!.custname!));
+});
+
+app.put('/api/cart/lines/:partname', requireCustomer, (req: AuthedRequest, res) => {
+  const { quantity } = (req.body || {}) as { quantity?: number };
+  if (typeof quantity !== 'number' || !isFinite(quantity)) {
+    res.status(400).json({ error: 'bad_quantity' });
+    return;
+  }
+  setCartLine(req.user!.id, req.params.partname, quantity);
+  res.json(getCart(req.user!.id, req.user!.custname!));
+});
+
+app.delete('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
+  clearCart(req.user!.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/orders', requireCustomer, async (req: AuthedRequest, res) => {
+  const { details } = (req.body || {}) as { details?: string };
+  try {
+    const result = await submitOrder(req.user!.id, req.user!.custname!, details);
+    res.json(result);
+  } catch (err) {
+    // User-facing validation errors (e.g. empty cart) are safe to surface.
+    if (err instanceof OrderError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    // Anything else may carry Priority/ERP internals — log server-side, return generic.
+    console.error('[orders] submit failed:', err);
+    res.status(500).json({ error: 'שליחת ההזמנה נכשלה. נסה שוב או פנה לתמיכה.' });
+  }
+});
+
+app.get('/api/orders', requireCustomer, (req: AuthedRequest, res) => {
+  res.json({ orders: listLocalOrders(req.user!.id) });
+});
+
+app.get('/api/orders/priority', requireCustomer, async (req: AuthedRequest, res) => {
+  const orders = await listPriorityOrders(req.user!.custname!);
+  res.json({ orders });
+});
+
+app.get('/api/orders/:id', requireCustomer, (req: AuthedRequest, res) => {
+  const order = getLocalOrder(req.user!.id, Number(req.params.id));
+  if (!order) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json(order);
+});
+
+app.post('/api/orders/:id/reorder', requireCustomer, (req: AuthedRequest, res) => {
+  try {
+    const count = reorderToCart(req.user!.id, Number(req.params.id));
+    res.json({ ok: true, lines: count });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/account', requireCustomer, async (req: AuthedRequest, res) => {
+  const summary = await getAccountSummary(req.user!.custname!);
+  res.json({
+    // Local fallbacks (kept for backward-compat / when Priority is unreachable)
+    custname: req.user!.custname,
+    cust_desc: req.user!.cust_desc,
+    email: req.user!.email,
+    phone: req.user!.phone,
+    // Live Priority data
+    profile: summary.profile,
+    balance: summary.balance,
+    priorityOk: summary.priorityOk,
+  });
+});
+
+app.get('/api/invoices', requireCustomer, async (req: AuthedRequest, res) => {
+  const result = await getInvoices(req.user!.custname!);
+  res.json(result);
+});
+
+// ---------- Admin ----------
+app.post('/api/admin/catalog/refresh', requireAdmin, async (_req, res) => {
+  try {
+    const result = await refreshCatalogFromPriority();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post('/api/admin/pricing/refresh', requireAdmin, async (req, res) => {
+  const custname = String(req.query.custname || '');
+  if (!custname) {
+    res.status(400).json({ error: 'custname_required' });
+    return;
+  }
+  try {
+    const count = await refreshCustomerPricing(custname);
+    res.json({ updated: count });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/admin/customers/priority', requireAdmin, async (_req, res) => {
+  const config = getPriorityConfig();
+  if (!config) {
+    res.status(400).json({ error: 'priority_not_configured' });
+    return;
+  }
+  try {
+    const customers = await listCustomers(config);
+    res.json({ customers });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/admin/users', requireAdmin, (_req, res) => {
+  const users = db
+    .prepare(
+      `SELECT id, username, role, custname, cust_desc, email, phone, status, created_at, last_login_at
+       FROM users ORDER BY created_at DESC`
+    )
+    .all();
+  res.json({ users });
+});
+
+app.post('/api/admin/invites', requireAdmin, (req: AuthedRequest, res) => {
+  const { custname, cust_desc, email, phone } = (req.body || {}) as Record<string, string | undefined>;
+  if (!custname) {
+    res.status(400).json({ error: 'custname_required' });
+    return;
+  }
+  const inv = createInvite({
+    custname,
+    cust_desc,
+    email,
+    phone,
+    created_by: req.user!.id,
+  });
+  const base = process.env.APP_BASE_URL || `http://localhost:5173`;
+  res.json({ invite: inv, url: `${base}/#invite/${inv.token}` });
+});
+
+app.get('/api/admin/invites', requireAdmin, (_req, res) => {
+  res.json({ invites: listInvites() });
+});
+
+app.get('/api/admin/leads', requireAdmin, (_req, res) => {
+  res.json({ leads: listLeads() });
+});
+
+app.patch('/api/admin/leads/:id', requireAdmin, (req, res) => {
+  const { status } = (req.body || {}) as { status?: string };
+  if (!status) {
+    res.status(400).json({ error: 'status_required' });
+    return;
+  }
+  updateLeadStatus(Number(req.params.id), status);
+  res.json({ ok: true });
+});
+
+// ---------- Admin: Product control panel ----------
+app.get('/api/admin/products', requireAdmin, (req, res) => {
+  const { q, family, status, page, pageSize } = req.query;
+  const result = listProductsAdmin({
+    q: typeof q === 'string' ? q : undefined,
+    family: typeof family === 'string' ? family : undefined,
+    status: (typeof status === 'string' ? status : 'all') as 'all' | 'visible' | 'hidden' | 'no_image' | 'inactive',
+    page: page ? Number(page) : undefined,
+    pageSize: pageSize ? Number(pageSize) : undefined,
+  });
+  res.json(result);
+});
+
+app.get('/api/admin/products/export.csv', requireAdmin, (_req, res) => {
+  const csv = exportCsv();
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="orgat-products.csv"');
+  res.send('﻿' + csv); // BOM for Excel Hebrew
+});
+
+app.post('/api/admin/products/import.csv', requireAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: 'no_file' });
+    return;
+  }
+  const dryRun = req.query.dryRun !== 'false';
+  const text = req.file.buffer.toString('utf8').replace(/^﻿/, '');
+  try {
+    const result = importCsv(text, dryRun);
+    res.json({ dryRun, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post('/api/admin/products/bulk', requireAdmin, (req, res) => {
+  try {
+    const changes = bulkUpdate(req.body || {});
+    res.json({ changes });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/admin/products/:partname', requireAdmin, (req, res) => {
+  const prod = getProductAdmin(req.params.partname);
+  if (!prod) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json(prod);
+});
+
+app.patch('/api/admin/products/:partname', requireAdmin, (req, res) => {
+  const updated = patchProduct(req.params.partname, req.body || {});
+  if (!updated) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json(updated);
+});
+
+app.post(
+  '/api/admin/products/:partname/image',
+  requireAdmin,
+  upload.single('image'),
+  async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ error: 'no_file' });
+      return;
+    }
+    try {
+      const result = await saveImage(req.params.partname, req.file.buffer);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+);
+
+app.delete('/api/admin/products/:partname/image', requireAdmin, (req, res) => {
+  deleteImage(req.params.partname);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/dashboard', requireAdmin, (_req, res) => {
+  const stats = {
+    users: (db.prepare(`SELECT COUNT(*) as c FROM users WHERE role='customer'`).get() as any).c,
+    orders: (db.prepare(`SELECT COUNT(*) as c FROM orders_local`).get() as any).c,
+    orders_submitted: (db.prepare(`SELECT COUNT(*) as c FROM orders_local WHERE status='submitted'`).get() as any).c,
+    leads: (db.prepare(`SELECT COUNT(*) as c FROM leads WHERE status='new'`).get() as any).c,
+    invites_pending: (db.prepare(`SELECT COUNT(*) as c FROM invites WHERE used_at IS NULL`).get() as any).c,
+    products: (db.prepare(`SELECT COUNT(*) as c FROM catalog_cache WHERE active=1`).get() as any).c,
+  };
+  res.json(stats);
+});
+
+// ---------- Static client in production ----------
+if (process.env.NODE_ENV === 'production') {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const clientDir = path.resolve(__dirname, '../client');
+  app.use(express.static(clientDir));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(clientDir, 'index.html'));
+  });
+}
+
+// ---------- Startup ----------
+async function startup() {
+  await bootstrapAdmin();
+  app.listen(PORT, () => {
+    console.log(`[prgatB2B] listening on :${PORT}`);
+    const config = getPriorityConfig();
+    if (config) {
+      console.log(`[prgatB2B] Priority configured: ${config.baseUrl}/${config.company}`);
+    } else {
+      console.warn('[prgatB2B] Priority NOT configured — set PRIORITY_* env vars');
+    }
+  });
+}
+
+startup().catch((err) => {
+  console.error('Startup failed:', err);
+  process.exit(1);
+});
