@@ -245,7 +245,15 @@ app.put('/api/cart/lines/:partname', requireCustomer, (req: AuthedRequest, res) 
     res.status(400).json({ error: 'bad_quantity' });
     return;
   }
-  setCartLine(req.user!.id, req.params.partname, quantity);
+  try {
+    setCartLine(req.user!.id, req.user!.custname!, req.params.partname, quantity);
+  } catch (err) {
+    if (err instanceof OrderError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
   res.json(getCart(req.user!.id, req.user!.custname!));
 });
 
@@ -291,10 +299,15 @@ app.get('/api/orders/:id', requireCustomer, (req: AuthedRequest, res) => {
 
 app.post('/api/orders/:id/reorder', requireCustomer, (req: AuthedRequest, res) => {
   try {
-    const count = reorderToCart(req.user!.id, Number(req.params.id));
+    const count = reorderToCart(req.user!.id, req.user!.custname!, Number(req.params.id));
     res.json({ ok: true, lines: count });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    if (err instanceof OrderError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    console.error('[orders] reorder failed:', err);
+    res.status(500).json({ error: 'הפעולה נכשלה. נסו שוב.' });
   }
 });
 

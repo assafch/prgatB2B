@@ -10,7 +10,11 @@ export interface CartLine {
   quantity: number;
   price: number | null;
   line_total: number;
+  /** false when the item is no longer active+visible in the catalog (kept so the user can remove it). */
+  available: boolean;
 }
+
+const MAX_LINE_QTY = 9999;
 
 export function getCart(userId: number, custname: string): { lines: CartLine[]; total: number } {
   const rows = db
@@ -29,16 +33,29 @@ export function getCart(userId: number, custname: string): { lines: CartLine[]; 
       quantity: r.quantity,
       price,
       line_total: lineTotal,
+      available: prod !== null,
     });
   }
   return { lines, total };
 }
 
-export function setCartLine(userId: number, partname: string, quantity: number): void {
+export function setCartLine(
+  userId: number,
+  custname: string,
+  partname: string,
+  quantity: number
+): void {
   if (quantity <= 0) {
+    // Always allow removal, even of items that have since been hidden/deactivated.
     db.prepare('DELETE FROM cart_lines WHERE user_id = ? AND partname = ?').run(userId, partname);
     return;
   }
+  if (quantity > MAX_LINE_QTY) throw new OrderError('כמות גדולה מדי');
+  // Only items that are active AND b2b_visible may enter a cart — getProduct
+  // returns null otherwise. Without this check a logged-in customer could PUT any
+  // partname (including hidden/internal SKUs) and push it into the ERP order.
+  const prod = getProduct(partname, custname);
+  if (!prod) throw new OrderError('המוצר אינו זמין להזמנה');
   db.prepare(
     `INSERT INTO cart_lines (user_id, partname, quantity, updated_at)
      VALUES (?, ?, ?, datetime('now'))
@@ -80,6 +97,21 @@ export async function submitOrder(
   const { lines, total } = getCart(userId, custname);
   if (lines.length === 0) throw new OrderError('הסל ריק');
 
+  // Re-validate every line against the live catalog at submit time. The cart may
+  // hold items that were hidden/deactivated since they were added, or items with
+  // no usable price — neither may reach the ERP.
+  for (const ln of lines) {
+    const prod = getProduct(ln.partname, custname);
+    if (!prod) {
+      throw new OrderError(`המוצר "${ln.partdes ?? ln.partname}" אינו זמין עוד — הסירו אותו מהסל`);
+    }
+    if (typeof prod.price !== 'number' || prod.price <= 0) {
+      throw new OrderError(
+        `למוצר "${prod.partdes ?? ln.partname}" אין מחיר זמין — פנו אלינו ונשלים את המחיר`
+      );
+    }
+  }
+
   const config = getPriorityConfig();
   if (!config) throw new Error('Priority not configured');
 
@@ -102,7 +134,10 @@ export async function submitOrder(
   });
   tx();
 
-  // POST to Priority
+  // POST to Priority. PRICE is deliberately omitted: Priority prices each line from
+  // its own price lists / customer agreements, exactly as a phoned-in order would be
+  // priced. The portal's cached price (stored on orders_local above) is display-only —
+  // sending it would let a stale or wrong cache write prices into the ERP.
   let ordname: string;
   try {
     ordname = await createOrder(
@@ -111,7 +146,6 @@ export async function submitOrder(
       lines.map((ln) => ({
         PARTNAME: ln.partname,
         TQUANT: ln.quantity,
-        PRICE: ln.price ?? undefined,
       })),
       details,
       `B2B-${localOrderId}`
@@ -169,16 +203,21 @@ export async function listPriorityOrders(custname: string): Promise<Array<Record
   }
 }
 
-export function reorderToCart(userId: number, orderId: number): number {
+export function reorderToCart(userId: number, custname: string, orderId: number): number {
   const order = db
     .prepare('SELECT id FROM orders_local WHERE id = ? AND user_id = ?')
     .get(orderId, userId) as { id: number } | undefined;
-  if (!order) throw new Error('הזמנה לא נמצאה');
+  if (!order) throw new OrderError('הזמנה לא נמצאה');
   const lines = db
     .prepare('SELECT partname, quantity FROM order_lines WHERE order_id = ?')
     .all(orderId) as Array<{ partname: string; quantity: number }>;
+  let added = 0;
   for (const ln of lines) {
-    setCartLine(userId, ln.partname, ln.quantity);
+    // Skip items that have since been hidden/deactivated instead of failing the
+    // whole reorder.
+    if (!getProduct(ln.partname, custname)) continue;
+    setCartLine(userId, custname, ln.partname, ln.quantity);
+    added++;
   }
-  return lines.length;
+  return added;
 }
