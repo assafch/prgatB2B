@@ -32,7 +32,13 @@ export function renderLogin(shell: HTMLElement, onSuccess: () => Promise<void> |
       });
       await onSuccess();
     } catch (ex) {
-      err.textContent = ex instanceof Error ? ex.message : String(ex);
+      const raw = ex instanceof Error ? ex.message : String(ex);
+      const friendly: Record<string, string> = {
+        invalid_credentials: 'שם משתמש או סיסמה שגויים',
+        account_locked: 'החשבון ננעל זמנית עקב ניסיונות כושלים — נסו שוב בעוד מספר דקות',
+        missing_credentials: 'נא למלא שם משתמש וסיסמה',
+      };
+      err.textContent = friendly[raw] ?? raw;
     }
   });
 }

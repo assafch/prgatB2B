@@ -15,6 +15,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     data = text;
   }
   if (!res.ok) {
+    // Session expired mid-flow (idle/absolute timeout): remember where the user
+    // was, send them to login; main.ts restores the hash after a successful login.
+    if (res.status === 401 && !path.startsWith('/api/auth/')) {
+      const here = location.hash;
+      if (here && here !== '#login') sessionStorage.setItem('prgat_post_login_hash', here);
+      location.hash = '#login';
+    }
     const msg =
       (data && typeof data === 'object' && 'error' in (data as Record<string, unknown>)
         ? String((data as Record<string, unknown>).error)

@@ -127,8 +127,11 @@ async function route(): Promise<void> {
 
 async function onAuthChanged(): Promise<void> {
   await refreshMe();
+  // If the session died mid-flow, api.ts stashed where the user was — go back there.
+  const saved = sessionStorage.getItem('prgat_post_login_hash');
+  sessionStorage.removeItem('prgat_post_login_hash');
   if (state.me?.role === 'admin') location.hash = '#admin';
-  else location.hash = '#catalog';
+  else location.hash = saved && saved !== '#login' ? saved : '#catalog';
   // Hash change handler will re-render
 }
 

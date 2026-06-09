@@ -3,6 +3,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 
 const DATA_DIR = process.env.DATA_DIR || './data';
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -29,10 +30,12 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_custname ON users(custname);
 
 CREATE TABLE IF NOT EXISTS sessions (
-  token TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY,
+  token_hash TEXT UNIQUE NOT NULL,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
   ip TEXT,
   user_agent TEXT
 );
@@ -145,12 +148,63 @@ CREATE TABLE IF NOT EXISTS settings (
 
 db.exec(SCHEMA);
 
+// --- Migration: sessions used to store the raw token as its PRIMARY KEY. Rebuild
+// the table around sha256(token) so a leaked DB file / backup can't be replayed as
+// live sessions. Existing sessions keep working: the cookie still holds the raw
+// token; lookups hash it first.
+{
+  const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+  if (cols.some((c) => c.name === 'token')) {
+    const migrate = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sessions_v2 (
+          id INTEGER PRIMARY KEY,
+          token_hash TEXT UNIQUE NOT NULL,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+          ip TEXT,
+          user_agent TEXT
+        );
+      `);
+      const rows = db
+        .prepare('SELECT token, user_id, created_at, expires_at, ip, user_agent FROM sessions')
+        .all() as Array<{
+        token: string;
+        user_id: number;
+        created_at: string;
+        expires_at: string;
+        ip: string | null;
+        user_agent: string | null;
+      }>;
+      const ins = db.prepare(
+        `INSERT INTO sessions_v2 (token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent)
+         VALUES (?, ?, ?, ?, datetime('now'), ?, ?)`
+      );
+      for (const r of rows) {
+        const hash = crypto.createHash('sha256').update(r.token).digest('hex');
+        ins.run(hash, r.user_id, r.created_at, r.expires_at, r.ip, r.user_agent);
+      }
+      db.exec('DROP TABLE sessions');
+      db.exec('ALTER TABLE sessions_v2 RENAME TO sessions');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+    });
+    migrate();
+    console.log('[db] sessions migrated to hashed tokens');
+  }
+}
+
 function ensureColumn(table: string, column: string, definition: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!cols.find((c) => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
+
+// Per-account login backoff (anti credential-stuffing; see auth.ts).
+ensureColumn('users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'locked_until', 'TEXT');
 
 // Box / case size per SKU. Default 12 units. Source of truth: app-side override;
 // will be populated from Priority LOGPART field once we pick which one (BOXSIZE / UDT).
@@ -189,4 +243,7 @@ export interface UserRow {
   status: string;
   created_at: string;
   last_login_at: string | null;
+  /** Only populated by the login query (SELECT *). */
+  failed_logins?: number;
+  locked_until?: string | null;
 }

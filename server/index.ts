@@ -8,21 +8,29 @@ import path from 'node:path';
 
 import { db } from './db.js';
 import {
+  accountLockSeconds,
   bootstrapAdmin,
+  clearFailedLogins,
   clearSessionCookie,
   createSession,
   destroySession,
+  destroySessionById,
   equalizeLoginTiming,
+  hashPassword,
+  listSessions,
   loadUser,
+  recordFailedLogin,
   requireAdmin,
   requireAuth,
   requireCustomer,
+  revokeOtherSessions,
   setSessionCookie,
+  sweepSessions,
+  tokenFromRequest,
+  validatePassword,
   verifyPassword,
   type AuthedRequest,
 } from './auth.js';
-import { COOKIE } from './auth.js';
-import * as cookie from 'cookie';
 import {
   getProduct,
   listFamiliesLocal,
@@ -132,13 +140,25 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
     res.status(401).json({ error: 'invalid_credentials' });
     return;
   }
+  // Per-account exponential lockout (5 failures → 1 min, doubling, capped 60 min).
+  const lockSeconds = accountLockSeconds(user);
+  if (lockSeconds > 0) {
+    res.status(429).json({ error: 'account_locked', retry_after_seconds: lockSeconds });
+    return;
+  }
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) {
+    recordFailedLogin(user.id);
     res.status(401).json({ error: 'invalid_credentials' });
     return;
   }
-  const token = createSession(user.id, req.ip, req.headers['user-agent']);
-  setSessionCookie(res, token);
+  clearFailedLogins(user.id);
+  // Session rotation: a login always issues a fresh token; any session already on
+  // this browser is revoked so the old cookie value dies with it.
+  const oldToken = tokenFromRequest(req);
+  if (oldToken) destroySession(oldToken);
+  const token = createSession(user.id, user.role, req.ip, req.headers['user-agent']);
+  setSessionCookie(res, token, user.role);
   db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id);
   res.json({
     user: {
@@ -152,14 +172,62 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
 });
 
 app.post('/api/auth/logout', (req: Request, res: Response) => {
-  const raw = req.headers.cookie;
-  if (raw) {
-    const parsed = cookie.parse(raw);
-    const token = parsed[COOKIE];
-    if (token) destroySession(token);
-  }
+  const token = tokenFromRequest(req);
+  if (token) destroySession(token);
   clearSessionCookie(res);
   res.json({ ok: true });
+});
+
+app.post('/api/auth/change-password', requireAuth, async (req: AuthedRequest, res) => {
+  const { current_password, new_password } = (req.body || {}) as {
+    current_password?: string;
+    new_password?: string;
+  };
+  if (!current_password || !new_password) {
+    res.status(400).json({ error: 'missing_fields' });
+    return;
+  }
+  const policyError = validatePassword(new_password, req.user!.username);
+  if (policyError) {
+    res.status(400).json({ error: policyError });
+    return;
+  }
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user!.id) as
+    | { password_hash: string }
+    | undefined;
+  if (!row || !(await verifyPassword(current_password, row.password_hash))) {
+    res.status(401).json({ error: 'סיסמה נוכחית שגויה' });
+    return;
+  }
+  const hash = await hashPassword(new_password);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.user!.id);
+  // Anyone else holding this account's session (e.g. a stolen device) is kicked out.
+  revokeOtherSessions(req.user!.id, req.sessionId);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/sessions', requireAuth, (req: AuthedRequest, res) => {
+  res.json({ sessions: listSessions(req.user!.id, req.sessionId) });
+});
+
+app.delete('/api/auth/sessions/:id', requireAuth, (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: 'bad_id' });
+    return;
+  }
+  const removed = destroySessionById(req.user!.id, id);
+  if (!removed) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  if (id === req.sessionId) clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/sessions/revoke-others', requireAuth, (req: AuthedRequest, res) => {
+  const revoked = revokeOtherSessions(req.user!.id, req.sessionId);
+  res.json({ ok: true, revoked });
 });
 
 app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
@@ -196,8 +264,8 @@ app.post('/api/invites/:token/accept', publicLimiter, async (req: AuthedRequest,
   }
   try {
     const { userId } = await acceptInvite(req.params.token, username, password);
-    const token = createSession(userId, req.ip, req.headers['user-agent']);
-    setSessionCookie(res, token);
+    const token = createSession(userId, 'customer', req.ip, req.headers['user-agent']);
+    setSessionCookie(res, token, 'customer');
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -524,6 +592,10 @@ if (process.env.NODE_ENV === 'production') {
 // ---------- Startup ----------
 async function startup() {
   await bootstrapAdmin();
+  // Expired/idle-dead session cleanup: at boot and once a day after.
+  const swept = sweepSessions();
+  if (swept > 0) console.log(`[auth] swept ${swept} dead sessions`);
+  setInterval(() => sweepSessions(), 86400_000).unref();
   app.listen(PORT, () => {
     console.log(`[prgatB2B] listening on :${PORT}`);
     const config = getPriorityConfig();
