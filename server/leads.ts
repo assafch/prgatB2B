@@ -11,6 +11,15 @@ export interface LeadInput {
   notes?: string;
 }
 
+// Public, unauthenticated input — accept strings only and clamp lengths so the
+// endpoint can't be used to stuff megabytes into the DB.
+function clamp(v: unknown, max: number): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (!s) return null;
+  return s.length > max ? s.slice(0, max) : s;
+}
+
 export function createLead(input: LeadInput): number {
   const result = db
     .prepare(
@@ -18,12 +27,12 @@ export function createLead(input: LeadInput): number {
        VALUES (?, ?, ?, ?, ?, ?)`
     )
     .run(
-      input.business_name ?? null,
-      input.contact_name ?? null,
-      input.phone ?? null,
-      input.email ?? null,
-      input.city ?? null,
-      input.notes ?? null
+      clamp(input.business_name, 200),
+      clamp(input.contact_name, 200),
+      clamp(input.phone, 50),
+      clamp(input.email, 200),
+      clamp(input.city, 100),
+      clamp(input.notes, 2000)
     );
   return result.lastInsertRowid as number;
 }

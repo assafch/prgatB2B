@@ -1,10 +1,11 @@
 // prgatB2B server entry — Express, all routes mounted here.
 
 import 'dotenv/config';
-import express, { type Request, type Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { db } from './db.js';
 import {
@@ -28,6 +29,7 @@ import {
   sweepSessions,
   tokenFromRequest,
   validatePassword,
+  validateUsername,
   verifyPassword,
   type AuthedRequest,
 } from './auth.js';
@@ -72,6 +74,25 @@ const PORT = Number(process.env.PORT) || 3000;
 app.set('trust proxy', 1);
 app.disable('x-powered-by'); // don't advertise Express
 
+// Request ID — correlates client-facing errors with server logs without leaking detail.
+declare module 'express-serve-static-core' {
+  interface Request {
+    reqId?: string;
+  }
+}
+app.use((req, _res, next) => {
+  req.reqId = crypto.randomBytes(6).toString('hex');
+  next();
+});
+
+/** Wrap async handlers so rejections reach the global error handler (Express 4
+ * does not do this on its own — an uncaught rejection would crash the process). */
+const ah =
+  (fn: (req: AuthedRequest, res: Response) => Promise<unknown>) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    fn(req as AuthedRequest, res).catch(next);
+  };
+
 // Security headers on every response. The strict CSP/HSTS are production-only so
 // they don't break the Vite dev server (HMR uses inline scripts, eval, websockets).
 app.use((_req, res, next) => {
@@ -102,6 +123,48 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: '2mb' }));
+
+// CSRF defense-in-depth (on top of SameSite=Lax cookies): every mutating /api
+// request that carries a browser Origin/Referer must match our own origin.
+// Requests with neither header are non-browser clients — a browser that can attach
+// a victim's cookie always sends Origin on cross-site POSTs, so they pass.
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+function allowedOrigins(req: Request): Set<string> {
+  const set = new Set<string>();
+  for (const o of (process.env.APP_ORIGIN || '').split(',')) {
+    const v = o.trim().replace(/\/+$/, '');
+    if (v) set.add(v);
+  }
+  // Same-origin for this request (correct behind Railway's proxy via trust proxy).
+  set.add(`${req.protocol}://${req.get('host')}`);
+  if (process.env.NODE_ENV !== 'production') {
+    set.add('http://localhost:5175');
+    set.add('http://127.0.0.1:5175');
+    set.add('http://localhost:5173');
+  }
+  return set;
+}
+app.use('/api', (req, res, next) => {
+  if (!MUTATING_METHODS.has(req.method)) {
+    next();
+    return;
+  }
+  let origin: string | null = (req.headers.origin as string | undefined) ?? null;
+  if (!origin && req.headers.referer) {
+    try {
+      origin = new URL(req.headers.referer).origin;
+    } catch {
+      origin = null;
+    }
+  }
+  if (origin && !allowedOrigins(req).has(origin)) {
+    console.warn(`[csrf] [${req.reqId}] blocked ${req.method} ${req.path} from origin ${origin}`);
+    res.status(403).json({ error: 'bad_origin' });
+    return;
+  }
+  next();
+});
+
 app.use(loadUser);
 
 // Public uploads (product images). Cached aggressively since filenames are content-hashed.
@@ -118,13 +181,43 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-// ---------- Auth ----------
+// ---------- Rate limits ----------
+// Per-IP login throttle + a global cap (one IP per attempt can't be the only guard
+// against distributed credential-stuffing; per-ACCOUNT lockout lives in auth.ts).
 const loginLimiter = rateLimit({ windowMs: 60_000, max: 10 });
+const globalLoginLimiter = rateLimit({ windowMs: 60_000, max: 100, keyGenerator: () => 'global' });
 // Throttle unauthenticated, state-changing / probe-able public endpoints
 // (invite lookup + accept, lead capture) to deter token brute-force and spam.
 const publicLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 
-app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) => {
+// Per-USER limiters for authenticated routes (mounted after the auth guard, so
+// req.user always exists). They protect the shared 100-calls/min Priority quota
+// and stop order/upload spam from a compromised account.
+const userKey = (req: Request) => `u:${(req as AuthedRequest).user!.id}`;
+const perUser = (windowMs: number, max: number) =>
+  rateLimit({ windowMs, max, keyGenerator: userKey });
+const ordersMinuteLimiter = perUser(60_000, 5);
+const ordersDailyLimiter = perUser(86_400_000, 30);
+const cartLimiter = perUser(60_000, 60);
+const financeLimiter = perUser(60_000, 20);
+const sensitiveLimiter = perUser(60_000, 5); // password change etc.
+const adminUploadLimiter = perUser(60_000, 10);
+const adminHeavyLimiter = perUser(60_000, 4); // full catalog/pricing refresh hits Priority hard
+
+/**
+ * Error text that is safe to return to an ADMIN client: ERP failures can embed
+ * entire OData payloads/URLs — log those server-side, return a short prefix only.
+ * Customer-facing routes must NOT use this; they return fixed Hebrew messages.
+ */
+function redactedError(reqId: string | undefined, context: string, err: unknown): string {
+  console.error(`[${context}] [${reqId ?? '-'}]`, err);
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.length > 200 ? msg.slice(0, 200) + '…' : msg;
+}
+
+// ---------- Auth ----------
+
+app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res) => {
   const { username, password } = (req.body || {}) as { username?: string; password?: string };
   if (!username || !password) {
     res.status(400).json({ error: 'missing_credentials' });
@@ -169,7 +262,7 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
       cust_desc: user.cust_desc,
     },
   });
-});
+}));
 
 app.post('/api/auth/logout', (req: Request, res: Response) => {
   const token = tokenFromRequest(req);
@@ -178,7 +271,7 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-app.post('/api/auth/change-password', requireAuth, async (req: AuthedRequest, res) => {
+app.post('/api/auth/change-password', requireAuth, sensitiveLimiter, ah(async (req, res) => {
   const { current_password, new_password } = (req.body || {}) as {
     current_password?: string;
     new_password?: string;
@@ -204,7 +297,7 @@ app.post('/api/auth/change-password', requireAuth, async (req: AuthedRequest, re
   // Anyone else holding this account's session (e.g. a stolen device) is kicked out.
   revokeOtherSessions(req.user!.id, req.sessionId);
   res.json({ ok: true });
-});
+}));
 
 app.get('/api/auth/sessions', requireAuth, (req: AuthedRequest, res) => {
   res.json({ sessions: listSessions(req.user!.id, req.sessionId) });
@@ -256,10 +349,20 @@ app.get('/api/invites/:token', publicLimiter, (req, res) => {
   res.json({ custname: inv.custname, cust_desc: inv.cust_desc, email: inv.email, phone: inv.phone });
 });
 
-app.post('/api/invites/:token/accept', publicLimiter, async (req: AuthedRequest, res) => {
+app.post('/api/invites/:token/accept', publicLimiter, ah(async (req, res) => {
   const { username, password } = (req.body || {}) as { username?: string; password?: string };
-  if (!username || !password || password.length < 8) {
-    res.status(400).json({ error: 'weak_password_or_missing_username' });
+  if (!username || !password) {
+    res.status(400).json({ error: 'נא למלא שם משתמש וסיסמה' });
+    return;
+  }
+  const usernameError = validateUsername(username);
+  if (usernameError) {
+    res.status(400).json({ error: usernameError });
+    return;
+  }
+  const passwordError = validatePassword(password, username);
+  if (passwordError) {
+    res.status(400).json({ error: passwordError });
     return;
   }
   try {
@@ -268,9 +371,11 @@ app.post('/api/invites/:token/accept', publicLimiter, async (req: AuthedRequest,
     setSessionCookie(res, token, 'customer');
     res.json({ ok: true });
   } catch (err) {
+    // acceptInvite throws controlled Hebrew messages (invalid/expired token,
+    // username taken) — safe to surface.
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
   }
-});
+}));
 
 // ---------- Leads (public) ----------
 app.post('/api/leads', publicLimiter, (req, res) => {
@@ -307,7 +412,7 @@ app.get('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
   res.json(getCart(req.user!.id, req.user!.custname!));
 });
 
-app.put('/api/cart/lines/:partname', requireCustomer, (req: AuthedRequest, res) => {
+app.put('/api/cart/lines/:partname', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
   const { quantity } = (req.body || {}) as { quantity?: number };
   if (typeof quantity !== 'number' || !isFinite(quantity)) {
     res.status(400).json({ error: 'bad_quantity' });
@@ -330,7 +435,7 @@ app.delete('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/orders', requireCustomer, async (req: AuthedRequest, res) => {
+app.post('/api/orders', requireCustomer, ordersMinuteLimiter, ordersDailyLimiter, ah(async (req, res) => {
   const { details } = (req.body || {}) as { details?: string };
   try {
     const result = await submitOrder(req.user!.id, req.user!.custname!, details);
@@ -345,16 +450,16 @@ app.post('/api/orders', requireCustomer, async (req: AuthedRequest, res) => {
     console.error('[orders] submit failed:', err);
     res.status(500).json({ error: 'שליחת ההזמנה נכשלה. נסה שוב או פנה לתמיכה.' });
   }
-});
+}));
 
 app.get('/api/orders', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ orders: listLocalOrders(req.user!.id) });
 });
 
-app.get('/api/orders/priority', requireCustomer, async (req: AuthedRequest, res) => {
+app.get('/api/orders/priority', requireCustomer, financeLimiter, ah(async (req, res) => {
   const orders = await listPriorityOrders(req.user!.custname!);
   res.json({ orders });
-});
+}));
 
 app.get('/api/orders/:id', requireCustomer, (req: AuthedRequest, res) => {
   const order = getLocalOrder(req.user!.id, Number(req.params.id));
@@ -379,7 +484,7 @@ app.post('/api/orders/:id/reorder', requireCustomer, (req: AuthedRequest, res) =
   }
 });
 
-app.get('/api/account', requireCustomer, async (req: AuthedRequest, res) => {
+app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => {
   const summary = await getAccountSummary(req.user!.custname!);
   res.json({
     // Local fallbacks (kept for backward-compat / when Priority is unreachable)
@@ -392,24 +497,24 @@ app.get('/api/account', requireCustomer, async (req: AuthedRequest, res) => {
     balance: summary.balance,
     priorityOk: summary.priorityOk,
   });
-});
+}));
 
-app.get('/api/invoices', requireCustomer, async (req: AuthedRequest, res) => {
+app.get('/api/invoices', requireCustomer, financeLimiter, ah(async (req, res) => {
   const result = await getInvoices(req.user!.custname!);
   res.json(result);
-});
+}));
 
 // ---------- Admin ----------
-app.post('/api/admin/catalog/refresh', requireAdmin, async (_req, res) => {
+app.post('/api/admin/catalog/refresh', requireAdmin, adminHeavyLimiter, ah(async (req, res) => {
   try {
     const result = await refreshCatalogFromPriority();
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: redactedError(req.reqId, 'admin/catalog-refresh', err) });
   }
-});
+}));
 
-app.post('/api/admin/pricing/refresh', requireAdmin, async (req, res) => {
+app.post('/api/admin/pricing/refresh', requireAdmin, adminHeavyLimiter, ah(async (req, res) => {
   const custname = String(req.query.custname || '');
   if (!custname) {
     res.status(400).json({ error: 'custname_required' });
@@ -419,11 +524,11 @@ app.post('/api/admin/pricing/refresh', requireAdmin, async (req, res) => {
     const count = await refreshCustomerPricing(custname);
     res.json({ updated: count });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: redactedError(req.reqId, 'admin/pricing-refresh', err) });
   }
-});
+}));
 
-app.get('/api/admin/customers/priority', requireAdmin, async (_req, res) => {
+app.get('/api/admin/customers/priority', requireAdmin, ah(async (req, res) => {
   const config = getPriorityConfig();
   if (!config) {
     res.status(400).json({ error: 'priority_not_configured' });
@@ -433,9 +538,9 @@ app.get('/api/admin/customers/priority', requireAdmin, async (_req, res) => {
     const customers = await listCustomers(config);
     res.json({ customers });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: redactedError(req.reqId, 'admin/customers', err) });
   }
-});
+}));
 
 app.get('/api/admin/users', requireAdmin, (_req, res) => {
   const users = db
@@ -502,7 +607,7 @@ app.get('/api/admin/products/export.csv', requireAdmin, (_req, res) => {
   res.send('﻿' + csv); // BOM for Excel Hebrew
 });
 
-app.post('/api/admin/products/import.csv', requireAdmin, upload.single('file'), (req, res) => {
+app.post('/api/admin/products/import.csv', requireAdmin, adminUploadLimiter, upload.single('file'), (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'no_file' });
     return;
@@ -513,7 +618,7 @@ app.post('/api/admin/products/import.csv', requireAdmin, upload.single('file'), 
     const result = importCsv(text, dryRun);
     res.json({ dryRun, ...result });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ error: redactedError(req.reqId, 'admin/import-csv', err) });
   }
 });
 
@@ -547,8 +652,9 @@ app.patch('/api/admin/products/:partname', requireAdmin, (req, res) => {
 app.post(
   '/api/admin/products/:partname/image',
   requireAdmin,
+  adminUploadLimiter,
   upload.single('image'),
-  async (req, res) => {
+  ah(async (req, res) => {
     if (!req.file) {
       res.status(400).json({ error: 'no_file' });
       return;
@@ -557,9 +663,9 @@ app.post(
       const result = await saveImage(req.params.partname, req.file.buffer);
       res.json(result);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(400).json({ error: redactedError(req.reqId, 'admin/image-upload', err) });
     }
-  }
+  })
 );
 
 app.delete('/api/admin/products/:partname/image', requireAdmin, (req, res) => {
@@ -579,6 +685,12 @@ app.get('/api/admin/dashboard', requireAdmin, (_req, res) => {
   res.json(stats);
 });
 
+// ---------- API 404 (must precede the SPA fallback so unknown /api paths
+// return JSON, not index.html) ----------
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'not_found' });
+});
+
 // ---------- Static client in production ----------
 if (process.env.NODE_ENV === 'production') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -588,6 +700,24 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.join(clientDir, 'index.html'));
   });
 }
+
+// ---------- Global error handler (last) ----------
+// Catches sync throws, next(err), and (via the ah() wrapper) async rejections.
+// Clients get a request id, never the error detail.
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const e = err as { type?: string; status?: number } | null;
+  if (e && typeof e === 'object' && e.type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'bad_json' });
+    return;
+  }
+  if (e && typeof e === 'object' && e.type === 'entity.too.large') {
+    res.status(413).json({ error: 'payload_too_large' });
+    return;
+  }
+  console.error(`[error] [${req.reqId ?? '-'}] ${req.method} ${req.path}:`, err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'internal_error', request_id: req.reqId ?? null });
+});
 
 // ---------- Startup ----------
 async function startup() {
