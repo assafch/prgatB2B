@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeAttr, escapeHtml } from '../format.js';
 
 interface CatalogItem {
   partname: string;
@@ -91,22 +92,22 @@ async function load(shell: HTMLElement): Promise<void> {
         (it) => `
       <div class="card" style="display:flex;flex-direction:column;gap:0.5rem">
         <div style="aspect-ratio:1;background:#f3f4f6;border-radius:6px;display:grid;place-items:center;color:#9ca3af;font-size:0.85rem">
-          ${it.image_url ? `<img src="${it.image_url}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
+          ${it.image_url ? `<img src="${escapeAttr(it.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
         </div>
         <a href="#product/${encodeURIComponent(it.partname)}" style="font-weight:500;color:var(--text)">
           ${escapeHtml(it.partdes || it.partname)}
         </a>
-        <div class="muted" style="font-size:0.85rem">${it.partname} · ארגז: ${it.box_size}</div>
+        <div class="muted" style="font-size:0.85rem">${escapeHtml(it.partname)} · ארגז: ${it.box_size}</div>
         <div style="font-weight:700;color:var(--brand)">
           ${it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>'}
         </div>
         <div style="display:flex;gap:0.25rem;align-items:stretch">
           <div style="display:flex;flex-direction:column;gap:1px">
-            <button class="step-up" data-part="${it.partname}" data-step="${it.box_size}" title="הוסף ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▲</button>
-            <button class="step-down" data-part="${it.partname}" data-step="${it.box_size}" title="הפחת ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▼</button>
+            <button class="step-up" data-part="${escapeAttr(it.partname)}" data-step="${it.box_size}" title="הוסף ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▲</button>
+            <button class="step-down" data-part="${escapeAttr(it.partname)}" data-step="${it.box_size}" title="הפחת ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▼</button>
           </div>
-          <input type="number" min="0" step="1" value="0" class="qty" data-part="${it.partname}" style="width:60px;text-align:center"/>
-          <button class="add" data-part="${it.partname}" style="flex:1">הוסף</button>
+          <input type="number" min="0" step="1" value="0" class="qty" data-part="${escapeAttr(it.partname)}" style="width:60px;text-align:center"/>
+          <button class="add" data-part="${escapeAttr(it.partname)}" style="flex:1">הוסף</button>
         </div>
       </div>`
       )
@@ -166,14 +167,8 @@ async function load(shell: HTMLElement): Promise<void> {
       load(shell);
     });
   } catch (ex) {
-    grid.innerHTML = `<div class="card error">שגיאת טעינה: ${ex instanceof Error ? ex.message : ex}</div>`;
+    grid.innerHTML = `<div class="card error">שגיאת טעינה: ${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-  );
 }
 
 function cssEscape(s: string): string {

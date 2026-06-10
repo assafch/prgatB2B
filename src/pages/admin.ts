@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeAttr, escapeHtml } from '../format.js';
 import { renderAdminProducts } from './adminProducts.js';
 
 interface Stats {
@@ -149,7 +150,10 @@ async function renderInvitesAdmin(c: HTMLElement): Promise<void> {
         email,
         phone,
       });
-      createMsg.innerHTML = `<div class="ok">קישור הזמנה: <input value="${r.url}" readonly style="width:100%;margin-top:0.25rem" onclick="this.select()"/></div>`;
+      createMsg.innerHTML = `<div class="ok">קישור הזמנה: <input value="${escapeAttr(r.url)}" readonly style="width:100%;margin-top:0.25rem"/></div>`;
+      createMsg
+        .querySelector('input')
+        ?.addEventListener('click', (e) => (e.target as HTMLInputElement).select());
       await loadInvitesList(c);
     } catch (ex) {
       createMsg.textContent = `שגיאה: ${ex instanceof Error ? ex.message : ex}`;
@@ -189,11 +193,11 @@ async function loadInvitesList(c: HTMLElement): Promise<void> {
                 const url = `${location.origin}/#invite/${i.token}`;
                 return `
                   <tr style="border-bottom:1px solid var(--border)">
-                    <td style="padding:0.5rem">${i.custname}</td>
-                    <td style="padding:0.5rem">${i.cust_desc || '-'}</td>
+                    <td style="padding:0.5rem">${escapeHtml(i.custname)}</td>
+                    <td style="padding:0.5rem">${escapeHtml(i.cust_desc || '-')}</td>
                     <td style="padding:0.5rem">${new Date(i.created_at + 'Z').toLocaleString('he-IL')}</td>
                     <td style="padding:0.5rem">${used}</td>
-                    <td style="padding:0.5rem"><input value="${url}" readonly style="width:100%" onclick="this.select()"/></td>
+                    <td style="padding:0.5rem"><input value="${escapeAttr(url)}" readonly style="width:100%"/></td>
                   </tr>`;
               })
               .join('')}
@@ -201,8 +205,11 @@ async function loadInvitesList(c: HTMLElement): Promise<void> {
         </table>
       </div>
     `;
+    list
+      .querySelectorAll('input[readonly]')
+      .forEach((el) => el.addEventListener('click', () => (el as HTMLInputElement).select()));
   } catch (ex) {
-    list.innerHTML = `<div class="card error">${ex instanceof Error ? ex.message : ex}</div>`;
+    list.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
 }
 
@@ -255,8 +262,3 @@ async function renderLeadsAdmin(c: HTMLElement): Promise<void> {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-  );
-}

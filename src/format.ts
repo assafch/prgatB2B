@@ -36,3 +36,7 @@ export function escapeHtml(s: unknown): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+// For interpolation inside HTML attribute values. Same escaping (quotes covered),
+// separate name so call sites state their context.
+export const escapeAttr = escapeHtml;

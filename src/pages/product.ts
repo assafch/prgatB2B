@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeAttr, escapeHtml } from '../format.js';
 
 interface Product {
   partname: string;
@@ -19,12 +20,12 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
     shell.innerHTML = `
       <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
         <div style="aspect-ratio:1;background:#f3f4f6;border-radius:8px;display:grid;place-items:center;color:#9ca3af">
-          ${p.image_url ? `<img src="${p.image_url}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
+          ${p.image_url ? `<img src="${escapeAttr(p.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
         </div>
         <div>
           <h1 style="margin:0 0 0.5rem 0">${escapeHtml(p.partdes || p.partname)}</h1>
-          <div class="muted">מק״ט: ${p.partname}</div>
-          ${p.barcode ? `<div class="muted">ברקוד: ${p.barcode}</div>` : ''}
+          <div class="muted">מק״ט: ${escapeHtml(p.partname)}</div>
+          ${p.barcode ? `<div class="muted">ברקוד: ${escapeHtml(p.barcode)}</div>` : ''}
           ${p.family ? `<div class="muted">משפחה: ${escapeHtml(p.family_desc || p.family)}</div>` : ''}
           <div style="margin:1rem 0;font-size:1.5rem;font-weight:700;color:var(--brand)">
             ${p.price != null ? `₪${p.price.toFixed(2)}` : 'צור קשר למחיר'}
@@ -71,12 +72,6 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
       }
     });
   } catch (ex) {
-    shell.innerHTML = `<div class="card error">${ex instanceof Error ? ex.message : ex}</div>`;
+    shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-  );
 }

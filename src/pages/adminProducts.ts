@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeAttr, escapeHtml } from '../format.js';
 
 interface AdminProduct {
   partname: string;
@@ -526,12 +527,3 @@ function closeDrawer(shell: HTMLElement): void {
   backdrop.style.display = 'none';
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-  );
-}
-
-function escapeAttr(s: string): string {
-  return escapeHtml(s);
-}

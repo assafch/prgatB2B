@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeAttr, escapeHtml } from '../format.js';
 
 interface CartLine {
   partname: string;
@@ -49,14 +50,14 @@ async function load(shell: HTMLElement): Promise<void> {
               <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:0.5rem">
                   <div style="font-weight:500">${escapeHtml(l.partdes || l.partname)}</div>
-                  <div class="muted" style="font-size:0.85rem">${l.partname}</div>
+                  <div class="muted" style="font-size:0.85rem">${escapeHtml(l.partname)}</div>
                 </td>
                 <td style="padding:0.5rem">
-                  <input type="number" min="0" step="1" value="${l.quantity}" data-part="${l.partname}" class="qty" style="width:70px"/>
+                  <input type="number" min="0" step="1" value="${l.quantity}" data-part="${escapeAttr(l.partname)}" class="qty" style="width:70px"/>
                 </td>
                 <td style="padding:0.5rem">${l.price != null ? `₪${l.price.toFixed(2)}` : '-'}</td>
                 <td style="padding:0.5rem;font-weight:700">${l.price != null ? `₪${l.line_total.toFixed(2)}` : '-'}</td>
-                <td style="padding:0.5rem"><button class="ghost remove" data-part="${l.partname}">🗑</button></td>
+                <td style="padding:0.5rem"><button class="ghost remove" data-part="${escapeAttr(l.partname)}">🗑</button></td>
               </tr>`
               )
               .join('')}
@@ -121,7 +122,7 @@ async function load(shell: HTMLElement): Promise<void> {
         shell.innerHTML = `
           <div class="card" style="text-align:center;padding:2rem">
             <h2 class="ok">✓ ההזמנה נשלחה</h2>
-            <p>מספר הזמנה ב-Priority: <b>${result.ordname}</b></p>
+            <p>מספר הזמנה ב-Priority: <b>${escapeHtml(result.ordname)}</b></p>
             <p><a href="#orders/${result.orderId}">צפה בהזמנה</a> · <a href="#catalog">חזור לקטלוג</a></p>
           </div>`;
       } catch (ex) {
@@ -131,12 +132,6 @@ async function load(shell: HTMLElement): Promise<void> {
       }
     });
   } catch (ex) {
-    shell.innerHTML = `<div class="card error">${ex instanceof Error ? ex.message : ex}</div>`;
+    shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-  );
 }

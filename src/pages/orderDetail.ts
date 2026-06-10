@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeHtml } from '../format.js';
 
 interface OrderLine {
   partname: string;
@@ -26,7 +27,7 @@ export async function renderOrderDetail(shell: HTMLElement, id: number): Promise
     shell.innerHTML = `
       <div class="card">
         <h1 style="margin-top:0">הזמנה #${o.id}</h1>
-        <p class="muted">מס׳ Priority: <b>${o.priority_ordname || '-'}</b> · נוצרה ב-${new Date(
+        <p class="muted">מס׳ Priority: <b>${escapeHtml(o.priority_ordname || '-')}</b> · נוצרה ב-${new Date(
       o.created_at + 'Z'
     ).toLocaleString('he-IL')}</p>
         ${o.details ? `<p>הערה: ${escapeHtml(o.details)}</p>` : ''}
@@ -47,7 +48,7 @@ export async function renderOrderDetail(shell: HTMLElement, id: number): Promise
               <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:0.5rem">
                   <div>${escapeHtml(l.pdes || l.partname)}</div>
-                  <div class="muted" style="font-size:0.85rem">${l.partname}</div>
+                  <div class="muted" style="font-size:0.85rem">${escapeHtml(l.partname)}</div>
                 </td>
                 <td style="padding:0.5rem">${l.quantity}</td>
                 <td style="padding:0.5rem">₪${l.price.toFixed(2)}</td>
@@ -77,12 +78,6 @@ export async function renderOrderDetail(shell: HTMLElement, id: number): Promise
       }
     });
   } catch (ex) {
-    shell.innerHTML = `<div class="card error">${ex instanceof Error ? ex.message : ex}</div>`;
+    shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-  );
 }
