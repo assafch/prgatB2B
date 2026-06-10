@@ -20,6 +20,7 @@ import { renderPayCheck } from './pages/payCheck.js';
 import { renderPayments } from './pages/payments.js';
 import { renderAssistant } from './pages/assistant.js';
 import { renderAccessibility } from './pages/accessibility.js';
+import { renderPayCard, renderPayCardReturn } from './pages/payCard.js';
 import { renderAdmin } from './pages/admin.js';
 
 const root = document.getElementById('app')!;
@@ -182,6 +183,11 @@ async function route(): Promise<void> {
   if (hash.startsWith('#invoice/')) {
     return renderInvoiceDetail(mount(''), decodeURIComponent(hash.slice('#invoice/'.length)));
   }
+  if (hash.startsWith('#pay/card/return')) {
+    const id = new URLSearchParams(hash.split('?')[1] || '').get('id') || '';
+    return renderPayCardReturn(mount(''), id);
+  }
+  if (hash === '#pay/card') return renderPayCard(mount(''));
   if (hash === '#pay/check') return renderPayCheck(mount(''));
   if (hash === '#payments') return renderPayments(mount(''));
   if (hash === '#assistant') return renderAssistant(mount(''));

@@ -21,7 +21,8 @@ export function assistantEnabled(): boolean {
 
 const SYSTEM = `אתה "העוזר של אורגת" — עוזר ידידותי בעברית לבעל חנות שמזמין מהמפיץ אורגת סחר.
 כללי ברזל:
-- ענה רק על סמך תוצאות הכלים (tools). אל תמציא מחירים, מלאי, מק"טים, סכומים או נתונים. אם כלי החזיר ריק — אמור "לא מצאתי".
+- ענה רק על סמך תוצאות הכלים (tools). אל תמציא מחירים, מלאי, מק"טים, סכומים או נתונים. אם כלי החזיר ריק — אמור "לא מצאתי". לפני שאתה מציין מחיר/יתרה/כמות — תמיד קרא לכלי המתאים, גם אם זה הוזכר קודם בשיחה.
+- אם כלי החזיר unavailable:true — אמור שנתוני החשבון אינם זמינים כרגע ולנסות שוב מאוחר יותר. לעולם אל תדווח על יתרת חוב 0 במצב כזה.
 - אל תחשוף ואל תבקש מספר לקוח — הנתונים כבר משויכים ללקוח המחובר.
 - כשהלקוח רוצה להוסיף מוצר לסל, קרא ל-propose_cart_add. זו הצעה בלבד — הלקוח מאשר בלחיצה. לעולם אל תאמר שהזמנה בוצעה או ששולם.
 - אתה לא מבצע תשלומים, לא שולח הזמנות ולא משנה פרטי חשבון.
@@ -160,12 +161,12 @@ export async function runAssistant(
         let out: unknown;
         if (tu.name === 'get_balance' || tu.name === 'list_open_invoices') {
           const inv = await ensureInvoices();
-          out =
-            tu.name === 'get_balance'
+          out = !inv.priorityOk
+            ? { unavailable: true, note: 'נתוני החשבון אינם זמינים כרגע (תקלה זמנית). אל תדווח על יתרה.' }
+            : tu.name === 'get_balance'
               ? {
                   openTotal: inv.summary.openTotal,
                   openCount: inv.summary.openCount,
-                  available: inv.priorityOk,
                   note: 'openTotal הוא יתרת החוב הסופית לתשלום, כולל מע"מ. אל תוסיף "לפני מע"מ".',
                 }
               : { openInvoices: inv.open.slice(0, 20).map((o) => ({ date: o.date, docNo: o.docNo, amount: o.amount })), incomplete: !!inv.openListIncomplete, note: 'הסכומים כוללים מע"מ.' };

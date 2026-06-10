@@ -11,6 +11,8 @@ import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSetti
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
+import { upayEnabled } from './upay.js';
+import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments } from './cardPayments.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -822,7 +824,8 @@ app.get('/api/payments', requireCustomer, (req: AuthedRequest, res) => {
 
 // ---------- AI assistant ("שאל את אורגת") ----------
 const assistantLimiter = perUser(60_000, 20);
-app.post('/api/assistant', requireCustomer, assistantLimiter, ah(async (req: AuthedRequest, res) => {
+const assistantDailyLimiter = perUser(86_400_000, 300); // daily cost ceiling per user
+app.post('/api/assistant', requireCustomer, assistantLimiter, assistantDailyLimiter, ah(async (req: AuthedRequest, res) => {
   if (!assistantEnabled()) {
     res.status(503).json({ error: 'האסיסטנט אינו זמין כרגע' });
     return;
@@ -838,6 +841,63 @@ app.post('/api/assistant', requireCustomer, assistantLimiter, ah(async (req: Aut
   const turn = await runAssistant(req.user!.id, req.user!.custname!, history);
   res.json(turn);
 }));
+
+// ---------- Card payments via UPay (hosted page; amount fixed server-side) ----------
+const cardPayLimiter = perUser(60_000, 10);
+function paymentsLive(): boolean {
+  return getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true') && upayEnabled();
+}
+function appBaseUrl(req: Request): string {
+  return process.env.APP_BASE_URL || process.env.WEB_ORIGIN || `${req.protocol}://${req.get('host')}`;
+}
+
+app.post('/api/payments/card/create', requireCustomer, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+  if (!paymentsLive()) {
+    res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
+    return;
+  }
+  const amount = Number((req.body as { amount?: unknown })?.amount);
+  try {
+    const out = await createCardDebtIntent(
+      req.user!.id,
+      req.user!.custname!,
+      isFinite(amount) && amount > 0 ? amount : undefined,
+      undefined,
+      appBaseUrl(req)
+    );
+    res.json(out);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה ביצירת התשלום' });
+  }
+}));
+
+// Owner-scoped status poll — re-queries UPay to confirm.
+app.get('/api/payments/card/:id', requireCustomer, ah(async (req: AuthedRequest, res) => {
+  let row = getCardForUser(req.user!.id, req.params.id);
+  if (!row) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  if (row.status === 'pending') row = (await confirmCard(row.id)) || row;
+  res.json({ id: row.id, status: row.status, amount: row.amount, confirmationCode: row.confirmation_code, fourDigits: row.four_digits, provider: row.provider });
+}));
+
+// UPay server-to-server IPN — confirms by re-query (caller is never trusted).
+app.get('/api/payments/upay/ipn', ah(async (req, res) => {
+  const id = typeof req.query.id === 'string' ? req.query.id : '';
+  if (id) await confirmCard(id).catch(() => null);
+  res.status(200).send('ok');
+}));
+
+app.get('/api/admin/card-payments', requireAdmin, (_req, res) => {
+  res.json({
+    payments: listAllCardPayments().map((c) => ({
+      id: c.id, custname: c.custname, amount: c.amount, status: c.status,
+      confirmationCode: c.confirmation_code, fourDigits: c.four_digits, provider: c.provider,
+      createdAt: c.created_at, paidAt: c.paid_at,
+    })),
+  });
+});
 
 // Stream the cheque image to its owner only (decrypted; never cached).
 app.get('/api/payments/:id/image', requireCustomer, (req: AuthedRequest, res) => {

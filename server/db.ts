@@ -97,6 +97,24 @@ CREATE TABLE IF NOT EXISTS payment_checks (
 CREATE INDEX IF NOT EXISTS idx_paychecks_user ON payment_checks(user_id);
 CREATE INDEX IF NOT EXISTS idx_paychecks_status ON payment_checks(status);
 
+CREATE TABLE IF NOT EXISTS card_payments (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  custname TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'debt',     -- 'debt' (pay open balance) for v1
+  amount REAL NOT NULL,                  -- shekels, fixed server-side
+  -- created → pending (hosted page opened) → paid | failed | expired
+  status TEXT NOT NULL DEFAULT 'created',
+  upay_cashier_id TEXT,
+  confirmation_code TEXT,                -- SHVA approval
+  four_digits TEXT,
+  provider TEXT,                         -- shva / bit
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  paid_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cardpay_user ON card_payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_cardpay_status ON card_payments(status);
+
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
   business_name TEXT,

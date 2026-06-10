@@ -164,7 +164,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
   `;
 
   shell.querySelector('#pay-debt')?.addEventListener('click', () => {
-    location.hash = '#invoices'; // payment flow lands in P3; until then, show invoices
+    location.hash = '#pay/card';
   });
 
   shell.querySelector('#reorder-last')?.addEventListener('click', async (e) => {
