@@ -75,8 +75,18 @@ export function renderPayCheck(shell: HTMLElement): void {
     gal.value = '';
   });
 
-  // Full-screen guided scanner: live rear camera with a cheque-shaped frame guide.
+  // Try the in-app framed live scanner. Request the camera FIRST and only build the
+  // overlay if it's granted — so a blocked/unsupported camera opens the device
+  // camera directly (no black screen, no dead-end). The native picker is the most
+  // reliable "open the camera" path and works in every browser.
   function openScanner(): void {
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+      .then((stream) => showScanner(stream))
+      .catch(() => cam.click());
+  }
+
+  function showScanner(stream: MediaStream): void {
     const ov = document.createElement('div');
     ov.className = 'scan-overlay';
     ov.innerHTML = `
@@ -84,53 +94,23 @@ export function renderPayCheck(shell: HTMLElement): void {
       <div class="scan-mask"><div class="scan-frame"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div></div>
       <div class="scan-hint">הצמידו את הצ׳ק לאורך המסגרת<br/><span>מואר, חד, וממלא את כל המסגרת</span></div>
       <button class="scan-close" type="button" aria-label="סגירה">✕</button>
-      <div class="scan-err"></div>
       <div class="scan-bar"><button class="scan-shutter" type="button" aria-label="צלם"></button></div>
     `;
     document.body.appendChild(ov);
     const video = ov.querySelector('.scan-video') as HTMLVideoElement;
-    const errEl = ov.querySelector('.scan-err') as HTMLElement;
-    let stream: MediaStream | null = null;
+    video.srcObject = stream;
+    let live = true;
     const close = () => {
-      stream?.getTracks().forEach((t) => t.stop());
-      stream = null;
+      live = false;
+      stream.getTracks().forEach((t) => t.stop());
       ov.remove();
       window.removeEventListener('hashchange', close);
     };
     window.addEventListener('hashchange', close);
     (ov.querySelector('.scan-close') as HTMLButtonElement).onclick = close;
 
-    // Some mobile browsers (in-app/WhatsApp webviews, or after a denied permission)
-    // block getUserMedia. Don't dead-end: offer the device camera (which always
-    // works via the native picker) and the gallery as one-tap fallbacks.
-    const showFallback = () => {
-      (ov.querySelector('.scan-bar') as HTMLElement).style.display = 'none';
-      errEl.innerHTML = `
-        <div>לא ניתן לפתוח את הסורק בדפדפן זה.</div>
-        <div style="display:flex;gap:0.5rem;margin-top:0.7rem;justify-content:center">
-          <button class="scan-fallback" data-act="cam">📷 מצלמת המכשיר</button>
-          <button class="scan-fallback" data-act="gal">🖼️ מהגלריה</button>
-        </div>`;
-      errEl.style.display = 'block';
-      errEl.querySelectorAll<HTMLButtonElement>('.scan-fallback').forEach((b) =>
-        b.addEventListener('click', () => {
-          const act = b.dataset.act;
-          close();
-          if (act === 'cam') cam.click();
-          else gal.click();
-        })
-      );
-    };
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-      .then((s) => {
-        stream = s;
-        video.srcObject = s;
-      })
-      .catch(showFallback);
-
     (ov.querySelector('.scan-shutter') as HTMLButtonElement).onclick = () => {
-      if (!stream || !video.videoWidth) return;
+      if (!live || !video.videoWidth) return;
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
