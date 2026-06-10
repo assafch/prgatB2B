@@ -2,6 +2,7 @@
 // Short in-memory TTL cache keyed per customer keeps us well under Priority's
 // 100-calls/min limit when a customer reloads their account/invoices screens.
 
+import { db } from './db.js';
 import {
   getPriorityConfig,
   getCustomer,
@@ -46,30 +47,94 @@ export async function getInvoiceDetail(custname: string, ivnum: string): Promise
   };
 }
 
-const TTL_MS = 5 * 60_000;
+// Stale-while-revalidate: serve the cached snapshot INSTANTLY (never block the
+// request on Priority); if it's older than FRESH_MS, kick off a background refresh
+// for next time. Snapshots persist to SQLite so deploys/restarts stay warm. Only
+// the very first read for a customer (no snapshot anywhere) awaits Priority.
+const FRESH_MS = 5 * 60_000;
 
 interface CacheEntry<T> {
   value: T;
-  expires: number;
+  updatedAt: number;
 }
 const cache = new Map<string, CacheEntry<unknown>>();
+const inflight = new Set<string>();
+
+const loadPersist = db.prepare('SELECT value, updated_at FROM finance_cache WHERE key = ?');
+const savePersist = db.prepare(
+  'INSERT INTO finance_cache (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'
+);
+const dropPersist = db.prepare('DELETE FROM finance_cache WHERE key = ?');
+
+function store<T>(key: string, value: T): void {
+  const updatedAt = Date.now();
+  cache.set(key, { value, updatedAt });
+  try {
+    savePersist.run(key, JSON.stringify(value), updatedAt);
+  } catch {
+    /* cache write best-effort */
+  }
+}
+
+function revalidate<T>(key: string, fn: () => Promise<T>): void {
+  if (inflight.has(key)) return;
+  inflight.add(key);
+  fn()
+    .then((v) => store(key, v))
+    .catch((err) => console.warn(`[finance] bg refresh ${key}:`, err instanceof Error ? err.message : err))
+    .finally(() => inflight.delete(key));
+}
 
 async function memo<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const hit = cache.get(key) as CacheEntry<T> | undefined;
-  if (hit && hit.expires > Date.now()) return hit.value;
+  let entry = cache.get(key) as CacheEntry<T> | undefined;
+  if (!entry) {
+    const row = loadPersist.get(key) as { value: string; updated_at: number } | undefined;
+    if (row) {
+      try {
+        entry = { value: JSON.parse(row.value) as T, updatedAt: row.updated_at };
+        cache.set(key, entry);
+      } catch {
+        /* corrupt row — ignore, fall through to fetch */
+      }
+    }
+  }
+  if (entry) {
+    if (Date.now() - entry.updatedAt > FRESH_MS) revalidate(key, fn); // stale → refresh for next time
+    return entry.value; // instant, even if slightly stale
+  }
+  // No snapshot anywhere — must fetch once.
   const value = await fn();
-  cache.set(key, { value, expires: Date.now() + TTL_MS });
+  store(key, value);
   return value;
 }
 
 export function bustFinanceCache(custname?: string): void {
   if (!custname) {
     cache.clear();
+    try {
+      db.prepare('DELETE FROM finance_cache').run();
+    } catch {
+      /* ignore */
+    }
     return;
   }
   for (const key of cache.keys()) {
-    if (key.endsWith(`:${custname}`)) cache.delete(key);
+    if (key.endsWith(`:${custname}`)) {
+      cache.delete(key);
+      try {
+        dropPersist.run(key);
+      } catch {
+        /* ignore */
+      }
+    }
   }
+}
+
+/** Fire-and-forget warm of a customer's finance snapshots (called on login) so the
+ *  first dashboard load is instant. */
+export function warmFinance(custname: string): void {
+  void getAccountSummary(custname).catch(() => {});
+  void getInvoices(custname).catch(() => {});
 }
 
 function round2(n: number): number {

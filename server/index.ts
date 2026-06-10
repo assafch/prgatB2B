@@ -59,7 +59,7 @@ import {
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
-import { getAccountSummary, getInvoices, getInvoiceDetail } from './finance.js';
+import { getAccountSummary, getInvoices, getInvoiceDetail, warmFinance } from './finance.js';
 import {
   bulkUpdate,
   deleteImage,
@@ -324,6 +324,8 @@ app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res
   const token = createSession(user.id, user.role, req.ip, req.headers['user-agent']);
   setSessionCookie(res, token, user.role);
   db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id);
+  // Warm the finance snapshot in the background so the first dashboard load is instant.
+  if (user.role === 'customer' && user.custname) warmFinance(user.custname);
   res.json({
     user: {
       id: user.id,

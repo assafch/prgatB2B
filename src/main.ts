@@ -47,7 +47,7 @@ function topbar(): string {
   if (!me) {
     return `
       <div class="topbar">
-        <div class="logo">אורגת B2B</div>
+        <div class="logo"><img class="logo-img" src="/icons/logo.svg" alt="אורגת B2B"/></div>
         <nav>
           <a href="#login" class="${location.hash === '#login' || !location.hash ? 'active' : ''}">התחברות</a>
           <a href="#lead" class="${location.hash === '#lead' ? 'active' : ''}">צור קשר</a>
@@ -58,7 +58,7 @@ function topbar(): string {
   if (me.role === 'admin') {
     return `
       <div class="topbar">
-        <div class="logo">אורגת B2B · אדמין</div>
+        <div class="logo"><img class="logo-img" src="/icons/logo.svg" alt="אורגת"/><span class="logo-sub">אדמין</span></div>
         <nav>
           <a href="#admin" class="${location.hash.startsWith('#admin') ? 'active' : ''}">לוח בקרה</a>
           <a href="#logout">יציאה</a>

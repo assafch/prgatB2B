@@ -206,6 +206,14 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Persistent stale-while-revalidate cache for Priority finance reads, so the
+-- request path never blocks on Priority and warm data survives deploys/restarts.
+CREATE TABLE IF NOT EXISTS finance_cache (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 db.exec(SCHEMA);

@@ -1,6 +1,6 @@
 :root {
-  --brand: #c8102e;       /* Orgat red */
-  --brand-dark: #9b0c24;
+  --brand: #234d8f;       /* Orgat navy/royal blue (logo) — friendlier than the old red */
+  --brand-dark: #18386b;
   --accent: #19b6c4;      /* turquoise from the PocketLink palette — replace if Orgat has its own */
   --bg: #f7f7f8;
   --surface: #ffffff;
@@ -225,6 +225,16 @@ input:focus, select:focus, textarea:focus {
 .debt-card .label { color: var(--muted); margin-top: 0.25rem; }
 .debt-card .pay-btn { margin-top: 1rem; width: 100%; max-width: 320px; padding: 0.8rem; font-size: 1.05rem; font-weight: 700; display: inline-block; background: var(--brand); color: #fff; border: none; border-radius: var(--radius); text-decoration: none; cursor: pointer; }
 .debt-card a.pay-btn:hover { background: var(--brand-dark); text-decoration: none; }
+
+/* Brand logo in the top bar */
+.logo-img { height: 34px; width: auto; display: block; }
+.logo { display: flex; align-items: center; gap: 0.5rem; }
+.logo-sub { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+
+/* Global "thinking circle" — spinning ring while a request is in flight */
+#req-spin { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%; margin-inline-start: -13px; width: 26px; height: 26px; border: 3px solid rgba(0,0,0,0.12); border-top-color: var(--brand); border-radius: 50%; z-index: 3000; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+#req-spin.active { opacity: 1; animation: reqspin 0.7s linear infinite; }
+@keyframes reqspin { to { transform: rotate(360deg); } }
 
 /* AI assistant chat */
 .asst-fab { position: fixed; inset-block-end: calc(env(safe-area-inset-bottom, 0px) + 70px); inset-inline-start: 16px; width: 56px; height: 56px; border-radius: 50%; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; text-decoration: none; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 900; }

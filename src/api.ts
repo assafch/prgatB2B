@@ -1,12 +1,47 @@
 // Tiny fetch wrapper. Always sends cookies. Throws on non-2xx with the server's error message.
 
+// Global "thinking circle": a spinning ring shown whenever a request is in flight.
+// A 150ms delay means instant (cached) responses never flash it.
+let pending = 0;
+let showTimer: ReturnType<typeof setTimeout> | undefined;
+function spinnerEl(): HTMLElement {
+  let el = document.getElementById('req-spin');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'req-spin';
+    el.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function loadStart(): void {
+  pending++;
+  if (pending === 1) showTimer = setTimeout(() => spinnerEl().classList.add('active'), 150);
+}
+function loadEnd(): void {
+  pending = Math.max(0, pending - 1);
+  if (pending === 0) {
+    if (showTimer) {
+      clearTimeout(showTimer);
+      showTimer = undefined;
+    }
+    spinnerEl().classList.remove('active');
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    credentials: 'include',
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  loadStart();
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      credentials: 'include',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } finally {
+    loadEnd();
+  }
   const text = await res.text();
   let data: unknown;
   try {
