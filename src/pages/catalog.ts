@@ -21,6 +21,7 @@ interface Family {
 }
 
 const state = { q: '', family: '', page: 1, pageSize: 24, view: 'grid' as 'grid' | 'list' };
+let favSet = new Set<string>();
 
 export async function renderCatalog(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `
@@ -32,6 +33,7 @@ export async function renderCatalog(shell: HTMLElement): Promise<void> {
         <button id="view-grid" title="תצוגת רשת" aria-label="רשת">▦</button>
         <button id="view-list" title="תצוגת רשימה" aria-label="רשימה">☰</button>
       </div>
+      <a href="#favorites" class="fav-link" title="המועדפים שלי" aria-label="מועדפים">❤️</a>
     </div>
     <div id="catalog-grid"></div>
     <div id="pager" style="text-align:center;margin-top:1rem"></div>
@@ -109,6 +111,11 @@ async function load(shell: HTMLElement): Promise<void> {
     const { items, total } = await api.get<{ items: CatalogItem[]; total: number }>(
       `/api/catalog?${params}`
     );
+    try {
+      favSet = new Set((await api.get<{ partnames: string[] }>('/api/favorites')).partnames);
+    } catch {
+      /* hearts just render empty */
+    }
     if (items.length === 0) {
       grid.innerHTML = `<div class="card muted">לא נמצאו מוצרים. אם הקטלוג ריק, אדמין צריך להריץ סנכרון מ-Priority.</div>`;
       pager.innerHTML = '';
@@ -192,6 +199,28 @@ async function load(shell: HTMLElement): Promise<void> {
       });
     });
 
+    grid.querySelectorAll<HTMLButtonElement>('button.fav').forEach((b) => {
+      b.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const part = b.dataset.part!;
+        try {
+          const r = await api.post<{ favorited: boolean }>('/api/favorites', { partname: part });
+          if (r.favorited) {
+            favSet.add(part);
+            b.textContent = '♥';
+            b.classList.add('on');
+          } else {
+            favSet.delete(part);
+            b.textContent = '♡';
+            b.classList.remove('on');
+          }
+        } catch (ex) {
+          toast(ex instanceof Error ? ex.message : String(ex), 'error');
+        }
+      });
+    });
+
     const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
     pager.innerHTML = `
       <button ${state.page <= 1 ? 'disabled' : ''} id="prev">‹ הקודם</button>
@@ -218,8 +247,9 @@ function priceHtml(it: CatalogItem): string {
 function gridCard(it: CatalogItem): string {
   return `
     <div class="card" style="display:flex;flex-direction:column;gap:0.5rem">
-      <div style="aspect-ratio:1;background:#f3f4f6;border-radius:6px;display:grid;place-items:center;color:#9ca3af;font-size:0.85rem">
+      <div style="position:relative;aspect-ratio:1;background:#f3f4f6;border-radius:6px;display:grid;place-items:center;color:#9ca3af;font-size:0.85rem">
         ${it.image_url ? `<img src="${escapeAttr(it.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
+        <button class="fav fav-over ${favSet.has(it.partname) ? 'on' : ''}" data-part="${escapeAttr(it.partname)}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       </div>
       <a href="#product/${encodeURIComponent(it.partname)}" style="font-weight:500;color:var(--text)">${escapeHtml(it.partdes || it.partname)}</a>
       <div class="muted" style="font-size:0.85rem">${escapeHtml(it.partname)} · ארגז: ${it.box_size}</div>
@@ -247,6 +277,7 @@ function listRow(it: CatalogItem): string {
         <div class="muted" style="font-size:0.76rem">${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
       </div>
       <div class="cat-row-price">${priceHtml(it)}<span class="muted">ליח׳</span></div>
+      <button class="fav ${favSet.has(it.partname) ? 'on' : ''}" data-part="${escapeAttr(it.partname)}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       <div class="cat-row-add">
         <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${escapeAttr(it.partname)}"/>
         <button class="add" data-part="${escapeAttr(it.partname)}">הוסף</button>

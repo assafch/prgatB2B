@@ -25,7 +25,10 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
           ${p.image_url ? `<img src="${escapeAttr(p.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
         </div>
         <div>
-          <h1 style="margin:0 0 0.5rem 0">${escapeHtml(p.partdes || p.partname)}</h1>
+          <div style="display:flex;align-items:flex-start;gap:0.5rem">
+            <h1 style="margin:0 0 0.5rem 0;flex:1">${escapeHtml(p.partdes || p.partname)}</h1>
+            <button id="fav-btn" class="fav-btn" type="button" aria-label="מועדף" title="הוסף למועדפים">♡</button>
+          </div>
           <div class="muted">מק״ט: ${escapeHtml(p.partname)}</div>
           ${p.barcode ? `<div class="muted">ברקוד: ${escapeHtml(p.barcode)}</div>` : ''}
           ${p.family ? `<div class="muted">משפחה: ${escapeHtml(p.family_desc || p.family)}</div>` : ''}
@@ -45,6 +48,7 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
           <p style="margin-top:1.5rem"><a href="#catalog">← חזרה לקטלוג</a></p>
         </div>
       </div>
+      <div id="similar" style="margin-top:1rem"></div>
     `;
     const qty = shell.querySelector('#qty') as HTMLInputElement;
     const btn = shell.querySelector('#add') as HTMLButtonElement;
@@ -76,6 +80,50 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
         btn.disabled = false;
       }
     });
+
+    // Favorite heart
+    const favBtn = shell.querySelector('#fav-btn') as HTMLButtonElement;
+    void api
+      .get<{ partnames: string[] }>('/api/favorites')
+      .then((f) => {
+        const on = f.partnames.includes(p.partname);
+        favBtn.textContent = on ? '♥' : '♡';
+        favBtn.classList.toggle('on', on);
+      })
+      .catch(() => {});
+    favBtn.addEventListener('click', async () => {
+      try {
+        const r = await api.post<{ favorited: boolean }>('/api/favorites', { partname: p.partname });
+        favBtn.textContent = r.favorited ? '♥' : '♡';
+        favBtn.classList.toggle('on', r.favorited);
+        toast(r.favorited ? 'נוסף למועדפים' : 'הוסר מהמועדפים', 'ok');
+      } catch (ex) {
+        toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      }
+    });
+
+    // Similar products rail (same family)
+    const simEl = shell.querySelector('#similar') as HTMLElement;
+    void api
+      .get<{ items: Product[] }>(`/api/catalog/${encodeURIComponent(p.partname)}/similar`)
+      .then((s) => {
+        if (!s.items.length) return;
+        simEl.innerHTML = `
+          <div class="sec-head"><h2 style="margin:0;font-size:1.1rem">מוצרים דומים</h2></div>
+          <div class="rail">
+            ${s.items
+              .map(
+                (it) => `
+              <a class="rail-item" href="#product/${encodeURIComponent(it.partname)}">
+                <div class="thumb">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : 'אין תמונה'}</div>
+                <div class="nm">${escapeHtml(it.partdes || it.partname)}</div>
+                <div class="pr">${it.price != null ? `₪${it.price.toFixed(2)}` : ''}</div>
+              </a>`
+              )
+              .join('')}
+          </div>`;
+      })
+      .catch(() => {});
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }

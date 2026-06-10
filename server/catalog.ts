@@ -365,6 +365,17 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
   };
 }
 
+/** Same-family products (excluding the given one) for the "מוצרים דומים" rail. */
+export function getSimilarProducts(partname: string, custname: string | null, limit = 8): CatalogItem[] {
+  const row = db.prepare('SELECT family, b2b_category_override FROM catalog_cache WHERE partname = ?').get(partname) as
+    | { family: string | null; b2b_category_override: string | null }
+    | undefined;
+  const fam = row?.b2b_category_override || row?.family;
+  if (!fam) return [];
+  const { items } = queryCatalog(custname, { family: fam, page: 1, pageSize: limit + 1 });
+  return items.filter((i) => i.partname !== partname).slice(0, limit);
+}
+
 export function listFamiliesLocal(): Array<{ family: string; family_desc: string | null; count: number }> {
   return db
     .prepare(

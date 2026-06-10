@@ -22,6 +22,7 @@ import { renderAssistant } from './pages/assistant.js';
 import { renderAccessibility } from './pages/accessibility.js';
 import { renderPayCard, renderPayCardReturn } from './pages/payCard.js';
 import { renderTemplates } from './pages/templates.js';
+import { renderFavorites } from './pages/favorites.js';
 import { renderAdmin } from './pages/admin.js';
 
 const root = document.getElementById('app')!;
@@ -36,8 +37,8 @@ export const state: AppState = { me: null, cartCount: 0 };
 // Which bottom-nav tab a route belongs to.
 function navKeyFor(hash: string): string {
   if (hash.startsWith('#home')) return 'home';
-  if (hash.startsWith('#catalog') || hash.startsWith('#product/')) return 'catalog';
-  if (hash.startsWith('#cart') || hash.startsWith('#checkout')) return 'cart';
+  if (hash.startsWith('#catalog') || hash.startsWith('#product/') || hash === '#favorites') return 'catalog';
+  if (hash.startsWith('#cart') || hash.startsWith('#checkout') || hash === '#templates') return 'cart';
   if (hash.startsWith('#orders')) return 'orders';
   if (hash.startsWith('#account') || hash.startsWith('#invoice') || hash.startsWith('#pay')) return 'account';
   return '';
@@ -193,6 +194,7 @@ async function route(): Promise<void> {
   if (hash === '#payments') return renderPayments(mount(''));
   if (hash === '#assistant') return renderAssistant(mount(''));
   if (hash === '#templates') return renderTemplates(mount(''));
+  if (hash === '#favorites') return renderFavorites(mount(''));
 
   // Unknown route → home
   location.hash = '#home';
