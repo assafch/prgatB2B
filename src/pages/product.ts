@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
 import { toast } from '../ui.js';
 import { refreshCartCount } from '../main.js';
+import { showUpsell } from './upsell.js';
 
 interface Product {
   partname: string;
@@ -72,7 +73,7 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
         await refreshCartCount();
         msg.textContent = '✓ נוסף לסל';
         msg.className = 'ok';
-        toast('נוסף לסל', 'ok');
+        void showUpsell(p.partname);
       } catch (ex) {
         msg.textContent = ex instanceof Error ? ex.message : String(ex);
         msg.className = 'error';

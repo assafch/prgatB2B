@@ -365,6 +365,14 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
   };
 }
 
+/** Exact barcode lookup for the scanner. Returns the sellable product or null. */
+export function findByBarcode(barcode: string, custname: string | null): CatalogItem | null {
+  const code = (barcode || '').trim();
+  if (!code) return null;
+  const row = db.prepare('SELECT partname FROM catalog_cache WHERE barcode = ? LIMIT 1').get(code) as { partname: string } | undefined;
+  return row ? getProduct(row.partname, custname) : null;
+}
+
 /** Same-family products (excluding the given one) for the "מוצרים דומים" rail. */
 export function getSimilarProducts(partname: string, custname: string | null, limit = 8): CatalogItem[] {
   const row = db.prepare('SELECT family, b2b_category_override FROM catalog_cache WHERE partname = ?').get(partname) as

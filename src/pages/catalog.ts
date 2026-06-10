@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
 import { toast } from '../ui.js';
 import { refreshCartCount } from '../main.js';
+import { showUpsell } from './upsell.js';
 
 interface CatalogItem {
   partname: string;
@@ -33,6 +34,7 @@ export async function renderCatalog(shell: HTMLElement): Promise<void> {
         <button id="view-grid" title="תצוגת רשת" aria-label="רשת">▦</button>
         <button id="view-list" title="תצוגת רשימה" aria-label="רשימה">☰</button>
       </div>
+      <a href="#scan" class="fav-link" title="סריקת ברקוד" aria-label="סריקת ברקוד">📷</a>
       <a href="#favorites" class="fav-link" title="המועדפים שלי" aria-label="מועדפים">❤️</a>
     </div>
     <div id="catalog-grid"></div>
@@ -191,6 +193,8 @@ async function load(shell: HTMLElement): Promise<void> {
             b.textContent = 'הוסף';
             b.disabled = false;
           }, 1200);
+          // Upsell popup on grid adds; list view stays fast for bulk ordering.
+          if (state.view !== 'list') void showUpsell(part);
         } catch (ex) {
           toast(ex instanceof Error ? ex.message : String(ex), 'error');
           b.textContent = 'הוסף';

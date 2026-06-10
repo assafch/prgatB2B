@@ -43,6 +43,7 @@ import {
   type AuthedRequest,
 } from './auth.js';
 import {
+  findByBarcode,
   getProduct,
   getSimilarProducts,
   listFamiliesLocal,
@@ -701,6 +702,10 @@ app.get('/api/favorites/products', requireCustomer, (req: AuthedRequest, res) =>
 });
 app.get('/api/catalog/:partname/similar', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ items: getSimilarProducts(req.params.partname, req.user!.custname, 8) });
+});
+app.get('/api/catalog/barcode/:code', requireCustomer, (req: AuthedRequest, res) => {
+  const item = findByBarcode(req.params.code, req.user!.custname);
+  res.status(item ? 200 : 404).json(item ? { item } : { error: 'not_found' });
 });
 app.post('/api/favorites', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
   const partname = typeof (req.body as { partname?: unknown })?.partname === 'string' ? (req.body as { partname: string }).partname : '';
