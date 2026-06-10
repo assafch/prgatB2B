@@ -115,19 +115,6 @@ CREATE TABLE IF NOT EXISTS card_payments (
 CREATE INDEX IF NOT EXISTS idx_cardpay_user ON card_payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_cardpay_status ON card_payments(status);
 
-CREATE TABLE IF NOT EXISTS promotions (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,            -- Hebrew label shown to customers
-  type TEXT NOT NULL,           -- 'percent' | 'fixed' | 'bogo' | 'gift'
-  params TEXT NOT NULL,         -- JSON, shape per type
-  active INTEGER NOT NULL DEFAULT 1,
-  priority INTEGER NOT NULL DEFAULT 0,
-  starts_at TEXT,               -- yyyy-mm-dd or null (no lower bound)
-  ends_at TEXT,                 -- yyyy-mm-dd or null (no upper bound)
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_promotions_active ON promotions(active);
-
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
   business_name TEXT,
@@ -316,6 +303,10 @@ ensureColumn('catalog_cache', 'b2b_min_qty', 'INTEGER');
 ensureColumn('catalog_cache', 'b2b_sort_priority', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('catalog_cache', 'b2b_featured', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('catalog_cache', 'b2b_category_override', 'TEXT');
+// Promotions table predates the current engine; add the columns it needs (the old
+// x_/y_ columns stay, unused). params holds the per-type rule JSON.
+ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");
+ensureColumn('promotions', 'priority', 'INTEGER NOT NULL DEFAULT 0');
 
 export function getSetting(key: string): string | null {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
