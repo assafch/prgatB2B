@@ -16,6 +16,7 @@ import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments 
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
 import { listStaff, createStaff, setStaffStatus, resetStaffPassword } from './staff.js';
+import { vapidPublicKey, saveSubscription, removeSubscription, notifyUser, broadcast } from './push.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -671,6 +672,33 @@ app.delete('/api/templates/:id', requireCustomer, (req: AuthedRequest, res) => {
 app.get('/api/favorites', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ partnames: listFavorites(req.user!.id) });
 });
+
+// ---------- Push notifications ----------
+app.get('/api/push/vapid', requireCustomer, (_req, res) => {
+  res.json({ publicKey: vapidPublicKey() });
+});
+app.post('/api/push/subscribe', requireCustomer, (req: AuthedRequest, res) => {
+  try {
+    saveSubscription(req.user!.id, req.user!.custname, (req.body || {}).subscription);
+    res.json({ ok: true });
+  } catch {
+    res.status(400).json({ error: 'bad_subscription' });
+  }
+});
+app.post('/api/push/unsubscribe', requireCustomer, (req: AuthedRequest, res) => {
+  const ep = (req.body || {}).endpoint;
+  if (ep) removeSubscription(String(ep));
+  res.json({ ok: true });
+});
+app.post('/api/admin/push/broadcast', requireAdmin, ah(async (req, res) => {
+  const { title, body } = (req.body || {}) as { title?: string; body?: string };
+  if (!title || !body) {
+    res.status(400).json({ error: 'title_body_required' });
+    return;
+  }
+  const sent = await broadcast({ title: String(title).slice(0, 80), body: String(body).slice(0, 200), url: '#home' });
+  res.json({ sent });
+}));
 // ---------- Per-store staff (owner-managed) ----------
 app.get('/api/account/staff', requireOwner, (req: AuthedRequest, res) => {
   res.json({ staff: listStaff(req.user!.custname!) });
@@ -720,6 +748,7 @@ app.post('/api/orders', requireCustomer, blockIfMaintenance, ordersMinuteLimiter
   const { details } = (req.body || {}) as { details?: string };
   try {
     const result = await submitOrder(req.user!.id, req.user!.custname!, details);
+    notifyUser(req.user!.id, { title: 'ההזמנה נקלטה ✓', body: `הזמנה ${result.ordname} התקבלה בהצלחה`, url: '#orders' });
     res.json(result);
   } catch (err) {
     // User-facing validation errors (e.g. empty cart) are safe to surface.

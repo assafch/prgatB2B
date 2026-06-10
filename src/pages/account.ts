@@ -3,6 +3,7 @@ import { formatMoney, escapeHtml, escapeAttr, formatDateTime } from '../format.j
 import { toast, confirmDialog } from '../ui.js';
 import { supportsPasskeys, serverPasskeysEnabled, passkeyRegister, isPasskeyCancel } from '../webauthn.js';
 import { state } from '../main.js';
+import { pushSupported, pushSubscribed, enablePush, disablePush } from '../push.js';
 
 interface Profile {
   custname: string;
@@ -80,9 +81,11 @@ export async function renderAccount(shell: HTMLElement): Promise<void> {
         <p class="muted" style="margin-top:1.5rem">לשינוי פרטים — צרו קשר עם משרד אורגת.</p>
       </div>
       <div id="passkey-card"></div>
+      <div id="push-card"></div>
       <div id="staff-card"></div>
     `;
     renderPasskeys(shell.querySelector('#passkey-card') as HTMLElement);
+    void renderPush(shell.querySelector('#push-card') as HTMLElement);
     if (isOwner) void renderStaff(shell.querySelector('#staff-card') as HTMLElement);
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
@@ -143,6 +146,35 @@ async function renderPasskeys(host: HTMLElement): Promise<void> {
     );
   };
   await load();
+}
+
+// Push-notifications toggle for this device.
+async function renderPush(host: HTMLElement): Promise<void> {
+  if (!pushSupported()) return; // iOS Safari needs the app installed to home screen, etc.
+  const on = await pushSubscribed();
+  host.innerHTML = `
+    <div class="card" style="max-width:720px;margin:1rem auto 0">
+      <h2 style="margin-top:0">🔔 התראות</h2>
+      <p class="muted" style="margin-top:-0.3rem">קבלת עדכונים על אישור הזמנה, תשלומים ומבצעים — במכשיר זה.</p>
+      <button id="push-toggle" class="${on ? 'ghost' : ''}" style="width:100%">${on ? 'כיבוי התראות במכשיר זה' : 'הפעלת התראות'}</button>
+    </div>`;
+  (host.querySelector('#push-toggle') as HTMLButtonElement).onclick = async () => {
+    const btn = host.querySelector('#push-toggle') as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      if (on) {
+        await disablePush();
+        toast('ההתראות כובו', 'ok');
+      } else {
+        await enablePush();
+        toast('ההתראות הופעלו ✓', 'ok');
+      }
+      void renderPush(host);
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      btn.disabled = false;
+    }
+  };
 }
 
 interface Staff { id: number; username: string; status: string; created_at: string; last_login_at: string | null }

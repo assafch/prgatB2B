@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS card_payments (
 CREATE INDEX IF NOT EXISTS idx_cardpay_user ON card_payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_cardpay_status ON card_payments(status);
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  custname TEXT,
+  endpoint TEXT NOT NULL UNIQUE,
+  sub_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
 CREATE TABLE IF NOT EXISTS templates (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

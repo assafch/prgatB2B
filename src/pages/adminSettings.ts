@@ -33,6 +33,14 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
 
       <button id="s-save" style="margin-top:1rem;width:100%">שמירת הגדרות</button>
       <div id="s-msg" style="margin-top:0.5rem;text-align:center"></div>
+    </div>
+    <div class="card" style="margin-top:0.75rem">
+      <h2 style="margin-top:0">🔔 שליחת התראה ללקוחות</h2>
+      <p class="muted" style="margin-top:-0.3rem">תישלח לכל מי שהפעיל התראות במכשירו.</p>
+      <input id="pb-title" placeholder="כותרת" maxlength="80"/>
+      <textarea id="pb-body" rows="2" placeholder="תוכן ההודעה" maxlength="200" style="margin-top:0.4rem"></textarea>
+      <button id="pb-send" style="margin-top:0.5rem;width:100%">שליחה</button>
+      <div id="pb-msg" style="margin-top:0.5rem;text-align:center"></div>
     </div>`;
 
   const msg = c.querySelector('#s-msg') as HTMLDivElement;
@@ -53,6 +61,27 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
     } catch (ex) {
       msg.textContent = ex instanceof Error ? ex.message : String(ex);
       msg.className = 'error';
+    }
+  };
+
+  (c.querySelector('#pb-send') as HTMLButtonElement).onclick = async () => {
+    const pbmsg = c.querySelector('#pb-msg') as HTMLDivElement;
+    const title = (c.querySelector('#pb-title') as HTMLInputElement).value.trim();
+    const body = (c.querySelector('#pb-body') as HTMLTextAreaElement).value.trim();
+    if (!title || !body) {
+      pbmsg.textContent = 'נא למלא כותרת ותוכן';
+      pbmsg.className = 'error';
+      return;
+    }
+    pbmsg.textContent = 'שולח…';
+    pbmsg.className = 'muted';
+    try {
+      const r = await api.post<{ sent: number }>('/api/admin/push/broadcast', { title, body });
+      pbmsg.textContent = `✓ נשלח ל-${r.sent} מכשירים`;
+      pbmsg.className = 'ok';
+    } catch (ex) {
+      pbmsg.textContent = ex instanceof Error ? ex.message : String(ex);
+      pbmsg.className = 'error';
     }
   };
 }
