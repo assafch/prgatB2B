@@ -11,7 +11,8 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "allowJs": false
+    "allowJs": false,
+    "types": ["vite/client"]
   },
   "include": ["src/**/*.ts", "index.html"]
 }

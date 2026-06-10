@@ -1,6 +1,7 @@
 // prgatB2B — hash router. Loads /api/auth/me at boot, dispatches to pages by route.
 
 import { api, type MeUser } from './api.js';
+import { registerPwa } from './pwa.js';
 import { renderLogin } from './pages/login.js';
 import { renderLead } from './pages/lead.js';
 import { renderInvite } from './pages/invite.js';
@@ -144,3 +145,5 @@ window.addEventListener('hashchange', () => {
 route().catch((err) => {
   root.innerHTML = `<div class="app-shell"><div class="card error">שגיאה: ${err.message || err}</div></div>`;
 });
+
+registerPwa();
