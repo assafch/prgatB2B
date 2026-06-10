@@ -18,6 +18,7 @@ import { renderInvoices } from './pages/invoices.js';
 import { renderInvoiceDetail } from './pages/invoiceDetail.js';
 import { renderPayCheck } from './pages/payCheck.js';
 import { renderPayments } from './pages/payments.js';
+import { renderAssistant } from './pages/assistant.js';
 import { renderAdmin } from './pages/admin.js';
 
 const root = document.getElementById('app')!;
@@ -78,7 +79,7 @@ function mount(html: string): HTMLDivElement {
   const navKey = navKeyFor(location.hash || '#home');
   root.innerHTML = `${topbar()}<div class="app-shell${isCustomer ? ' has-bottom-nav' : ''}"></div>${
     isCustomer ? bottomNav({ active: navKey, cartCount: state.cartCount }) : ''
-  }`;
+  }${isCustomer && location.hash !== '#assistant' ? '<a href="#assistant" class="asst-fab" aria-label="שאל את אורגת">🤖</a>' : ''}`;
   const shell = root.querySelector('.app-shell') as HTMLDivElement;
   shell.innerHTML = html;
   return shell;
@@ -180,6 +181,7 @@ async function route(): Promise<void> {
   }
   if (hash === '#pay/check') return renderPayCheck(mount(''));
   if (hash === '#payments') return renderPayments(mount(''));
+  if (hash === '#assistant') return renderAssistant(mount(''));
 
   // Unknown route → home
   location.hash = '#home';

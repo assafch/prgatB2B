@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSettings } from './db.js';
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
+import { runAssistant, assistantEnabled } from './assistant.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -818,6 +819,25 @@ app.post('/api/payments/check/:id/confirm', requireCustomer, blockIfMaintenance,
 app.get('/api/payments', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ checks: listChecksForUser(req.user!.id).map(shapeCheck) });
 });
+
+// ---------- AI assistant ("שאל את אורגת") ----------
+const assistantLimiter = perUser(60_000, 20);
+app.post('/api/assistant', requireCustomer, assistantLimiter, ah(async (req: AuthedRequest, res) => {
+  if (!assistantEnabled()) {
+    res.status(503).json({ error: 'האסיסטנט אינו זמין כרגע' });
+    return;
+  }
+  const body = (req.body || {}) as { messages?: Array<{ role?: string; content?: string }> };
+  const history = (Array.isArray(body.messages) ? body.messages : [])
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content as string }));
+  if (!history.length || history[history.length - 1].role !== 'user') {
+    res.status(400).json({ error: 'no_message' });
+    return;
+  }
+  const turn = await runAssistant(req.user!.id, req.user!.custname!, history);
+  res.json(turn);
+}));
 
 // Stream the cheque image to its owner only (decrypted; never cached).
 app.get('/api/payments/:id/image', requireCustomer, (req: AuthedRequest, res) => {
