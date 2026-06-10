@@ -62,7 +62,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
         <div class="label">יתרה לתשלום${d.balance.openCount > 0 ? ` (${d.balance.openCount} חשבוניות פתוחות)` : ''}</div>
         <div class="amount">${formatMoney(d.balance.openTotal)}</div>
         ${d.features.checkPayment ? `<a class="pay-btn" href="#pay/check" style="display:inline-flex;align-items:center;gap:0.4rem;justify-content:center">📸 תשלום בצ׳ק</a>` : ''}
-        ${d.features.payments ? `<button class="pay-btn" id="pay-debt" style="margin-top:0.5rem">לתשלום בכרטיס אשראי</button>` : ''}
+        <a class="pay-btn" href="#pay/card" style="display:inline-flex;align-items:center;gap:0.4rem;justify-content:center;margin-top:0.5rem">💳 תשלום בכרטיס אשראי</a>
         <div style="margin-top:0.6rem"><a href="#invoices">צפייה בחשבוניות הפתוחות</a></div>
       </div>`;
   } else if (d.lastOrder) {
@@ -162,10 +162,6 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     ${suggestionCard}
     ${quickActions}
   `;
-
-  shell.querySelector('#pay-debt')?.addEventListener('click', () => {
-    location.hash = '#pay/card';
-  });
 
   shell.querySelector('#reorder-last')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;

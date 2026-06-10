@@ -5,11 +5,26 @@ import { escapeHtml, formatMoney } from '../format.js';
 export async function renderPayCard(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `<div class="card"><div class="muted">טוען…</div></div>`;
   let debt = 0;
+  let enabled = false;
   try {
-    const d = await api.get<{ balance: { openTotal: number }; balanceOk: boolean }>('/api/home');
+    const d = await api.get<{ balance: { openTotal: number }; balanceOk: boolean; features: { payments: boolean } }>('/api/home');
     debt = d.balanceOk ? d.balance.openTotal : 0;
+    enabled = !!d.features?.payments;
   } catch {
     /* ignore — show generic */
+  }
+  if (!enabled) {
+    shell.innerHTML = `
+      <div class="card" style="text-align:center">
+        <div class="es-icon">💳</div>
+        <div class="es-title">תשלום בכרטיס אשראי — בקרוב</div>
+        <div class="es-sub">האפשרות תיפתח ממש בקרוב. בינתיים ניתן לשלם בצ׳ק 📸 או לפנות אלינו.</div>
+        <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:center">
+          <a class="es-cta" href="#pay/check">תשלום בצ׳ק</a>
+          <a href="#home" style="align-self:center">חזרה</a>
+        </div>
+      </div>`;
+    return;
   }
   if (debt <= 0) {
     shell.innerHTML = `<div class="card"><div class="es-title">אין חוב פתוח 🎉</div><div style="margin-top:0.75rem"><a href="#home">חזרה</a></div></div>`;
