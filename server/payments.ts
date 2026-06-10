@@ -176,11 +176,16 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
   return info.changes > 0;
 }
 
-// Customer-facing list: never surfaces abandoned drafts, and the status filter is
-// applied BEFORE the LIMIT so real cheques can't be pushed out of the window.
+// Customer-facing list: hide abandoned drafts AND cancelled/void cheques (a
+// cancelled payment is a resolved non-event — only admins keep it for audit).
+// The status filter is applied BEFORE the LIMIT so real cheques can't be pushed
+// out of the window.
 export function listChecksForUser(userId: number): CheckRow[] {
   return db
-    .prepare(`SELECT * FROM payment_checks WHERE user_id = ? AND status != 'draft' ORDER BY created_at DESC LIMIT 200`)
+    .prepare(
+      `SELECT * FROM payment_checks WHERE user_id = ? AND status NOT IN ('draft', 'cancelled')
+        ORDER BY created_at DESC LIMIT 200`
+    )
     .all(userId) as CheckRow[];
 }
 
