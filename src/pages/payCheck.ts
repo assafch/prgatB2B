@@ -28,7 +28,8 @@ interface CheckItem {
   aiAvailable: boolean;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Local (Israel) date as yyyy-mm-dd — avoids UTC flipping the post-dated flag near midnight.
+const today = () => new Date().toLocaleDateString('en-CA');
 
 export function renderPayCheck(shell: HTMLElement): void {
   shell.innerHTML = `

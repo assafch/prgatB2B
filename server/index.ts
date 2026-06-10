@@ -71,7 +71,7 @@ import { scheduleSnapshots } from './backup.js';
 import { getHomeData } from './home.js';
 import { getReorderSuggestions } from './reorder.js';
 import multer from 'multer';
-import { extractCheck, checkOcrEnabled } from './checkOcr.js';
+import { extractCheck, checkOcrEnabled, prepareCheckImage } from './checkOcr.js';
 import {
   createCheckDraft,
   confirmCheck,
@@ -81,6 +81,8 @@ import {
   listAllChecks,
   getCheckAny,
   setCheckStatus,
+  imageStorageEnabled,
+  sweepDraftChecks,
   type CheckRow,
 } from './payments.js';
 import {
@@ -697,7 +699,12 @@ app.get('/api/invoices/:ivnum', requireCustomer, financeLimiter, ah(async (req, 
 
 // ---------- Check-photo payments (promise-to-pay; image encrypted, never web-served) ----------
 const checkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+// The parse endpoint is the only LLM-billing path: cap per-minute, per-day, and
+// org-wide so a runaway/compromised account can't run up the Anthropic bill.
+// skipFailedRequests so an Anthropic outage doesn't burn the customer's budget.
 const checkParseLimiter = perUser(60_000, 10);
+const checkParseDailyLimiter = rateLimit({ windowMs: 86_400_000, max: 60, keyGenerator: userKey, skipFailedRequests: true });
+const checkParseGlobalLimiter = rateLimit({ windowMs: 86_400_000, max: 2000, keyGenerator: () => 'global', skipFailedRequests: true });
 
 function shapeCheck(c: CheckRow) {
   return {
@@ -717,16 +724,37 @@ function shapeCheck(c: CheckRow) {
   };
 }
 
-// Upload a cheque photo → store encrypted → AI extraction (if a key is set) →
-// return a draft id + extracted fields for the customer to confirm.
-app.post('/api/payments/check/parse', requireCustomer, checkParseLimiter, checkUpload.single('image'), ah(async (req, res) => {
+// Upload a cheque photo → normalise + validate it's a real image → store encrypted
+// → AI extraction (if a key is set) → return a draft id + extracted fields.
+app.post(
+  '/api/payments/check/parse',
+  requireCustomer,
+  checkParseGlobalLimiter,
+  checkParseLimiter,
+  checkParseDailyLimiter,
+  checkUpload.single('image'),
+  ah(async (req, res) => {
   const file = (req as any).file as { buffer: Buffer } | undefined;
   if (!file) {
     res.status(400).json({ error: 'no_image' });
     return;
   }
-  const ai = await extractCheck(file.buffer);
-  const { id } = createCheckDraft(req.user!.id, req.user!.custname!, file.buffer, ai);
+  // The stored deposit image must be retrievable later — refuse if encryption
+  // (hence storage) isn't configured, rather than silently discarding it.
+  if (!imageStorageEnabled()) {
+    console.error('[payments] CHECK_IMAGE_KEY missing/invalid — refusing cheque upload');
+    res.status(503).json({ error: 'אחסון התשלומים אינו זמין כעת' });
+    return;
+  }
+  // Normalise (EXIF/GPS strip + downscale). A non-decodable upload is rejected
+  // before anything is stored or sent to the model.
+  const jpeg = await prepareCheckImage(file.buffer);
+  if (!jpeg) {
+    res.status(400).json({ error: 'הקובץ אינו תמונה תקינה' });
+    return;
+  }
+  const ai = await extractCheck(jpeg);
+  const { id } = createCheckDraft(req.user!.id, req.user!.custname!, jpeg, ai);
   res.json({
     id,
     aiAvailable: checkOcrEnabled(),
@@ -763,8 +791,7 @@ app.post('/api/payments/check/:id/confirm', requireCustomer, cartLimiter, (req: 
   }
   const ok = confirmCheck(req.user!.id, req.params.id, {
     amount: Math.round(amount * 100) / 100,
-    checkDate,
-    isPostdated: !!b.isPostdated,
+    checkDate, // is_postdated is derived server-side from checkDate in confirmCheck
     bank: typeof b.bank === 'string' ? b.bank : undefined,
     branch: typeof b.branch === 'string' ? b.branch : undefined,
     account: typeof b.account === 'string' ? b.account : undefined,
@@ -1033,6 +1060,15 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     res.status(413).json({ error: 'payload_too_large' });
     return;
   }
+  // multer (file upload) errors — map the over-size case to 413, others to 400,
+  // instead of a generic 500 for a user-correctable condition.
+  const me = err as { name?: string; code?: string } | null;
+  if (me && typeof me === 'object' && me.name === 'MulterError') {
+    res.status(me.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+      error: me.code === 'LIMIT_FILE_SIZE' ? 'payload_too_large' : 'upload_error',
+    });
+    return;
+  }
   console.error(`[error] [${req.reqId ?? '-'}] ${req.method} ${req.path}:`, err);
   if (res.headersSent) return;
   res.status(500).json({ error: 'internal_error', request_id: req.reqId ?? null });
@@ -1047,6 +1083,9 @@ async function startup() {
   setInterval(() => sweepSessions(), 86400_000).unref();
   sweepChallenges();
   setInterval(() => sweepChallenges(), 3600_000).unref();
+  // Abandoned cheque drafts (+ their encrypted images): sweep at boot and hourly.
+  sweepDraftChecks();
+  setInterval(() => sweepDraftChecks(), 3600_000).unref();
   // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
   scheduleSnapshots();
   app.listen(PORT, () => {
@@ -1056,6 +1095,9 @@ async function startup() {
       console.log(`[prgatB2B] Priority configured: ${config.baseUrl}/${config.company}`);
     } else {
       console.warn('[prgatB2B] Priority NOT configured — set PRIORITY_* env vars');
+    }
+    if (!imageStorageEnabled()) {
+      console.warn('[prgatB2B] CHECK_IMAGE_KEY missing/invalid (need 64 hex chars) — cheque uploads will be refused');
     }
   });
 }

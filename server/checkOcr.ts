@@ -27,6 +27,25 @@ export function checkOcrEnabled(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }
 
+/**
+ * Normalise an uploaded image for both the AI call and at-rest storage: honour
+ * EXIF orientation, then drop ALL metadata (incl. GPS), downscale, re-encode JPEG.
+ * Returns null if the bytes aren't a decodable image (→ caller rejects the upload).
+ * The normalised buffer is what we encrypt and store — never the raw upload — so
+ * the stored deposit instrument carries no GPS/EXIF and is bounded in size.
+ */
+export async function prepareCheckImage(imageBuffer: Buffer): Promise<Buffer | null> {
+  try {
+    return await sharp(imageBuffer, { limitInputPixels: 50_000_000 })
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
 const SYSTEM = `אתה מחלץ נתונים מתצלום של צ'ק (שיק) ישראלי.
 החזר אך ורק אובייקט JSON תקין (ללא markdown, ללא טקסט נוסף, ללא backticks) עם בדיוק המפתחות הבאים:
 {
@@ -51,24 +70,38 @@ function stripToJson(s: string): string {
   return start >= 0 && end > start ? body.slice(start, end + 1) : body;
 }
 
-/**
- * Extract cheque fields from raw image bytes. Returns null when no API key is set
- * (→ manual entry) or on any failure (the UI then asks the customer to type the
- * amount/date). Downscales + strips EXIF before sending (privacy + cost).
- */
-export async function extractCheck(imageBuffer: Buffer): Promise<CheckExtraction | null> {
-  if (!checkOcrEnabled()) return null;
-  let jpeg: Buffer;
-  try {
-    jpeg = await sharp(imageBuffer, { limitInputPixels: 50_000_000 })
-      .rotate() // honor EXIF orientation, then drop metadata
-      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 85 })
-      .toBuffer();
-  } catch {
-    return null;
-  }
+const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null);
+const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
 
+// Never trust model output verbatim: coerce/clamp every field to its declared type.
+function sanitize(raw: Record<string, unknown>): CheckExtraction {
+  const amount = typeof raw.amount === 'number' && isFinite(raw.amount) && raw.amount > 0 ? raw.amount : null;
+  const date = typeof raw.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : null;
+  const confidence =
+    typeof raw.confidence === 'number' && isFinite(raw.confidence) ? Math.min(1, Math.max(0, raw.confidence)) : 0;
+  return {
+    is_check: raw.is_check === true,
+    amount,
+    amount_words_match: bool(raw.amount_words_match),
+    date,
+    is_postdated: bool(raw.is_postdated),
+    bank: str(raw.bank),
+    branch: str(raw.branch),
+    account: str(raw.account),
+    check_number: str(raw.check_number),
+    confidence,
+    legible: raw.legible === true,
+    notes_he: str(raw.notes_he),
+  };
+}
+
+/**
+ * Extract cheque fields from an ALREADY-NORMALISED jpeg buffer (see
+ * prepareCheckImage). Returns null when no API key is set (→ manual entry) or on
+ * any failure (the UI then asks the customer to type the amount/date).
+ */
+export async function extractCheck(jpeg: Buffer): Promise<CheckExtraction | null> {
+  if (!checkOcrEnabled()) return null;
   const client = new Anthropic(); // reads ANTHROPIC_API_KEY
   try {
     const res = await client.messages.create({
@@ -87,12 +120,7 @@ export async function extractCheck(imageBuffer: Buffer): Promise<CheckExtraction
     });
     const text = res.content.find((b) => b.type === 'text');
     if (!text || text.type !== 'text') return null;
-    const parsed = JSON.parse(stripToJson(text.text)) as CheckExtraction;
-    // Normalise an obviously-bad amount to null so the UI demands manual entry.
-    if (typeof parsed.amount !== 'number' || !isFinite(parsed.amount) || parsed.amount <= 0) {
-      parsed.amount = null;
-    }
-    return parsed;
+    return sanitize(JSON.parse(stripToJson(text.text)) as Record<string, unknown>);
   } catch (err) {
     console.warn('[checkOcr] extraction failed:', err instanceof Error ? err.message : err);
     return null;

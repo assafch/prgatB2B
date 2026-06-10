@@ -1,10 +1,16 @@
 // Check-photo payments: a customer photographs a cheque, the app records a
-// promise-to-pay (amount + possibly-post-dated date), and the office reconciles
-// it when the physical cheque arrives with the driver. This is NOT remote deposit
-// capture and moves no money — the cheque is still collected and deposited
-// normally. Cheque images contain bank-account numbers, so they are encrypted at
-// rest (AES-256-GCM) on the volume and NEVER web-served — only streamed to the
-// owning customer or an admin through an auth-gated route.
+// promise-to-pay (amount + possibly-post-dated date), and the office deposits it
+// digitally via the Chex app. This moves no money itself.
+//
+// Data protection: the cheque image is the sensitive artifact (it carries the
+// full bank-account + CMC-7 MICR line), so the NORMALISED image (EXIF/GPS
+// stripped) is AES-256-GCM encrypted at rest on the volume and NEVER web-served —
+// only streamed to the owning customer or an admin via an auth-gated route. We
+// deliberately do NOT persist the full account number or the raw AI JSON in the
+// (plaintext) SQLite DB / backups — only a masked last-4 — so a DB/backup leak
+// never exposes account numbers. The full number lives solely in the encrypted
+// image. Abandoned drafts (and their image files) are swept after a short TTL,
+// and cancelling a cheque erases its image.
 
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -16,10 +22,25 @@ const DATA_DIR = process.env.DATA_DIR || './data';
 const CHECKS_DIR = path.join(DATA_DIR, 'checks');
 fs.mkdirSync(CHECKS_DIR, { recursive: true });
 
+const DRAFT_TTL_HOURS = 48;
+
 function imageKey(): Buffer | null {
-  const hex = process.env.CHECK_IMAGE_KEY;
-  if (!hex || hex.length < 64) return null;
-  return Buffer.from(hex.slice(0, 64), 'hex');
+  const hex = (process.env.CHECK_IMAGE_KEY || '').trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) return null; // require exactly 32 bytes of hex
+  return Buffer.from(hex, 'hex');
+}
+
+/** True when a valid image-encryption key is configured. */
+export function imageStorageEnabled(): boolean {
+  return imageKey() !== null;
+}
+
+/** Keep only the last 4 digits of the account for reconciliation hints; the full
+ *  number is never stored in the DB (it lives only in the encrypted image). */
+function maskAccount(account: string | null | undefined): string | null {
+  if (!account) return null;
+  const digits = account.replace(/\D/g, '');
+  return digits.length >= 4 ? '****' + digits.slice(-4) : null;
 }
 
 function encryptToFile(id: string, plain: Buffer): string | null {
@@ -37,13 +58,28 @@ function encryptToFile(id: string, plain: Buffer): string | null {
 export function decryptCheckImage(imagePath: string): Buffer | null {
   const key = imageKey();
   if (!key || !fs.existsSync(imagePath)) return null;
-  const blob = fs.readFileSync(imagePath);
-  const iv = blob.subarray(0, 12);
-  const tag = blob.subarray(12, 28);
-  const enc = blob.subarray(28);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(enc), decipher.final()]);
+  try {
+    const blob = fs.readFileSync(imagePath);
+    const iv = blob.subarray(0, 12);
+    const tag = blob.subarray(12, 28);
+    const enc = blob.subarray(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(enc), decipher.final()]);
+  } catch (err) {
+    // Corrupted/truncated blob or a rotated/wrong key → treat as "not available".
+    console.warn('[payments] decrypt failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+function unlinkImage(imagePath: string | null): void {
+  if (!imagePath) return;
+  try {
+    fs.unlinkSync(imagePath);
+  } catch {
+    /* already gone */
+  }
 }
 
 export interface CheckRow {
@@ -66,20 +102,22 @@ export interface CheckRow {
   submitted_at: string | null;
 }
 
-/** Store the image (encrypted) + a draft row prefilled from AI extraction. */
+/** Store the NORMALISED image (encrypted) + a draft row prefilled from AI
+ *  extraction. Returns imageStored=false if no storage key is configured (the
+ *  caller should treat that as a hard error — we must retain the deposit image). */
 export function createCheckDraft(
   userId: number,
   custname: string,
   imageBuffer: Buffer,
   ai: CheckExtraction | null
-): { id: string; ai: CheckExtraction | null } {
+): { id: string; imageStored: boolean } {
   const id = crypto.randomBytes(12).toString('hex');
   const imagePath = encryptToFile(id, imageBuffer);
   db.prepare(
     `INSERT INTO payment_checks
        (id, user_id, custname, amount, check_date, is_postdated, bank, branch, account, check_number,
         image_path, ai_raw, ai_confidence, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'draft')`
   ).run(
     id,
     userId,
@@ -89,19 +127,17 @@ export function createCheckDraft(
     ai?.is_postdated ? 1 : 0,
     ai?.bank ?? null,
     ai?.branch ?? null,
-    ai?.account ?? null,
+    maskAccount(ai?.account), // masked last-4 only; full number never hits the DB
     ai?.check_number ?? null,
     imagePath,
-    ai ? JSON.stringify(ai) : null,
     ai?.confidence ?? null
   );
-  return { id, ai };
+  return { id, imageStored: imagePath !== null };
 }
 
 export interface ConfirmInput {
   amount: number;
   checkDate: string;
-  isPostdated?: boolean;
   bank?: string;
   branch?: string;
   account?: string;
@@ -109,23 +145,30 @@ export interface ConfirmInput {
   note?: string;
 }
 
-/** Customer confirms the (human-verified) details → promise-to-pay recorded. */
+const localToday = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+
+/** Customer confirms the (human-verified) details → promise-to-pay recorded.
+ *  is_postdated is derived server-side from check_date (never trusted from the
+ *  client), and account is re-masked. */
 export function confirmCheck(userId: number, id: string, input: ConfirmInput): boolean {
+  const isPostdated = input.checkDate > localToday() ? 1 : 0;
   const info = db
     .prepare(
       `UPDATE payment_checks
-         SET amount = ?, check_date = ?, is_postdated = ?, bank = ?, branch = ?, account = ?,
-             check_number = ?, note = ?, status = 'submitted', submitted_at = datetime('now')
+         SET amount = ?, check_date = ?, is_postdated = ?,
+             bank = COALESCE(?, bank), branch = COALESCE(?, branch),
+             account = COALESCE(?, account), check_number = COALESCE(?, check_number),
+             note = ?, status = 'submitted', submitted_at = datetime('now')
        WHERE id = ? AND user_id = ? AND status = 'draft'`
     )
     .run(
       input.amount,
       input.checkDate,
-      input.isPostdated ? 1 : 0,
-      input.bank ?? null,
-      input.branch ?? null,
-      input.account ?? null,
-      input.checkNumber ?? null,
+      isPostdated,
+      input.bank?.slice(0, 80) ?? null,
+      input.branch?.slice(0, 40) ?? null,
+      maskAccount(input.account),
+      input.checkNumber?.slice(0, 40) ?? null,
       (input.note ?? '').slice(0, 500) || null,
       id,
       userId
@@ -133,9 +176,11 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
   return info.changes > 0;
 }
 
+// Customer-facing list: never surfaces abandoned drafts, and the status filter is
+// applied BEFORE the LIMIT so real cheques can't be pushed out of the window.
 export function listChecksForUser(userId: number): CheckRow[] {
   return db
-    .prepare(`SELECT * FROM payment_checks WHERE user_id = ? ORDER BY created_at DESC LIMIT 100`)
+    .prepare(`SELECT * FROM payment_checks WHERE user_id = ? AND status != 'draft' ORDER BY created_at DESC LIMIT 200`)
     .all(userId) as CheckRow[];
 }
 
@@ -152,7 +197,9 @@ export function listAllChecks(status?: string): CheckRow[] {
       .prepare(`SELECT * FROM payment_checks WHERE status = ? ORDER BY created_at DESC LIMIT 500`)
       .all(status) as CheckRow[];
   }
-  return db.prepare(`SELECT * FROM payment_checks ORDER BY created_at DESC LIMIT 500`).all() as CheckRow[];
+  return db
+    .prepare(`SELECT * FROM payment_checks WHERE status != 'draft' ORDER BY created_at DESC LIMIT 500`)
+    .all() as CheckRow[];
 }
 
 export function getCheckAny(id: string): CheckRow | null {
@@ -162,5 +209,32 @@ export function getCheckAny(id: string): CheckRow | null {
 const ADMIN_STATUSES = new Set(['received', 'deposited', 'bounced', 'cancelled', 'submitted']);
 export function setCheckStatus(id: string, status: string): boolean {
   if (!ADMIN_STATUSES.has(status)) return false;
-  return db.prepare(`UPDATE payment_checks SET status = ? WHERE id = ?`).run(status, id).changes > 0;
+  // Only reconcilable (already-submitted) cheques can be transitioned — never a
+  // never-confirmed draft (whose amount is the untrusted AI value).
+  const info = db.prepare(`UPDATE payment_checks SET status = ? WHERE id = ? AND status != 'draft'`).run(status, id);
+  if (info.changes > 0 && status === 'cancelled') {
+    // Data minimisation: erase the image once the cheque is cancelled.
+    const row = db.prepare(`SELECT image_path FROM payment_checks WHERE id = ?`).get(id) as { image_path: string | null } | undefined;
+    unlinkImage(row?.image_path ?? null);
+    db.prepare(`UPDATE payment_checks SET image_path = NULL WHERE id = ?`).run(id);
+  }
+  return info.changes > 0;
+}
+
+/** Sweep abandoned drafts: delete rows older than the TTL and unlink their image
+ *  files. Mirrors the session/challenge sweeps. */
+export function sweepDraftChecks(): number {
+  const stale = db
+    .prepare(
+      `SELECT id, image_path FROM payment_checks
+        WHERE status = 'draft' AND created_at < datetime('now', ?)`
+    )
+    .all(`-${DRAFT_TTL_HOURS} hours`) as Array<{ id: string; image_path: string | null }>;
+  for (const r of stale) unlinkImage(r.image_path);
+  if (stale.length) {
+    const del = db.prepare(`DELETE FROM payment_checks WHERE id = ?`);
+    const tx = db.transaction((rows: typeof stale) => rows.forEach((r) => del.run(r.id)));
+    tx(stale);
+  }
+  return stale.length;
 }
