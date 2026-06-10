@@ -8,8 +8,43 @@ import {
   listOpenInvoices,
   listInvoices,
   getObligo,
+  getInvoiceWithItems,
   type PriorityCustomerFull,
 } from './priority.js';
+
+export interface InvoiceDetailView {
+  ivnum: string;
+  date: string | null;
+  total: number;
+  beforeVat: number | null;
+  vat: number | null;
+  ordname: string | null;
+  status: string | null;
+  items: Array<{ partname: string | null; pdes: string | null; quantity: number; price: number | null; lineTotal: number | null }>;
+}
+
+export async function getInvoiceDetail(custname: string, ivnum: string): Promise<InvoiceDetailView | null> {
+  const config = getPriorityConfig();
+  if (!config) return null;
+  const inv = await getInvoiceWithItems(config, custname, ivnum).catch(() => null);
+  if (!inv) return null;
+  return {
+    ivnum: String(inv.IVNUM ?? ivnum),
+    date: inv.IVDATE ?? null,
+    total: Math.round((Number(inv.TOTPRICE) || 0) * 100) / 100,
+    beforeVat: inv.QPRICE != null ? Math.round(Number(inv.QPRICE) * 100) / 100 : null,
+    vat: inv.VAT != null ? Math.round(Number(inv.VAT) * 100) / 100 : null,
+    ordname: inv.ORDNAME ?? null,
+    status: inv.STATDES ?? null,
+    items: (inv.items || []).map((l) => ({
+      partname: l.PARTNAME ?? null,
+      pdes: l.PDES ?? null,
+      quantity: Number(l.TQUANT) || 0,
+      price: l.PRICE != null ? Math.round(Number(l.PRICE) * 100) / 100 : null,
+      lineTotal: l.TOTPRICE != null ? Math.round(Number(l.TOTPRICE) * 100) / 100 : null,
+    })),
+  };
+}
 
 const TTL_MS = 5 * 60_000;
 

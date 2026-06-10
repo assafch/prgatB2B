@@ -15,6 +15,7 @@ import { renderOrders } from './pages/orders.js';
 import { renderOrderDetail } from './pages/orderDetail.js';
 import { renderAccount } from './pages/account.js';
 import { renderInvoices } from './pages/invoices.js';
+import { renderInvoiceDetail } from './pages/invoiceDetail.js';
 import { renderAdmin } from './pages/admin.js';
 
 const root = document.getElementById('app')!;
@@ -32,7 +33,7 @@ function navKeyFor(hash: string): string {
   if (hash.startsWith('#catalog') || hash.startsWith('#product/')) return 'catalog';
   if (hash.startsWith('#cart') || hash.startsWith('#checkout')) return 'cart';
   if (hash.startsWith('#orders')) return 'orders';
-  if (hash.startsWith('#account') || hash.startsWith('#invoices')) return 'account';
+  if (hash.startsWith('#account') || hash.startsWith('#invoice')) return 'account';
   return '';
 }
 
@@ -172,6 +173,9 @@ async function route(): Promise<void> {
   }
   if (hash === '#account') return renderAccount(mount(''));
   if (hash === '#invoices') return renderInvoices(mount(''));
+  if (hash.startsWith('#invoice/')) {
+    return renderInvoiceDetail(mount(''), decodeURIComponent(hash.slice('#invoice/'.length)));
+  }
 
   // Unknown route → home
   location.hash = '#home';

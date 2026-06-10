@@ -325,6 +325,40 @@ export async function listInvoices(
   return (result.value || []) as PriorityInvoice[];
 }
 
+export interface PriorityInvoiceLine {
+  PARTNAME?: string;
+  PDES?: string;
+  TQUANT?: number;
+  UNITNAME?: string;
+  PRICE?: number;
+  QPRICE?: number; // line pre-VAT
+  TOTPRICE?: number; // line incl VAT
+}
+
+// Single invoice with its line items — SCOPED to the customer (IDOR guard: the
+// IVNUM must belong to this custname or we return null).
+export async function getInvoiceWithItems(
+  config: PriorityConfig,
+  custname: string,
+  ivnum: string
+): Promise<(PriorityInvoice & { items: PriorityInvoiceLine[] }) | null> {
+  const safeIv = ivnum.replace(/'/g, "''");
+  const safeCust = custname.replace(/'/g, "''");
+  const result = await priorityRequest(
+    config,
+    `AINVOICES?$filter=IVNUM eq '${safeIv}' and CUSTNAME eq '${safeCust}'&$top=1` +
+      `&$select=IVNUM,IVTYPE,CDES,IVDATE,TOTPRICE,QPRICE,VAT,DISCOUNT,ORDNAME,STATDES` +
+      `&$expand=AINVOICEITEMS_SUBFORM($select=PARTNAME,PDES,TQUANT,UNITNAME,PRICE,QPRICE,TOTPRICE)`
+  );
+  const rows = (result.value || []) as Array<
+    PriorityInvoice & { AINVOICEITEMS_SUBFORM?: PriorityInvoiceLine[] }
+  >;
+  const row = rows[0];
+  if (!row) return null;
+  const { AINVOICEITEMS_SUBFORM, ...inv } = row;
+  return { ...inv, items: AINVOICEITEMS_SUBFORM || [] };
+}
+
 export interface PriorityObligo {
   OBLIGO?: number;
   IV_DEBIT?: number;

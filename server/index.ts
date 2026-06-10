@@ -54,7 +54,7 @@ import {
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
-import { getAccountSummary, getInvoices } from './finance.js';
+import { getAccountSummary, getInvoices, getInvoiceDetail } from './finance.js';
 import {
   bulkUpdate,
   deleteImage,
@@ -670,6 +670,16 @@ app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => 
 app.get('/api/invoices', requireCustomer, financeLimiter, ah(async (req, res) => {
   const result = await getInvoices(req.user!.custname!);
   res.json(result);
+}));
+
+// Single invoice detail (line items) — scoped to the session custname (IDOR-safe).
+app.get('/api/invoices/:ivnum', requireCustomer, financeLimiter, ah(async (req, res) => {
+  const detail = await getInvoiceDetail(req.user!.custname!, req.params.ivnum);
+  if (!detail) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.json(detail);
 }));
 
 // ---------- Admin ----------

@@ -70,7 +70,7 @@ function balanceCard(d: InvoicesResult): string {
   const hasDebt = d.summary.openTotal > 0.005;
   return hasDebt
     ? `<div class="card debt-card owing">
-         <div class="label">יתרה לתשלום · ${d.summary.openCount} חשבוניות פתוחות</div>
+         <div class="label">יתרה לתשלום${d.summary.openCount > 0 ? ` · ${d.summary.openCount} חשבוניות פתוחות` : ''}</div>
          <div class="amount">${formatMoney(d.summary.openTotal)}</div>
        </div>`
     : `<div class="card debt-card clear">
@@ -107,13 +107,14 @@ function historySection(d: InvoicesResult): string {
     ${d.history
       .map(
         (iv) => `
-      <div class="card dash-row" style="margin-bottom:0.5rem">
+      <a href="#invoice/${encodeURIComponent(iv.ivnum)}" class="card dash-row" style="margin-bottom:0.5rem;color:var(--text)">
         <div class="grow">
           <div style="font-weight:700">${escapeHtml(iv.ivnum)} ${iv.isCredit ? '<span class="chip info">זיכוי</span>' : ''}</div>
           <div class="muted" style="font-size:0.83rem">${formatDate(iv.date)}${iv.ordname ? ' · הזמנה ' + escapeHtml(iv.ordname) : ''}</div>
         </div>
         <div style="font-weight:700">${formatMoney(iv.amount)}</div>
-      </div>`
+        <div class="muted" style="font-size:1.2rem">›</div>
+      </a>`
       )
       .join('')}`;
 }
