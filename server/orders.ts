@@ -56,6 +56,11 @@ export function setCartLine(
   // partname (including hidden/internal SKUs) and push it into the ERP order.
   const prod = getProduct(partname, custname);
   if (!prod) throw new OrderError('המוצר אינו זמין להזמנה');
+  // Unpriceable items are rejected at ADD time, not only at submit — otherwise the
+  // cart accumulates lines that doom the whole order later (review finding).
+  if (typeof prod.price !== 'number' || prod.price <= 0) {
+    throw new OrderError('למוצר אין מחיר זמין — פנו אלינו ונשלים את המחיר');
+  }
   db.prepare(
     `INSERT INTO cart_lines (user_id, partname, quantity, updated_at)
      VALUES (?, ?, ?, datetime('now'))
@@ -213,9 +218,10 @@ export function reorderToCart(userId: number, custname: string, orderId: number)
     .all(orderId) as Array<{ partname: string; quantity: number }>;
   let added = 0;
   for (const ln of lines) {
-    // Skip items that have since been hidden/deactivated instead of failing the
-    // whole reorder.
-    if (!getProduct(ln.partname, custname)) continue;
+    // Skip items that have since been hidden/deactivated/lost their price instead
+    // of failing the whole reorder.
+    const prod = getProduct(ln.partname, custname);
+    if (!prod || typeof prod.price !== 'number' || prod.price <= 0) continue;
     setCartLine(userId, custname, ln.partname, ln.quantity);
     added++;
   }

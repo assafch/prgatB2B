@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { escapeHtml } from '../format.js';
 
 interface InviteInfo {
   custname: string;
@@ -25,14 +26,14 @@ export async function renderInvite(
   }
   shell.innerHTML = `
     <div class="card" style="max-width:480px;margin:3rem auto">
-      <h1 style="margin-top:0">ברוכים הבאים, ${info.cust_desc || info.custname}</h1>
+      <h1 style="margin-top:0">ברוכים הבאים, ${escapeHtml(info.cust_desc || info.custname)}</h1>
       <p class="muted">בחר שם משתמש וסיסמה כדי לסיים את ההרשמה.</p>
       <form id="accept-form">
-        <label>שם משתמש</label>
-        <input name="username" required minlength="3" />
+        <label>שם משתמש (3–32 תווים: אותיות באנגלית, ספרות, נקודה או מקף)</label>
+        <input name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9._\\-]+" autocomplete="username" />
         <div style="height:0.5rem"></div>
-        <label>סיסמה (8+ תווים)</label>
-        <input name="password" type="password" required minlength="8" />
+        <label>סיסמה (10+ תווים)</label>
+        <input name="password" type="password" required minlength="10" autocomplete="new-password" />
         <div style="height:1rem"></div>
         <button type="submit" style="width:100%">סיים והיכנס</button>
         <div id="acc-err" class="error" style="margin-top:0.5rem"></div>

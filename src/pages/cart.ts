@@ -7,6 +7,7 @@ interface CartLine {
   quantity: number;
   price: number | null;
   line_total: number;
+  available: boolean;
 }
 
 interface CartResp {
@@ -47,13 +48,14 @@ async function load(shell: HTMLElement): Promise<void> {
             ${cart.lines
               .map(
                 (l) => `
-              <tr style="border-bottom:1px solid var(--border)">
+              <tr style="border-bottom:1px solid var(--border)${l.available ? '' : ';opacity:0.55'}">
                 <td style="padding:0.5rem">
                   <div style="font-weight:500">${escapeHtml(l.partdes || l.partname)}</div>
                   <div class="muted" style="font-size:0.85rem">${escapeHtml(l.partname)}</div>
+                  ${l.available ? '' : '<div class="error" style="font-size:0.8rem">לא זמין יותר — יש להסיר מהסל</div>'}
                 </td>
                 <td style="padding:0.5rem">
-                  <input type="number" min="0" step="1" value="${l.quantity}" data-part="${escapeAttr(l.partname)}" class="qty" style="width:70px"/>
+                  <input type="number" min="0" step="1" value="${l.quantity}" data-part="${escapeAttr(l.partname)}" class="qty" style="width:70px" ${l.available ? '' : 'disabled'}/>
                 </td>
                 <td style="padding:0.5rem">${l.price != null ? `₪${l.price.toFixed(2)}` : '-'}</td>
                 <td style="padding:0.5rem;font-weight:700">${l.price != null ? `₪${l.line_total.toFixed(2)}` : '-'}</td>
@@ -82,6 +84,13 @@ async function load(shell: HTMLElement): Promise<void> {
       </div>
     `;
 
+    const lineError = (text: string) => {
+      const msgEl = shell.querySelector('#msg') as HTMLDivElement | null;
+      if (msgEl) {
+        msgEl.textContent = text;
+        msgEl.className = 'error';
+      }
+    };
     shell.querySelectorAll<HTMLInputElement>('input.qty').forEach((inp) => {
       inp.addEventListener('change', async () => {
         const part = inp.dataset.part!;
@@ -90,8 +99,16 @@ async function load(shell: HTMLElement): Promise<void> {
           inp.value = '0';
           return;
         }
-        await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty });
-        await load(shell);
+        try {
+          await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty });
+          await load(shell);
+        } catch (ex) {
+          // Server refused the change (item hidden/unpriced/qty cap) — resync,
+          // then surface the reason (load() re-renders, so the message goes last).
+          const reason = ex instanceof Error ? ex.message : String(ex);
+          await load(shell);
+          lineError(reason);
+        }
       });
     });
     shell.querySelectorAll<HTMLButtonElement>('button.remove').forEach((b) => {

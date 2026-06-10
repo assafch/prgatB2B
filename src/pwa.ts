@@ -23,10 +23,14 @@ export function registerPwa(): void {
         });
       });
 
-      // After SKIP_WAITING the new worker takes control — reload once.
+      // After SKIP_WAITING the new worker takes control — reload once. On the very
+      // FIRST install there was no controller before, and clients.claim() also
+      // fires controllerchange — reloading then would yank the page out from under
+      // every user mid-session, so only reload when replacing an old controller.
+      const hadController = !!navigator.serviceWorker.controller;
       let reloaded = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloaded) return;
+        if (!hadController || reloaded) return;
         reloaded = true;
         location.reload();
       });

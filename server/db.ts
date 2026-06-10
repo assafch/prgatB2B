@@ -195,6 +195,19 @@ db.exec(SCHEMA);
   }
 }
 
+// Clamp legacy session expiries to the new absolute caps (pre-migration rows were
+// minted with a 30-day TTL). Idempotent — fresh sessions are never above the cap.
+db.prepare(
+  `UPDATE sessions SET expires_at = datetime('now', '+14 days')
+   WHERE datetime(expires_at) > datetime('now', '+14 days')
+     AND user_id IN (SELECT id FROM users WHERE role <> 'admin')`
+).run();
+db.prepare(
+  `UPDATE sessions SET expires_at = datetime('now', '+12 hours')
+   WHERE datetime(expires_at) > datetime('now', '+12 hours')
+     AND user_id IN (SELECT id FROM users WHERE role = 'admin')`
+).run();
+
 function ensureColumn(table: string, column: string, definition: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!cols.find((c) => c.name === column)) {

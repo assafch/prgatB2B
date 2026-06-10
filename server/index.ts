@@ -72,7 +72,10 @@ import { scheduleSnapshots } from './backup.js';
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.set('trust proxy', 1);
+// Exactly one trusted hop (Railway's proxy) in production. Trusting a hop in
+// direct-connection dev would let clients spoof req.ip via X-Forwarded-For and
+// dodge the per-IP limiters.
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
 app.disable('x-powered-by'); // don't advertise Express
 
 // Request ID — correlates client-facing errors with server logs without leaking detail.
@@ -123,8 +126,6 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '2mb' }));
-
 // CSRF defense-in-depth (on top of SameSite=Lax cookies): every mutating /api
 // request that carries a browser Origin/Referer must match our own origin.
 // Requests with neither header are non-browser clients — a browser that can attach
@@ -166,6 +167,9 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// Body parsing AFTER the origin check — rejected cross-site requests shouldn't
+// cost JSON parsing.
+app.use(express.json({ limit: '2mb' }));
 app.use(loadUser);
 
 // Public uploads (product images). Cached aggressively since filenames are content-hashed.
@@ -186,7 +190,10 @@ app.get('/api/health', (_req, res) => {
 // Per-IP login throttle + a global cap (one IP per attempt can't be the only guard
 // against distributed credential-stuffing; per-ACCOUNT lockout lives in auth.ts).
 const loginLimiter = rateLimit({ windowMs: 60_000, max: 10 });
-const globalLoginLimiter = rateLimit({ windowMs: 60_000, max: 100, keyGenerator: () => 'global' });
+// Catastrophic backstop only. Deliberately high: a low global cap would itself be
+// a cheap site-wide login DoS (review finding) — sustaining 600/min already needs
+// 60+ IPs past the per-IP limiter, and per-account lockout blunts what gets through.
+const globalLoginLimiter = rateLimit({ windowMs: 60_000, max: 600, keyGenerator: () => 'global' });
 // Throttle unauthenticated, state-changing / probe-able public endpoints
 // (invite lookup + accept, lead capture) to deter token brute-force and spam.
 const publicLimiter = rateLimit({ windowMs: 60_000, max: 20 });
@@ -197,12 +204,27 @@ const publicLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 const userKey = (req: Request) => `u:${(req as AuthedRequest).user!.id}`;
 const perUser = (windowMs: number, max: number) =>
   rateLimit({ windowMs, max, keyGenerator: userKey });
-const ordersMinuteLimiter = perUser(60_000, 5);
-const ordersDailyLimiter = perUser(86_400_000, 30);
+// Order caps count only SUCCESSFUL submissions — a Priority outage must not burn
+// the customer's retry budget (skipFailedRequests skips status >= 400).
+const ordersMinuteLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 5,
+  keyGenerator: userKey,
+  skipFailedRequests: true,
+});
+const ordersDailyLimiter = rateLimit({
+  windowMs: 86_400_000,
+  max: 30,
+  keyGenerator: userKey,
+  skipFailedRequests: true,
+});
 const cartLimiter = perUser(60_000, 60);
 const financeLimiter = perUser(60_000, 20);
 const sensitiveLimiter = perUser(60_000, 5); // password change etc.
-const adminUploadLimiter = perUser(60_000, 10);
+// Separate buckets: a CSV import dry-run + real-run pair must not eat the budget
+// of a bulk image-upload session (review finding).
+const csvImportLimiter = perUser(60_000, 10);
+const imageUploadLimiter = perUser(60_000, 20);
 const adminHeavyLimiter = perUser(60_000, 4); // full catalog/pricing refresh hits Priority hard
 
 /**
@@ -608,7 +630,7 @@ app.get('/api/admin/products/export.csv', requireAdmin, (_req, res) => {
   res.send('﻿' + csv); // BOM for Excel Hebrew
 });
 
-app.post('/api/admin/products/import.csv', requireAdmin, adminUploadLimiter, upload.single('file'), (req, res) => {
+app.post('/api/admin/products/import.csv', requireAdmin, csvImportLimiter, upload.single('file'), (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'no_file' });
     return;
@@ -653,7 +675,7 @@ app.patch('/api/admin/products/:partname', requireAdmin, (req, res) => {
 app.post(
   '/api/admin/products/:partname/image',
   requireAdmin,
-  adminUploadLimiter,
+  imageUploadLimiter,
   upload.single('image'),
   ah(async (req, res) => {
     if (!req.file) {

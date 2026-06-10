@@ -80,6 +80,8 @@ Work items:
 **Acceptance criteria:** app serves only from b2b.orgat.co.il; fake-partname PUT returns 400 and a hidden-SKU order is refused; sessions DB contains no plaintext tokens; CSP passes with zero violations on all routes; Lighthouse reports installable PWA; restore-from-backup demonstrated; fresh PAT works and probe results documented.
 **Security gate:** R1, R2, R4 merged before any P1 code; no payment code may be written before the Step-0 probe results exist.
 
+> **Status (2026-06-10): code-side P0 DONE** — R1–R10, PWA (icons+SW+toast), local snapshots, probe script all landed, runtime-verified in production mode (fake partname → 400, unpriced add → 400, hashed sessions, lockout 429, bad_origin 403, CSP zero violations, SW active caching static only), and hardened again against a 3-lens adversarial review (15 fixes applied). **Still open (needs Assaf):** fresh Priority PAT (current one 401s — blocks the Step-0 probe), Railway deploy + b2b.orgat.co.il DNS, R2/B2 bucket for Litestream, and the long-lead kickoffs (PayPlus onboarding, TINVOICES API-enable, Anthropic DPA, 019 SMS, attorney).
+
 ---
 
 ### P1 — Customer dashboard & order UX (≈ 12–16 days)

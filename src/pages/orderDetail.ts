@@ -71,7 +71,11 @@ export async function renderOrderDetail(shell: HTMLElement, id: number): Promise
     const reorder = shell.querySelector('#reorder') as HTMLButtonElement;
     reorder.addEventListener('click', async () => {
       try {
-        await api.post(`/api/orders/${id}/reorder`);
+        const r = await api.post<{ lines: number }>(`/api/orders/${id}/reorder`);
+        if (!r.lines) {
+          alert('אף מוצר מההזמנה הזו אינו זמין כעת להזמנה חוזרת');
+          return;
+        }
         location.hash = '#cart';
       } catch (ex) {
         alert(ex instanceof Error ? ex.message : String(ex));

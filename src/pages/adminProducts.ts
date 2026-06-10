@@ -327,7 +327,9 @@ async function doImport(shell: HTMLElement, file: File): Promise<void> {
       body: fd,
       credentials: 'include',
     });
-    dryRun = await res.json();
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+    dryRun = body;
   } catch (ex) {
     msg.textContent = `שגיאה: ${ex instanceof Error ? ex.message : ex}`;
     msg.className = 'error';
@@ -351,6 +353,11 @@ async function doImport(shell: HTMLElement, file: File): Promise<void> {
     credentials: 'include',
   });
   const real = await res.json();
+  if (!res.ok) {
+    msg.textContent = `שגיאה: ${real?.error || `HTTP ${res.status}`}`;
+    msg.className = 'error';
+    return;
+  }
   msg.textContent = `✓ ייבוא הושלם: ${real.updated} עודכנו, ${real.skipped} דולגו`;
   msg.className = 'ok';
   await loadList(shell);

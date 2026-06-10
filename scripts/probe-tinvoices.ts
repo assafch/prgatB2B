@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   // 4. BOOKNUM filter (P3 webhook dedupe depends on this working).
   const m = /"BOOKNUM"\s*:\s*"([^"]+)"/.exec(tinv.body);
   if (m) {
-    const r = await get(`TINVOICES?$filter=BOOKNUM eq '${encodeURIComponent(m[1])}'&$top=1`);
+    const r = await get(`TINVOICES?$filter=BOOKNUM eq '${m[1]}'&$top=1`);
     show(`BOOKNUM filter (eq '${m[1]}')`, r, 600);
   } else {
     console.log('\n   (no BOOKNUM value found in TINVOICES sample — filter test skipped)');
