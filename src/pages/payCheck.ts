@@ -82,7 +82,7 @@ export function renderPayCheck(shell: HTMLElement): void {
     ov.innerHTML = `
       <video class="scan-video" autoplay playsinline muted></video>
       <div class="scan-mask"><div class="scan-frame"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div></div>
-      <div class="scan-hint">מקמו את הצ׳ק בתוך המסגרת<br/><span>מואר, חד, וממלא את כל המסגרת</span></div>
+      <div class="scan-hint">הצמידו את הצ׳ק לאורך המסגרת<br/><span>מואר, חד, וממלא את כל המסגרת</span></div>
       <button class="scan-close" type="button" aria-label="סגירה">✕</button>
       <div class="scan-err"></div>
       <div class="scan-bar"><button class="scan-shutter" type="button" aria-label="צלם"></button></div>
@@ -100,19 +100,34 @@ export function renderPayCheck(shell: HTMLElement): void {
     window.addEventListener('hashchange', close);
     (ov.querySelector('.scan-close') as HTMLButtonElement).onclick = close;
 
+    // Some mobile browsers (in-app/WhatsApp webviews, or after a denied permission)
+    // block getUserMedia. Don't dead-end: offer the device camera (which always
+    // works via the native picker) and the gallery as one-tap fallbacks.
+    const showFallback = () => {
+      (ov.querySelector('.scan-bar') as HTMLElement).style.display = 'none';
+      errEl.innerHTML = `
+        <div>לא ניתן לפתוח את הסורק בדפדפן זה.</div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.7rem;justify-content:center">
+          <button class="scan-fallback" data-act="cam">📷 מצלמת המכשיר</button>
+          <button class="scan-fallback" data-act="gal">🖼️ מהגלריה</button>
+        </div>`;
+      errEl.style.display = 'block';
+      errEl.querySelectorAll<HTMLButtonElement>('.scan-fallback').forEach((b) =>
+        b.addEventListener('click', () => {
+          const act = b.dataset.act;
+          close();
+          if (act === 'cam') cam.click();
+          else gal.click();
+        })
+      );
+    };
     navigator.mediaDevices
-      .getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      })
+      .getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
       .then((s) => {
         stream = s;
         video.srcObject = s;
       })
-      .catch(() => {
-        errEl.textContent = 'לא ניתן לגשת למצלמה. אשרו הרשאת מצלמה או השתמשו ב״מהגלריה״.';
-        errEl.style.display = 'block';
-      });
+      .catch(showFallback);
 
     (ov.querySelector('.scan-shutter') as HTMLButtonElement).onclick = () => {
       if (!stream || !video.videoWidth) return;
