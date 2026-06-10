@@ -162,8 +162,13 @@ export async function runAssistant(
           const inv = await ensureInvoices();
           out =
             tu.name === 'get_balance'
-              ? { openTotal: inv.summary.openTotal, openCount: inv.summary.openCount, available: inv.priorityOk }
-              : { openInvoices: inv.open.slice(0, 20).map((o) => ({ date: o.date, docNo: o.docNo, amount: o.amount })), incomplete: !!inv.openListIncomplete };
+              ? {
+                  openTotal: inv.summary.openTotal,
+                  openCount: inv.summary.openCount,
+                  available: inv.priorityOk,
+                  note: 'openTotal הוא יתרת החוב הסופית לתשלום, כולל מע"מ. אל תוסיף "לפני מע"מ".',
+                }
+              : { openInvoices: inv.open.slice(0, 20).map((o) => ({ date: o.date, docNo: o.docNo, amount: o.amount })), incomplete: !!inv.openListIncomplete, note: 'הסכומים כוללים מע"מ.' };
         } else {
           out = runTool(tu.name, (tu.input as Record<string, unknown>) || {}, { userId, custname }, proposals);
         }
