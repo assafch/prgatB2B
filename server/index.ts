@@ -67,6 +67,7 @@ import {
   upload,
   UPLOADS_DIR,
 } from './products.js';
+import { scheduleSnapshots } from './backup.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -726,6 +727,8 @@ async function startup() {
   const swept = sweepSessions();
   if (swept > 0) console.log(`[auth] swept ${swept} dead sessions`);
   setInterval(() => sweepSessions(), 86400_000).unref();
+  // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
+  scheduleSnapshots();
   app.listen(PORT, () => {
     console.log(`[prgatB2B] listening on :${PORT}`);
     const config = getPriorityConfig();

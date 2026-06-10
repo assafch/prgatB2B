@@ -1,0 +1,26 @@
+# Litestream — continuous off-site WAL replication for data/app.db.
+#
+# HUMAN SETUP (one-time, see docs/OPS_RUNBOOK.md):
+#   1. Create a private bucket (Cloudflare R2 or Backblaze B2).
+#   2. Create a WRITE-ONLY key for it (no list/delete if the provider supports it).
+#   3. Set on Railway: LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY,
+#      REPLICA_URL (e.g. s3://prgat-b2b-backups/app.db), BACKUP_AGE_KEY (encryption).
+#   4. Run the app under litestream:  litestream replicate -config litestream.yml
+#      (swap the Railway start command to it once the bucket exists).
+#
+# Restore drill (must be rehearsed before payments go live):
+#   litestream restore -config litestream.yml -o /tmp/restored.db $DATA_DIR/app.db
+
+dbs:
+  - path: ${DATA_DIR}/app.db
+    replicas:
+      - url: ${REPLICA_URL}
+        retention: 720h           # 30 days of WAL history
+        snapshot-interval: 24h
+        sync-interval: 10s
+        # Client-side encryption: snapshots+WAL are encrypted before upload.
+        age:
+          identities:
+            - ${BACKUP_AGE_KEY}
+          recipients:
+            - ${BACKUP_AGE_RECIPIENT}
