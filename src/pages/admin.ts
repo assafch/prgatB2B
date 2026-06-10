@@ -46,6 +46,7 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
         <a href="#admin/products" class="${tab === '#admin/products' ? 'active' : ''}">ניהול מוצרים</a>
         <a href="#admin/catalog" class="${tab === '#admin/catalog' ? 'active' : ''}">סנכרון Priority</a>
         <a href="#admin/invites" class="${tab === '#admin/invites' ? 'active' : ''}">הזמנות-לקוח</a>
+        <a href="#admin/payments" class="${tab === '#admin/payments' ? 'active' : ''}">תשלומים</a>
         <a href="#admin/leads" class="${tab === '#admin/leads' ? 'active' : ''}">לידים</a>
       </nav>
     </div>
@@ -57,7 +58,82 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
   else if (tab === '#admin/products') await renderAdminProducts(c);
   else if (tab === '#admin/catalog') await renderCatalogAdmin(c);
   else if (tab === '#admin/invites') await renderInvitesAdmin(c);
+  else if (tab === '#admin/payments') await renderPaymentsAdmin(c);
   else if (tab === '#admin/leads') await renderLeadsAdmin(c);
+}
+
+interface AdminCheck {
+  id: string;
+  custname: string;
+  amount: number | null;
+  checkDate: string | null;
+  isPostdated: boolean;
+  status: string;
+  createdAt: string;
+}
+
+async function renderPaymentsAdmin(c: HTMLElement): Promise<void> {
+  c.innerHTML = `<div class="muted">טוען…</div>`;
+  let checks: AdminCheck[] = [];
+  try {
+    checks = (await api.get<{ checks: AdminCheck[] }>('/api/admin/payments')).checks;
+  } catch (ex) {
+    c.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
+    return;
+  }
+  checks = checks.filter((c2) => c2.status !== 'draft');
+  if (checks.length === 0) {
+    c.innerHTML = `<div class="card muted">אין תשלומי צ׳ק עדיין.</div>`;
+    return;
+  }
+  const opts = (cur: string) =>
+    [
+      ['submitted', 'התקבל — בעיבוד'],
+      ['received', 'הצ׳ק נאסף'],
+      ['deposited', 'הופקד'],
+      ['bounced', 'חזר'],
+      ['cancelled', 'בוטל'],
+    ]
+      .map(([v, t]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${t}</option>`)
+      .join('');
+
+  c.innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0">תשלומי צ׳ק — סליקה</h2>
+      <table class="table">
+        <thead><tr><th>לקוח</th><th>סכום</th><th>תאריך צ׳ק</th><th>נשלח</th><th>סטטוס</th><th>צ׳ק</th></tr></thead>
+        <tbody>
+          ${checks
+            .map(
+              (ch) => `
+            <tr data-id="${escapeAttr(ch.id)}">
+              <td>${escapeHtml(ch.custname)}</td>
+              <td class="amount">${ch.amount != null ? '₪' + ch.amount.toFixed(2) : '-'}</td>
+              <td>${ch.checkDate ? escapeHtml(ch.checkDate) : '-'}${ch.isPostdated ? ' <span class="badge warn">דחוי</span>' : ''}</td>
+              <td>${escapeHtml((ch.createdAt || '').slice(0, 10))}</td>
+              <td><select class="pay-status" data-id="${escapeAttr(ch.id)}">${opts(ch.status)}</select></td>
+              <td><a href="/api/admin/payments/${encodeURIComponent(ch.id)}/image" target="_blank">צפייה</a></td>
+            </tr>`
+            )
+            .join('')}
+        </tbody>
+      </table>
+      <div id="pay-msg" style="margin-top:0.5rem"></div>
+    </div>
+  `;
+  const msg = c.querySelector('#pay-msg') as HTMLDivElement;
+  c.querySelectorAll<HTMLSelectElement>('select.pay-status').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      try {
+        await api.patch(`/api/admin/payments/${sel.dataset.id}`, { status: sel.value });
+        msg.textContent = '✓ עודכן';
+        msg.className = 'ok';
+      } catch (ex) {
+        msg.textContent = `שגיאה: ${ex instanceof Error ? ex.message : ex}`;
+        msg.className = 'error';
+      }
+    });
+  });
 }
 
 async function renderDashboard(c: HTMLElement): Promise<void> {

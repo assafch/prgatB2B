@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.1",
     "@types/multer": "^2.1.0",

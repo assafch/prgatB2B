@@ -28,7 +28,7 @@ interface HomeData {
   balanceOk: boolean;
   lastOrder: LastOrder | null;
   suggestions: Suggestion[];
-  features: { payments: boolean };
+  features: { payments: boolean; checkPayment: boolean };
 }
 
 export async function renderHome(shell: HTMLElement): Promise<void> {
@@ -59,11 +59,9 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       <div class="card debt-card owing">
         <div class="label">יתרה לתשלום${d.balance.openCount > 0 ? ` (${d.balance.openCount} חשבוניות פתוחות)` : ''}</div>
         <div class="amount">${formatMoney(d.balance.openTotal)}</div>
-        ${
-          d.features.payments
-            ? `<button class="pay-btn" id="pay-debt">לתשלום עכשיו</button>`
-            : `<a class="es-cta" href="#invoices" style="margin-top:1rem">צפייה בחשבוניות הפתוחות</a>`
-        }
+        ${d.features.checkPayment ? `<a class="pay-btn" href="#pay/check" style="display:inline-flex;align-items:center;gap:0.4rem;justify-content:center">📸 תשלום בצ׳ק</a>` : ''}
+        ${d.features.payments ? `<button class="pay-btn" id="pay-debt" style="margin-top:0.5rem">לתשלום בכרטיס אשראי</button>` : ''}
+        <div style="margin-top:0.6rem"><a href="#invoices">צפייה בחשבוניות הפתוחות</a></div>
       </div>`;
   } else if (d.lastOrder) {
     debtCard = `

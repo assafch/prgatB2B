@@ -70,6 +70,19 @@ import {
 import { scheduleSnapshots } from './backup.js';
 import { getHomeData } from './home.js';
 import { getReorderSuggestions } from './reorder.js';
+import multer from 'multer';
+import { extractCheck, checkOcrEnabled } from './checkOcr.js';
+import {
+  createCheckDraft,
+  confirmCheck,
+  listChecksForUser,
+  getCheckForUser,
+  decryptCheckImage,
+  listAllChecks,
+  getCheckAny,
+  setCheckStatus,
+  type CheckRow,
+} from './payments.js';
 import {
   webauthnEnabled,
   registrationOptions,
@@ -681,6 +694,134 @@ app.get('/api/invoices/:ivnum', requireCustomer, financeLimiter, ah(async (req, 
   }
   res.json(detail);
 }));
+
+// ---------- Check-photo payments (promise-to-pay; image encrypted, never web-served) ----------
+const checkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const checkParseLimiter = perUser(60_000, 10);
+
+function shapeCheck(c: CheckRow) {
+  return {
+    id: c.id,
+    amount: c.amount,
+    checkDate: c.check_date,
+    isPostdated: !!c.is_postdated,
+    bank: c.bank,
+    branch: c.branch,
+    account: c.account,
+    checkNumber: c.check_number,
+    note: c.note,
+    status: c.status,
+    createdAt: c.created_at,
+    submittedAt: c.submitted_at,
+    custname: c.custname,
+  };
+}
+
+// Upload a cheque photo → store encrypted → AI extraction (if a key is set) →
+// return a draft id + extracted fields for the customer to confirm.
+app.post('/api/payments/check/parse', requireCustomer, checkParseLimiter, checkUpload.single('image'), ah(async (req, res) => {
+  const file = (req as any).file as { buffer: Buffer } | undefined;
+  if (!file) {
+    res.status(400).json({ error: 'no_image' });
+    return;
+  }
+  const ai = await extractCheck(file.buffer);
+  const { id } = createCheckDraft(req.user!.id, req.user!.custname!, file.buffer, ai);
+  res.json({
+    id,
+    aiAvailable: checkOcrEnabled(),
+    ai: ai
+      ? {
+          isCheck: ai.is_check,
+          amount: ai.amount,
+          date: ai.date,
+          isPostdated: ai.is_postdated,
+          bank: ai.bank,
+          branch: ai.branch,
+          account: ai.account,
+          checkNumber: ai.check_number,
+          confidence: ai.confidence,
+          legible: ai.legible,
+          notes: ai.notes_he,
+        }
+      : null,
+  });
+}));
+
+// Customer confirms the human-verified amount/date → promise-to-pay recorded.
+app.post('/api/payments/check/:id/confirm', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const amount = Number(b.amount);
+  const checkDate = typeof b.checkDate === 'string' ? b.checkDate : '';
+  if (!isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'יש להזין סכום תקין' });
+    return;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(checkDate)) {
+    res.status(400).json({ error: 'יש להזין תאריך תקין' });
+    return;
+  }
+  const ok = confirmCheck(req.user!.id, req.params.id, {
+    amount: Math.round(amount * 100) / 100,
+    checkDate,
+    isPostdated: !!b.isPostdated,
+    bank: typeof b.bank === 'string' ? b.bank : undefined,
+    branch: typeof b.branch === 'string' ? b.branch : undefined,
+    account: typeof b.account === 'string' ? b.account : undefined,
+    checkNumber: typeof b.checkNumber === 'string' ? b.checkNumber : undefined,
+    note: typeof b.note === 'string' ? b.note : undefined,
+  });
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
+});
+
+app.get('/api/payments', requireCustomer, (req: AuthedRequest, res) => {
+  res.json({ checks: listChecksForUser(req.user!.id).map(shapeCheck) });
+});
+
+// Stream the cheque image to its owner only (decrypted; never cached).
+app.get('/api/payments/:id/image', requireCustomer, (req: AuthedRequest, res) => {
+  const c = getCheckForUser(req.user!.id, req.params.id);
+  if (!c || !c.image_path) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  const buf = decryptCheckImage(c.image_path);
+  if (!buf) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(buf);
+});
+
+// Admin reconciliation.
+app.get('/api/admin/payments', requireAdmin, (req, res) => {
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  res.json({ checks: listAllChecks(status).map(shapeCheck) });
+});
+
+app.patch('/api/admin/payments/:id', requireAdmin, (req, res) => {
+  const { status } = (req.body || {}) as { status?: string };
+  const ok = status ? setCheckStatus(req.params.id, status) : false;
+  res.status(ok ? 200 : 400).json(ok ? { ok: true } : { error: 'bad_status' });
+});
+
+app.get('/api/admin/payments/:id/image', requireAdmin, (req, res) => {
+  const c = getCheckAny(req.params.id);
+  if (!c || !c.image_path) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  const buf = decryptCheckImage(c.image_path);
+  if (!buf) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(buf);
+});
 
 // ---------- Admin ----------
 app.post('/api/admin/catalog/refresh', requireAdmin, adminHeavyLimiter, ah(async (req, res) => {

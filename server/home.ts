@@ -25,7 +25,7 @@ export interface HomeData {
   lastOrder: LastOrderView | null;
   suggestions: ReorderSuggestion[];
   /** server-owned feature flags so the client never shows dead CTAs */
-  features: { payments: boolean };
+  features: { payments: boolean; checkPayment: boolean };
 }
 
 export async function getHomeData(
@@ -70,6 +70,9 @@ export async function getHomeData(
     balanceOk: summary.balanceOk,
     lastOrder,
     suggestions: getReorderSuggestions(userId, custname),
-    features: { payments: process.env.PAYMENTS_ENABLED === 'true' },
+    features: {
+      payments: process.env.PAYMENTS_ENABLED === 'true', // card (P3) — still gated
+      checkPayment: true, // check-by-photo is live (manual entry always works; AI when keyed)
+    },
   };
 }

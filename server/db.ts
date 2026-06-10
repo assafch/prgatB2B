@@ -75,6 +75,28 @@ CREATE TABLE IF NOT EXISTS invites (
   used_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS payment_checks (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  custname TEXT NOT NULL,
+  amount REAL,
+  check_date TEXT,            -- the (possibly post-dated) date on the cheque, ISO yyyy-mm-dd
+  is_postdated INTEGER NOT NULL DEFAULT 0,
+  bank TEXT, branch TEXT, account TEXT, check_number TEXT,
+  note TEXT,
+  image_path TEXT,            -- AES-GCM encrypted blob on the volume (never web-served)
+  ai_raw TEXT,                -- JSON of the model's structured extraction
+  ai_confidence REAL,
+  -- draft  = uploaded, awaiting customer confirm
+  -- submitted = customer confirmed the promise-to-pay
+  -- received / deposited / bounced / cancelled = office reconciliation
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  submitted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_paychecks_user ON payment_checks(user_id);
+CREATE INDEX IF NOT EXISTS idx_paychecks_status ON payment_checks(status);
+
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
   business_name TEXT,
