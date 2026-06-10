@@ -68,6 +68,8 @@ import {
   UPLOADS_DIR,
 } from './products.js';
 import { scheduleSnapshots } from './backup.js';
+import { getHomeData } from './home.js';
+import { getReorderSuggestions } from './reorder.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -404,6 +406,28 @@ app.post('/api/invites/:token/accept', publicLimiter, ah(async (req, res) => {
 app.post('/api/leads', publicLimiter, (req, res) => {
   const id = createLead(req.body || {});
   res.json({ id });
+});
+
+// ---------- Customer: home dashboard ----------
+app.get('/api/home', requireCustomer, financeLimiter, ah(async (req, res) => {
+  const data = await getHomeData(req.user!.id, req.user!.custname!, req.user!.cust_desc);
+  res.json(data);
+}));
+
+// Add the heuristic "usual basket" to the cart in one tap. Validation lives in
+// setCartLine, so hidden/unpriced items are silently skipped here.
+app.post('/api/reorder/add-all', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  const suggestions = getReorderSuggestions(req.user!.id, req.user!.custname!);
+  let added = 0;
+  for (const s of suggestions) {
+    try {
+      setCartLine(req.user!.id, req.user!.custname!, s.partname, s.quantity);
+      added++;
+    } catch {
+      /* skip anything that fails validation */
+    }
+  }
+  res.json({ ...getCart(req.user!.id, req.user!.custname!), added });
 });
 
 // ---------- Customer ----------

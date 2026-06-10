@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
+import { toast } from '../ui.js';
+import { refreshCartCount } from '../main.js';
 
 interface CatalogItem {
   partname: string;
@@ -58,6 +60,12 @@ export async function renderCatalog(shell: HTMLElement): Promise<void> {
   btn.addEventListener('click', doSearch);
   q.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doSearch();
+  });
+  // Search-as-you-type (debounced) so store owners don't have to hunt for a button.
+  let debounce: number | undefined;
+  q.addEventListener('input', () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = window.setTimeout(doSearch, 350);
   });
   famSel.addEventListener('change', doSearch);
 
@@ -140,13 +148,16 @@ async function load(shell: HTMLElement): Promise<void> {
         b.disabled = true;
         try {
           await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty });
+          await refreshCartCount();
           b.textContent = '✓ נוסף';
+          input.value = '0';
           setTimeout(() => {
             b.textContent = 'הוסף';
             b.disabled = false;
           }, 1200);
         } catch (ex) {
-          b.textContent = 'שגיאה';
+          toast(ex instanceof Error ? ex.message : String(ex), 'error');
+          b.textContent = 'הוסף';
           b.disabled = false;
         }
       });

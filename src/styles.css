@@ -167,3 +167,163 @@ input:focus, select:focus, textarea:focus {
   .kv { grid-template-columns: 1fr; gap: 0.1rem 0; }
   .kv dd { margin-bottom: 0.5rem; }
 }
+
+/* ============================================================
+   P1 — mobile-first store-owner UI
+   ============================================================ */
+
+/* Leave room for the fixed bottom nav (+ iOS safe area). */
+.app-shell.has-bottom-nav { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+
+/* ---- Bottom navigation ---- */
+.bottom-nav {
+  position: fixed;
+  bottom: 0; inset-inline: 0;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 30;
+  box-shadow: 0 -1px 6px rgba(0,0,0,0.05);
+}
+.bn-tab {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.7rem;
+  padding: 6px 0;
+}
+.bn-tab:hover { text-decoration: none; }
+.bn-tab.active { color: var(--brand); }
+.bn-icon { position: relative; font-size: 1.35rem; line-height: 1; }
+.bn-label { font-weight: 600; }
+.bn-badge {
+  position: absolute; top: -6px; inset-inline-end: -10px;
+  background: var(--brand); color: #fff;
+  font-size: 0.62rem; font-weight: 800;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px; display: grid; place-items: center;
+}
+/* On wide screens the app is centered; keep the bar app-width, not edge-to-edge. */
+@media (min-width: 760px) {
+  .bottom-nav { max-width: 480px; margin: 0 auto; border-radius: 14px 14px 0 0; border: 1px solid var(--border); border-bottom: none; }
+}
+
+/* ---- Dashboard ---- */
+.dash-greet { font-size: 1.05rem; color: var(--muted); margin: 0.25rem 0 0.75rem; }
+.dash-greet b { color: var(--text); font-weight: 800; }
+
+.debt-card { text-align: center; padding: 1.4rem 1rem; }
+.debt-card .amount { font-size: 2.4rem; font-weight: 900; letter-spacing: -0.03em; line-height: 1.1; }
+.debt-card.owing { background: rgba(220,38,38,0.06); border-color: rgba(220,38,38,0.25); }
+.debt-card.owing .amount { color: var(--err); }
+.debt-card.clear { background: rgba(22,163,74,0.07); border-color: rgba(22,163,74,0.3); }
+.debt-card.clear .amount { color: var(--ok); }
+.debt-card .label { color: var(--muted); margin-top: 0.25rem; }
+.debt-card .pay-btn { margin-top: 1rem; width: 100%; max-width: 320px; padding: 0.8rem; font-size: 1.05rem; font-weight: 700; }
+
+/* credit utilization bar */
+.util { margin-top: 0.9rem; }
+.util-track { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.util-fill { height: 100%; background: var(--ok); border-radius: 999px; transition: width 0.3s; }
+.util-fill.warn { background: var(--warn); }
+.util-fill.over { background: var(--err); }
+.util-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem; }
+
+.dash-row { display: flex; align-items: center; gap: 0.75rem; }
+.dash-row .grow { flex: 1; min-width: 0; }
+.dash-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem; }
+.dash-action {
+  display: flex; flex-direction: column; gap: 0.2rem; align-items: flex-start;
+  padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font-weight: 700;
+}
+.dash-action .ico { font-size: 1.5rem; }
+.dash-action .sub { font-weight: 500; color: var(--muted); font-size: 0.82rem; }
+.dash-action:hover { text-decoration: none; border-color: var(--brand); }
+
+/* horizontal product rail (usual basket) */
+.rail { display: flex; gap: 0.6rem; overflow-x: auto; padding: 0.25rem 0 0.5rem; scroll-snap-type: x mandatory; }
+.rail::-webkit-scrollbar { height: 0; }
+.rail-item { scroll-snap-align: start; flex: 0 0 132px; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem; background: var(--surface); }
+.rail-item .thumb { width: 100%; aspect-ratio: 1; border-radius: 6px; background: #f3f4f6; display: grid; place-items: center; color: #9ca3af; font-size: 0.7rem; overflow: hidden; margin-bottom: 0.4rem; }
+.rail-item .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.rail-item .nm { font-size: 0.8rem; font-weight: 600; line-height: 1.25; height: 2.5em; overflow: hidden; }
+.rail-item .pr { font-weight: 800; color: var(--brand); font-size: 0.88rem; margin-top: 0.2rem; }
+
+/* ---- Floating action button ---- */
+.fab {
+  position: fixed;
+  inset-inline-end: 16px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  background: var(--brand); color: #fff;
+  border: none; border-radius: 999px;
+  padding: 0.9rem 1.3rem; font-size: 1rem; font-weight: 800;
+  box-shadow: 0 4px 14px rgba(200,16,46,0.4);
+  z-index: 25; display: flex; align-items: center; gap: 0.4rem;
+}
+@media (min-width: 760px) { .fab { inset-inline-end: calc(50% - 230px); } }
+
+/* ---- Quantity stepper (44px targets) ---- */
+.stepper { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.stepper button { border: none; background: var(--bg); color: var(--text); width: 40px; min-height: 40px; padding: 0; font-size: 1.3rem; font-weight: 700; border-radius: 0; }
+.stepper button:hover { background: var(--border); }
+.stepper .st-qty { width: 52px; text-align: center; border: none; border-inline: 1px solid var(--border); border-radius: 0; padding: 0.4rem 0; font-weight: 700; -moz-appearance: textfield; }
+.stepper .st-qty::-webkit-outer-spin-button, .stepper .st-qty::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ---- Status chips ---- */
+.chip { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700; background: var(--border); color: var(--text); }
+.chip.ok { background: rgba(22,163,74,0.13); color: var(--ok); }
+.chip.warn { background: rgba(217,119,6,0.13); color: var(--warn); }
+.chip.error { background: rgba(220,38,38,0.12); color: var(--err); }
+.chip.info { background: rgba(25,182,196,0.14); color: #0e7d88; }
+
+/* ---- Toast ---- */
+.app-toast {
+  position: fixed; bottom: calc(80px + env(safe-area-inset-bottom)); inset-inline: 0;
+  margin: 0 auto; width: max-content; max-width: 90vw;
+  background: #1f2937; color: #fff; padding: 0.7rem 1.1rem; border-radius: 10px;
+  font-size: 0.95rem; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  z-index: 50; opacity: 0; transform: translateY(12px); pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.app-toast.show { opacity: 1; transform: translateY(0); }
+.app-toast.ok { background: #166534; }
+.app-toast.error { background: #b91c1c; }
+
+/* ---- Bottom sheet / confirm ---- */
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 60; display: flex; align-items: flex-end; justify-content: center; opacity: 0; transition: opacity 0.18s; }
+.sheet-backdrop.show { opacity: 1; }
+.sheet { background: var(--surface); width: 100%; max-width: 480px; border-radius: 16px 16px 0 0; padding: 1.25rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom)); }
+@media (min-width: 760px) { .sheet-backdrop { align-items: center; } .sheet { border-radius: 16px; } }
+.sheet-msg { font-size: 1.05rem; margin: 0 0 1rem; }
+.sheet-actions { display: flex; gap: 0.6rem; }
+.sheet-actions button { flex: 1; padding: 0.75rem; }
+
+/* ---- Skeleton + empty/error ---- */
+.skeleton { display: flex; flex-direction: column; gap: 0.6rem; }
+.sk-line { height: 1rem; background: linear-gradient(90deg, var(--border) 25%, #f0f0f1 50%, var(--border) 75%); background-size: 200% 100%; border-radius: 6px; animation: sk 1.2s infinite; }
+.sk-line:nth-child(2) { width: 80%; } .sk-line:nth-child(3) { width: 60%; }
+@keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--muted); }
+.empty-state .es-icon { font-size: 2.5rem; }
+.empty-state .es-title { font-weight: 800; color: var(--text); margin-top: 0.5rem; font-size: 1.1rem; }
+.empty-state .es-sub { margin-top: 0.3rem; }
+.empty-state .es-cta { display: inline-block; margin-top: 1rem; background: var(--brand); color: #fff; padding: 0.6rem 1.2rem; border-radius: var(--radius); font-weight: 700; border: none; }
+.empty-state .es-cta:hover { text-decoration: none; background: var(--brand-dark); }
+
+/* ---- Delivery-date chips (checkout) ---- */
+.date-chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.date-chip { border: 1px solid var(--border); border-radius: 10px; padding: 0.55rem 0.8rem; background: var(--surface); text-align: center; cursor: pointer; min-width: 76px; }
+.date-chip.sel { border-color: var(--brand); background: rgba(200,16,46,0.06); color: var(--brand); font-weight: 700; }
+.date-chip .dow { font-size: 0.75rem; color: var(--muted); }
+.date-chip.sel .dow { color: var(--brand); }
+.date-chip .dnum { font-weight: 700; font-size: 1.05rem; }
+
+/* Section heading with a "see all" link */
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 1.25rem 0 0.6rem; }
+.sec-head h2 { margin: 0; font-size: 1.05rem; }
+.sec-head a { font-size: 0.85rem; font-weight: 600; }

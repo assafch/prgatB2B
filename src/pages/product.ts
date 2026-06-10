@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
+import { toast } from '../ui.js';
+import { refreshCartCount } from '../main.js';
 
 interface Product {
   partname: string;
@@ -62,8 +64,10 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
         await api.put(`/api/cart/lines/${encodeURIComponent(p.partname)}`, {
           quantity: Number(qty.value),
         });
+        await refreshCartCount();
         msg.textContent = '✓ נוסף לסל';
         msg.className = 'ok';
+        toast('נוסף לסל', 'ok');
       } catch (ex) {
         msg.textContent = ex instanceof Error ? ex.message : String(ex);
         msg.className = 'error';

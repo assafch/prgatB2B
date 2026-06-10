@@ -2,12 +2,15 @@
 
 import { api, type MeUser } from './api.js';
 import { registerPwa } from './pwa.js';
+import { bottomNav } from './ui.js';
 import { renderLogin } from './pages/login.js';
 import { renderLead } from './pages/lead.js';
 import { renderInvite } from './pages/invite.js';
+import { renderHome } from './pages/home.js';
 import { renderCatalog } from './pages/catalog.js';
 import { renderProduct } from './pages/product.js';
 import { renderCart } from './pages/cart.js';
+import { renderCheckout } from './pages/checkout.js';
 import { renderOrders } from './pages/orders.js';
 import { renderOrderDetail } from './pages/orderDetail.js';
 import { renderAccount } from './pages/account.js';
@@ -18,9 +21,20 @@ const root = document.getElementById('app')!;
 
 interface AppState {
   me: MeUser | null;
+  cartCount: number;
 }
 
-export const state: AppState = { me: null };
+export const state: AppState = { me: null, cartCount: 0 };
+
+// Which bottom-nav tab a route belongs to.
+function navKeyFor(hash: string): string {
+  if (hash.startsWith('#home')) return 'home';
+  if (hash.startsWith('#catalog') || hash.startsWith('#product/')) return 'catalog';
+  if (hash.startsWith('#cart') || hash.startsWith('#checkout')) return 'cart';
+  if (hash.startsWith('#orders')) return 'orders';
+  if (hash.startsWith('#account') || hash.startsWith('#invoices')) return 'account';
+  return '';
+}
 
 function topbar(): string {
   const me = state.me;
@@ -30,7 +44,7 @@ function topbar(): string {
         <div class="logo">אורגת B2B</div>
         <nav>
           <a href="#login" class="${location.hash === '#login' || !location.hash ? 'active' : ''}">התחברות</a>
-          <a href="#lead" class="${location.hash === '#lead' ? 'active' : ''}">ליד חדש</a>
+          <a href="#lead" class="${location.hash === '#lead' ? 'active' : ''}">צור קשר</a>
         </nav>
       </div>`;
   }
@@ -44,22 +58,24 @@ function topbar(): string {
         </nav>
       </div>`;
   }
+  // Customer: slim topbar (logo + logout); primary nav is the bottom bar.
   return `
     <div class="topbar">
       <div class="logo">אורגת B2B</div>
       <nav>
-        <a href="#catalog" class="${location.hash.startsWith('#catalog') || location.hash === '' ? 'active' : ''}">קטלוג</a>
-        <a href="#cart" class="${location.hash === '#cart' ? 'active' : ''}">סל 🛒</a>
-        <a href="#orders" class="${location.hash.startsWith('#orders') ? 'active' : ''}">הזמנות</a>
-        <a href="#invoices" class="${location.hash === '#invoices' ? 'active' : ''}">חשבוניות</a>
-        <a href="#account" class="${location.hash === '#account' ? 'active' : ''}">חשבון</a>
         <a href="#logout">יציאה</a>
       </nav>
     </div>`;
 }
 
+// Mount page HTML. For logged-in customers also renders the bottom nav and pads
+// the shell so content never hides behind it.
 function mount(html: string): HTMLDivElement {
-  root.innerHTML = `${topbar()}<div class="app-shell"></div>`;
+  const isCustomer = state.me?.role === 'customer';
+  const navKey = navKeyFor(location.hash || '#home');
+  root.innerHTML = `${topbar()}<div class="app-shell${isCustomer ? ' has-bottom-nav' : ''}"></div>${
+    isCustomer ? bottomNav({ active: navKey, cartCount: state.cartCount }) : ''
+  }`;
   const shell = root.querySelector('.app-shell') as HTMLDivElement;
   shell.innerHTML = html;
   return shell;
@@ -74,13 +90,39 @@ async function refreshMe(): Promise<void> {
   }
 }
 
+// Keep the cart badge honest. Pages call this after mutating the cart.
+export async function refreshCartCount(): Promise<void> {
+  if (state.me?.role !== 'customer') {
+    state.cartCount = 0;
+    return;
+  }
+  try {
+    const cart = await api.get<{ lines: unknown[] }>('/api/cart');
+    state.cartCount = cart.lines.length;
+  } catch {
+    /* leave as-is */
+  }
+  // Update the badge in place without a full re-render.
+  const badge = document.querySelector('.bn-tab[href="#cart"] .bn-badge');
+  const icon = document.querySelector('.bn-tab[href="#cart"] .bn-icon');
+  if (state.cartCount > 0) {
+    const txt = state.cartCount > 99 ? '99+' : String(state.cartCount);
+    if (badge) badge.textContent = txt;
+    else if (icon) icon.insertAdjacentHTML('beforeend', `<span class="bn-badge">${txt}</span>`);
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
 async function route(): Promise<void> {
-  const hash = location.hash || (state.me ? '#catalog' : '#login');
-  await refreshMe();
+  // Auth is cached after boot; only (re)fetch when we don't know who the user is.
+  if (state.me === null) await refreshMe();
+  const hash = location.hash || (state.me ? '#home' : '#login');
 
   if (hash === '#logout') {
-    await api.post('/api/auth/logout');
+    await api.post('/api/auth/logout').catch(() => {});
     state.me = null;
+    state.cartCount = 0;
     location.hash = '#login';
     return;
   }
@@ -108,12 +150,14 @@ async function route(): Promise<void> {
   }
 
   // Customer routes
-  if (hash === '#catalog' || hash === '') return renderCatalog(mount(''));
+  if (hash === '#home' || hash === '') return renderHome(mount(''));
+  if (hash === '#catalog') return renderCatalog(mount(''));
   if (hash.startsWith('#product/')) {
     const part = decodeURIComponent(hash.slice('#product/'.length));
     return renderProduct(mount(''), part);
   }
   if (hash === '#cart') return renderCart(mount(''));
+  if (hash === '#checkout') return renderCheckout(mount(''));
   if (hash === '#orders') return renderOrders(mount(''));
   if (hash.startsWith('#orders/')) {
     const id = Number(hash.slice('#orders/'.length));
@@ -122,18 +166,17 @@ async function route(): Promise<void> {
   if (hash === '#account') return renderAccount(mount(''));
   if (hash === '#invoices') return renderInvoices(mount(''));
 
-  // Unknown route → catalog
-  location.hash = '#catalog';
+  // Unknown route → home
+  location.hash = '#home';
 }
 
 async function onAuthChanged(): Promise<void> {
   await refreshMe();
-  // If the session died mid-flow, api.ts stashed where the user was — go back there.
+  await refreshCartCount();
   const saved = sessionStorage.getItem('prgat_post_login_hash');
   sessionStorage.removeItem('prgat_post_login_hash');
   if (state.me?.role === 'admin') location.hash = '#admin';
-  else location.hash = saved && saved !== '#login' ? saved : '#catalog';
-  // Hash change handler will re-render
+  else location.hash = saved && saved !== '#login' ? saved : '#home';
 }
 
 window.addEventListener('hashchange', () => {
@@ -142,7 +185,16 @@ window.addEventListener('hashchange', () => {
   });
 });
 
-route().catch((err) => {
+// Re-check auth when the tab regains focus (the session may have idled out).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.me) refreshMe();
+});
+
+(async () => {
+  await refreshMe();
+  await refreshCartCount();
+  await route();
+})().catch((err) => {
   root.innerHTML = `<div class="app-shell"><div class="card error">שגיאה: ${err.message || err}</div></div>`;
 });
 

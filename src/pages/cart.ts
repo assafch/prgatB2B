@@ -1,5 +1,7 @@
 import { api } from '../api.js';
-import { escapeAttr, escapeHtml } from '../format.js';
+import { formatMoney, escapeHtml, escapeAttr } from '../format.js';
+import { toast, confirmDialog, qtyStepper, bindSteppers, emptyState } from '../ui.js';
+import { refreshCartCount } from '../main.js';
 
 interface CartLine {
   partname: string;
@@ -9,7 +11,6 @@ interface CartLine {
   line_total: number;
   available: boolean;
 }
-
 interface CartResp {
   lines: CartLine[];
   total: number;
@@ -20,135 +21,85 @@ export async function renderCart(shell: HTMLElement): Promise<void> {
 }
 
 async function load(shell: HTMLElement): Promise<void> {
-  shell.innerHTML = `<div class="muted">טוען…</div>`;
+  shell.innerHTML = `<div class="card muted">טוען…</div>`;
+  let cart: CartResp;
   try {
-    const cart = await api.get<CartResp>('/api/cart');
-    if (cart.lines.length === 0) {
-      shell.innerHTML = `
-        <div class="card" style="text-align:center;padding:2rem">
-          <h2>הסל ריק</h2>
-          <p><a href="#catalog">חזור לקטלוג</a></p>
-        </div>`;
-      return;
-    }
-    shell.innerHTML = `
-      <div class="card">
-        <h1 style="margin-top:0">הסל שלך</h1>
-        <table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="text-align:right;border-bottom:1px solid var(--border)">
-              <th style="padding:0.5rem">מק״ט / שם</th>
-              <th style="padding:0.5rem">כמות</th>
-              <th style="padding:0.5rem">מחיר ליחידה</th>
-              <th style="padding:0.5rem">סה״כ</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${cart.lines
-              .map(
-                (l) => `
-              <tr style="border-bottom:1px solid var(--border)${l.available ? '' : ';opacity:0.55'}">
-                <td style="padding:0.5rem">
-                  <div style="font-weight:500">${escapeHtml(l.partdes || l.partname)}</div>
-                  <div class="muted" style="font-size:0.85rem">${escapeHtml(l.partname)}</div>
-                  ${l.available ? '' : '<div class="error" style="font-size:0.8rem">לא זמין יותר — יש להסיר מהסל</div>'}
-                </td>
-                <td style="padding:0.5rem">
-                  <input type="number" min="0" step="1" value="${l.quantity}" data-part="${escapeAttr(l.partname)}" class="qty" style="width:70px" ${l.available ? '' : 'disabled'}/>
-                </td>
-                <td style="padding:0.5rem">${l.price != null ? `₪${l.price.toFixed(2)}` : '-'}</td>
-                <td style="padding:0.5rem;font-weight:700">${l.price != null ? `₪${l.line_total.toFixed(2)}` : '-'}</td>
-                <td style="padding:0.5rem"><button class="ghost remove" data-part="${escapeAttr(l.partname)}">🗑</button></td>
-              </tr>`
-              )
-              .join('')}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="3" style="padding:0.75rem;text-align:left;font-weight:700">סה״כ:</td>
-              <td style="padding:0.75rem;font-weight:700;color:var(--brand);font-size:1.2rem">₪${cart.total.toFixed(2)}</td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
-        <div style="margin-top:1rem">
-          <label>הערה להזמנה</label>
-          <textarea id="details" rows="2"></textarea>
-        </div>
-        <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
-          <button class="ghost" id="clear">רוקן סל</button>
-          <button id="submit">שלח הזמנה</button>
-        </div>
-        <div id="msg" style="margin-top:0.5rem"></div>
-      </div>
-    `;
-
-    const lineError = (text: string) => {
-      const msgEl = shell.querySelector('#msg') as HTMLDivElement | null;
-      if (msgEl) {
-        msgEl.textContent = text;
-        msgEl.className = 'error';
-      }
-    };
-    shell.querySelectorAll<HTMLInputElement>('input.qty').forEach((inp) => {
-      inp.addEventListener('change', async () => {
-        const part = inp.dataset.part!;
-        const qty = Number(inp.value);
-        if (!isFinite(qty) || qty < 0) {
-          inp.value = '0';
-          return;
-        }
-        try {
-          await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty });
-          await load(shell);
-        } catch (ex) {
-          // Server refused the change (item hidden/unpriced/qty cap) — resync,
-          // then surface the reason (load() re-renders, so the message goes last).
-          const reason = ex instanceof Error ? ex.message : String(ex);
-          await load(shell);
-          lineError(reason);
-        }
-      });
-    });
-    shell.querySelectorAll<HTMLButtonElement>('button.remove').forEach((b) => {
-      b.addEventListener('click', async () => {
-        await api.put(`/api/cart/lines/${encodeURIComponent(b.dataset.part!)}`, { quantity: 0 });
-        await load(shell);
-      });
-    });
-
-    const clearBtn = shell.querySelector('#clear') as HTMLButtonElement;
-    clearBtn.addEventListener('click', async () => {
-      if (!confirm('לרוקן את הסל?')) return;
-      await api.del('/api/cart');
-      await load(shell);
-    });
-
-    const submitBtn = shell.querySelector('#submit') as HTMLButtonElement;
-    const details = shell.querySelector('#details') as HTMLTextAreaElement;
-    const msg = shell.querySelector('#msg') as HTMLDivElement;
-    submitBtn.addEventListener('click', async () => {
-      submitBtn.disabled = true;
-      msg.textContent = 'שולח…';
-      msg.className = 'muted';
-      try {
-        const result = await api.post<{ ordname: string; orderId: number }>('/api/orders', {
-          details: details.value || undefined,
-        });
-        shell.innerHTML = `
-          <div class="card" style="text-align:center;padding:2rem">
-            <h2 class="ok">✓ ההזמנה נשלחה</h2>
-            <p>מספר הזמנה ב-Priority: <b>${escapeHtml(result.ordname)}</b></p>
-            <p><a href="#orders/${result.orderId}">צפה בהזמנה</a> · <a href="#catalog">חזור לקטלוג</a></p>
-          </div>`;
-      } catch (ex) {
-        msg.textContent = `שגיאה: ${ex instanceof Error ? ex.message : ex}`;
-        msg.className = 'error';
-        submitBtn.disabled = false;
-      }
-    });
+    cart = await api.get<CartResp>('/api/cart');
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
+    return;
   }
+
+  if (cart.lines.length === 0) {
+    shell.innerHTML = `<div class="card">${emptyState('🛒', 'הסל ריק', 'התחילו הזמנה חדשה מהקטלוג', '#catalog', 'לקטלוג')}</div>`;
+    return;
+  }
+
+  const hasUnavailable = cart.lines.some((l) => !l.available);
+
+  shell.innerHTML = `
+    <div class="card">
+      <h1 style="margin-top:0">הסל שלי</h1>
+      <div id="cart-lines">
+        ${cart.lines.map(lineRow).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem;padding-top:0.75rem;border-top:2px solid var(--border)">
+        <span style="font-weight:700">סה״כ</span>
+        <span style="font-weight:900;font-size:1.3rem;color:var(--brand)">${formatMoney(cart.total)}</span>
+      </div>
+      <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">המחיר הסופי ייקבע ב-Priority לפי ההסכם שלך</div>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-top:1rem">
+      <button class="ghost" id="clear">רוקן סל</button>
+      <button id="checkout" style="flex:1" ${hasUnavailable ? 'disabled' : ''}>המשך לסיום הזמנה ←</button>
+    </div>
+    ${hasUnavailable ? `<div class="error" style="text-align:center;margin-top:0.5rem;font-size:0.9rem">יש להסיר פריטים שאינם זמינים כדי להמשיך</div>` : ''}
+  `;
+
+  bindSteppers(shell, async (part, qty) => {
+    try {
+      await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty });
+      await refreshCartCount();
+      await load(shell);
+    } catch (ex) {
+      const reason = ex instanceof Error ? ex.message : String(ex);
+      await load(shell);
+      toast(reason, 'error');
+    }
+  });
+
+  shell.querySelectorAll<HTMLButtonElement>('button.remove').forEach((b) => {
+    b.addEventListener('click', async () => {
+      await api.put(`/api/cart/lines/${encodeURIComponent(b.dataset.part!)}`, { quantity: 0 });
+      await refreshCartCount();
+      await load(shell);
+    });
+  });
+
+  shell.querySelector('#clear')?.addEventListener('click', async () => {
+    if (!(await confirmDialog('לרוקן את כל הסל?', 'רוקן', 'ביטול'))) return;
+    await api.del('/api/cart');
+    await refreshCartCount();
+    await load(shell);
+  });
+
+  shell.querySelector('#checkout')?.addEventListener('click', () => {
+    location.hash = '#checkout';
+  });
+}
+
+function lineRow(l: CartLine): string {
+  return `
+    <div class="dash-row" style="padding:0.6rem 0;border-bottom:1px solid var(--border)${l.available ? '' : ';opacity:0.6'}">
+      <div class="grow">
+        <div style="font-weight:600">${escapeHtml(l.partdes || l.partname)}</div>
+        <div class="muted" style="font-size:0.82rem">${escapeHtml(l.partname)}${
+    l.price != null ? ` · ${formatMoney(l.price)} ליח׳` : ''
+  }</div>
+        ${l.available ? '' : '<div class="error" style="font-size:0.8rem">לא זמין יותר — יש להסיר</div>'}
+      </div>
+      ${l.available ? qtyStepper(l.partname, l.quantity, 1) : ''}
+      <div style="min-width:72px;text-align:left;font-weight:700">${l.price != null ? formatMoney(l.line_total) : '—'}</div>
+      <button class="ghost remove" data-part="${escapeAttr(l.partname)}" aria-label="הסר" style="padding:0.4rem 0.6rem">🗑</button>
+    </div>`;
 }
