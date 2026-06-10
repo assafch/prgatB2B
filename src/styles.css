@@ -323,6 +323,12 @@ input:focus, select:focus, textarea:focus {
 .date-chip.sel .dow { color: var(--brand); }
 .date-chip .dnum { font-weight: 700; font-size: 1.05rem; }
 
+/* "or" separator (login: passkey vs password) */
+.sep { display: flex; align-items: center; text-align: center; color: var(--muted); font-size: 0.85rem; margin: 0.9rem 0; }
+.sep::before, .sep::after { content: ""; flex: 1; border-bottom: 1px solid var(--border); }
+.sep::before { margin-inline-end: 0.6rem; }
+.sep::after { margin-inline-start: 0.6rem; }
+
 /* Section heading with a "see all" link */
 .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 1.25rem 0 0.6rem; }
 .sec-head h2 { margin: 0; font-size: 1.05rem; }

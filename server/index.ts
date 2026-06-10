@@ -70,6 +70,17 @@ import {
 import { scheduleSnapshots } from './backup.js';
 import { getHomeData } from './home.js';
 import { getReorderSuggestions } from './reorder.js';
+import {
+  webauthnEnabled,
+  registrationOptions,
+  verifyRegistration,
+  authenticationOptions,
+  verifyAuthentication,
+  listUserCredentials,
+  deleteCredential,
+  renameCredential,
+  sweepChallenges,
+} from './webauthn.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -350,6 +361,102 @@ app.delete('/api/auth/sessions/:id', requireAuth, (req: AuthedRequest, res) => {
 app.post('/api/auth/sessions/revoke-others', requireAuth, (req: AuthedRequest, res) => {
   const revoked = revokeOtherSessions(req.user!.id, req.sessionId);
   res.json({ ok: true, revoked });
+});
+
+// ---------- WebAuthn / passkeys (Face ID / fingerprint) ----------
+const passkeyLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+function requireWebauthn(_req: Request, res: Response, next: NextFunction): void {
+  if (!webauthnEnabled()) {
+    res.status(503).json({ error: 'webauthn_not_configured' });
+    return;
+  }
+  next();
+}
+
+app.get('/api/auth/capabilities', (_req, res) => {
+  res.json({ webauthn: webauthnEnabled() });
+});
+
+// Enrollment (requires a fresh authenticated session).
+app.post('/api/webauthn/register/options', requireAuth, requireWebauthn, passkeyLimiter, ah(async (req, res) => {
+  const { options, challengeId } = await registrationOptions(req.user!.id, req.user!.username);
+  res.json({ options, challengeId });
+}));
+
+app.post('/api/webauthn/register/verify', requireAuth, requireWebauthn, passkeyLimiter, ah(async (req, res) => {
+  const { challengeId, response, deviceName } = (req.body || {}) as {
+    challengeId?: string; response?: unknown; deviceName?: string;
+  };
+  if (!challengeId || !response) {
+    res.status(400).json({ error: 'missing_fields' });
+    return;
+  }
+  const ok = await verifyRegistration(req.user!.id, challengeId, response, String(deviceName || 'מכשיר'));
+  if (!ok) {
+    res.status(400).json({ error: 'רישום המפתח נכשל. נסו שוב.' });
+    return;
+  }
+  res.json({ ok: true });
+}));
+
+// Usernameless login.
+app.post('/api/webauthn/login/options', requireWebauthn, passkeyLimiter, ah(async (_req, res) => {
+  const { options, challengeId } = await authenticationOptions();
+  res.json({ options, challengeId });
+}));
+
+app.post('/api/webauthn/login/verify', requireWebauthn, passkeyLimiter, ah(async (req, res) => {
+  const { challengeId, response } = (req.body || {}) as { challengeId?: string; response?: unknown };
+  if (!challengeId || !response) {
+    res.status(400).json({ error: 'missing_fields' });
+    return;
+  }
+  const userId = await verifyAuthentication(challengeId, response);
+  if (!userId) {
+    res.status(401).json({ error: 'invalid_credentials' });
+    return;
+  }
+  const user = db
+    .prepare(`SELECT id, username, role, custname, cust_desc FROM users WHERE id = ? AND status = 'active'`)
+    .get(userId) as
+    | { id: number; username: string; role: 'customer' | 'admin'; custname: string | null; cust_desc: string | null }
+    | undefined;
+  if (!user) {
+    res.status(401).json({ error: 'invalid_credentials' });
+    return;
+  }
+  // Same session path as password login (rotation + role-based TTL cookie).
+  const oldToken = tokenFromRequest(req);
+  if (oldToken) destroySession(oldToken);
+  const token = createSession(user.id, user.role, req.ip, req.headers['user-agent']);
+  setSessionCookie(res, token, user.role);
+  db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id);
+  res.json({ user });
+}));
+
+app.get('/api/auth/passkeys', requireAuth, (req: AuthedRequest, res) => {
+  const list = listUserCredentials(req.user!.id).map((c) => ({
+    id: c.id,
+    device_name: c.device_name,
+    created_at: c.created_at,
+    last_used_at: c.last_used_at,
+  }));
+  res.json({ passkeys: list, webauthn: webauthnEnabled() });
+});
+
+app.patch('/api/auth/passkeys/:id', requireAuth, (req: AuthedRequest, res) => {
+  const { name } = (req.body || {}) as { name?: string };
+  if (!name) {
+    res.status(400).json({ error: 'name_required' });
+    return;
+  }
+  const ok = renameCredential(req.user!.id, Number(req.params.id), name);
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
+});
+
+app.delete('/api/auth/passkeys/:id', requireAuth, (req: AuthedRequest, res) => {
+  const ok = deleteCredential(req.user!.id, Number(req.params.id));
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });
 
 app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
@@ -784,6 +891,8 @@ async function startup() {
   const swept = sweepSessions();
   if (swept > 0) console.log(`[auth] swept ${swept} dead sessions`);
   setInterval(() => sweepSessions(), 86400_000).unref();
+  sweepChallenges();
+  setInterval(() => sweepChallenges(), 3600_000).unref();
   // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
   scheduleSnapshots();
   app.listen(PORT, () => {

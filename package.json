@@ -16,6 +16,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.1",
     "@types/multer": "^2.1.0",
     "@types/papaparse": "^5.5.2",
     "bcryptjs": "^2.4.3",
