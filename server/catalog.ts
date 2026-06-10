@@ -43,7 +43,15 @@ export async function refreshCatalogFromPriority(): Promise<{
   const config = getPriorityConfig();
   if (!config) throw new Error('Priority not configured');
 
-  const [products, families] = await Promise.all([listProducts(config), listFamilies(config)]);
+  const products = await listProducts(config);
+  // Families are only category labels — if FAMILY_LOG isn't API-enabled for the
+  // API user it must not block the whole product sync (per-form degradation).
+  let families: Awaited<ReturnType<typeof listFamilies>> = [];
+  try {
+    families = await listFamilies(config);
+  } catch (err) {
+    console.warn('[catalog] families (FAMILY_LOG) unavailable — products only:', err instanceof Error ? err.message : err);
+  }
   const famMap = new Map<string, string>();
   for (const f of families) {
     famMap.set(String(f.FAMILYNAME || '').trim(), String(f.FAMILYDESC || '').trim());
