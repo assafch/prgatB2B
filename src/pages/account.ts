@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { formatMoney, escapeHtml, formatDateTime } from '../format.js';
 import { toast, confirmDialog } from '../ui.js';
-import { supportsPasskeys, serverPasskeysEnabled, passkeyRegister } from '../webauthn.js';
+import { supportsPasskeys, serverPasskeysEnabled, passkeyRegister, isPasskeyCancel } from '../webauthn.js';
 
 interface Profile {
   custname: string;
@@ -125,8 +125,7 @@ async function renderPasskeys(host: HTMLElement): Promise<void> {
         toast('כניסה מהירה הופעלה ✓', 'ok');
         await load();
       } catch (ex) {
-        const raw = ex instanceof Error ? ex.message : String(ex);
-        if (!/NotAllowed|AbortError|cancel/i.test(raw)) toast('ההפעלה נכשלה — נסו שוב', 'error');
+        if (!isPasskeyCancel(ex)) toast('ההפעלה נכשלה — נסו שוב', 'error');
         btn.disabled = false;
       }
     });

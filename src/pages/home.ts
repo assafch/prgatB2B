@@ -57,7 +57,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
   } else if (owing) {
     debtCard = `
       <div class="card debt-card owing">
-        <div class="label">יתרה לתשלום (${d.balance.openCount} חשבוניות פתוחות)</div>
+        <div class="label">יתרה לתשלום${d.balance.openCount > 0 ? ` (${d.balance.openCount} חשבוניות פתוחות)` : ''}</div>
         <div class="amount">${formatMoney(d.balance.openTotal)}</div>
         ${
           d.features.payments

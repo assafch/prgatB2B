@@ -94,7 +94,9 @@ export async function registrationOptions(userId: number, username: string) {
     authenticatorSelection: {
       residentKey: 'required',
       requireResidentKey: true,
-      userVerification: 'preferred',
+      // Require biometric/PIN — this is sold as Face ID / fingerprint, so the
+      // inherence factor must be cryptographically enforced, not optional.
+      userVerification: 'required',
     },
     excludeCredentials: existing.map((c) => ({ id: c.cred_id, transports: parseTransports(c.transports) })),
   });
@@ -118,26 +120,30 @@ export async function verifyRegistration(
       expectedChallenge: stored.challenge,
       expectedOrigin: cfg.origin,
       expectedRPID: cfg.rpID,
-      requireUserVerification: false,
+      requireUserVerification: true,
     });
   } catch {
     return false;
   }
   if (!verification.verified || !verification.registrationInfo) return false;
   const { credential } = verification.registrationInfo;
-  db.prepare(
-    `INSERT INTO webauthn_credentials (user_id, cred_id, public_key, counter, transports, device_name)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(cred_id) DO NOTHING`
-  ).run(
-    userId,
-    credential.id,
-    b64u.enc(credential.publicKey),
-    credential.counter ?? 0,
-    JSON.stringify(credential.transports ?? []),
-    deviceName.slice(0, 60) || 'מכשיר'
-  );
-  return true;
+  const info = db
+    .prepare(
+      `INSERT INTO webauthn_credentials (user_id, cred_id, public_key, counter, transports, device_name)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(cred_id) DO NOTHING`
+    )
+    .run(
+      userId,
+      credential.id,
+      b64u.enc(credential.publicKey),
+      credential.counter ?? 0,
+      JSON.stringify(credential.transports ?? []),
+      deviceName.slice(0, 60) || 'מכשיר'
+    );
+  // A no-op insert means this credential id already exists — report failure rather
+  // than a misleading success.
+  return info.changes > 0;
 }
 
 // --- usernameless login (discoverable credentials) ---
@@ -145,7 +151,7 @@ export async function authenticationOptions() {
   const cfg = webauthnConfig()!;
   const options = await generateAuthenticationOptions({
     rpID: cfg.rpID,
-    userVerification: 'preferred',
+    userVerification: 'required', // enforce biometric/PIN for passwordless login
     allowCredentials: [], // discoverable — the authenticator offers its resident creds
   });
   const challengeId = storeChallenge(options.challenge, 'login', null);
@@ -157,17 +163,31 @@ export async function verifyAuthentication(challengeId: string, response: any): 
   const cfg = webauthnConfig()!;
   const stored = consumeChallenge(challengeId, 'login');
   if (!stored) return null;
+  // Guard the SQL bind: a malformed/missing id would otherwise throw (→ 500).
+  if (typeof response?.id !== 'string') return null;
   const cred = db
     .prepare('SELECT * FROM webauthn_credentials WHERE cred_id = ?')
-    .get(response?.id) as CredRow | undefined;
+    .get(response.id) as CredRow | undefined;
   if (!cred) return null;
+  // Defense-in-depth: if the authenticator returned a userHandle, it must match the
+  // credential's owner (we set userID = the user id at registration). cred_id is
+  // already UNIQUE + signature-verified, but this keeps the binding correct even if
+  // the schema ever changes.
+  const uh = response?.response?.userHandle;
+  if (uh) {
+    try {
+      if (Buffer.from(uh, 'base64url').toString() !== String(cred.user_id)) return null;
+    } catch {
+      return null;
+    }
+  }
   try {
     const verification = await verifyAuthenticationResponse({
       response,
       expectedChallenge: stored.challenge,
       expectedOrigin: cfg.origin,
       expectedRPID: cfg.rpID,
-      requireUserVerification: false,
+      requireUserVerification: true,
       credential: {
         id: cred.cred_id,
         publicKey: b64u.dec(cred.public_key),
@@ -176,7 +196,10 @@ export async function verifyAuthentication(challengeId: string, response: any): 
       },
     });
     if (!verification.verified) return null;
-    // Counter anomalies are logged, not fatal: synced passkeys (iCloud/Google) report 0.
+    // Counter regression IS rejected by verifyAuthenticationResponse (it throws when
+    // newCounter <= stored counter for authenticators reporting a non-zero counter —
+    // hardware-key clone detection; the catch below turns that into a failed login).
+    // Synced passkeys (iCloud/Google) always report 0 and are exempt.
     db.prepare(
       `UPDATE webauthn_credentials SET counter = ?, last_used_at = datetime('now') WHERE id = ?`
     ).run(verification.authenticationInfo.newCounter, cred.id);

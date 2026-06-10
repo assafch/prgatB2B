@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { supportsPasskeys, serverPasskeysEnabled, passkeyLogin } from '../webauthn.js';
+import { supportsPasskeys, serverPasskeysEnabled, passkeyLogin, isPasskeyCancel } from '../webauthn.js';
 
 export function renderLogin(shell: HTMLElement, onSuccess: () => Promise<void> | void): void {
   shell.innerHTML = `
@@ -60,9 +60,9 @@ export function renderLogin(shell: HTMLElement, onSuccess: () => Promise<void> |
           await passkeyLogin();
           await onSuccess();
         } catch (ex) {
-          const raw = ex instanceof Error ? ex.message : String(ex);
-          // User-cancelled ceremonies throw NotAllowedError/AbortError — stay quiet.
-          if (!/NotAllowed|AbortError|cancel/i.test(raw)) {
+          // User-cancelled ceremonies (NotAllowedError/AbortError) — stay quiet.
+          if (!isPasskeyCancel(ex)) {
+            const raw = ex instanceof Error ? ex.message : String(ex);
             err.textContent = raw === 'invalid_credentials' ? 'המפתח לא זוהה — התחברו עם סיסמה' : 'הכניסה הביומטרית נכשלה — נסו סיסמה';
           }
           btn.disabled = false;

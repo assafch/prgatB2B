@@ -28,6 +28,7 @@ interface InvoicesResult {
   priorityOk: boolean;
   openUnavailable?: boolean;
   historyUnavailable?: boolean;
+  openListIncomplete?: boolean;
 }
 
 export async function renderInvoices(shell: HTMLElement): Promise<void> {
@@ -52,6 +53,11 @@ export async function renderInvoices(shell: HTMLElement): Promise<void> {
 
   shell.innerHTML = `
     ${balanceCard(data)}
+    ${
+      data.openListIncomplete
+        ? `<div class="card" style="border-color:var(--warn);background:rgba(217,119,6,0.06)"><b class="badge warn">לתשומת לבך</b> קיימת יתרה לתשלום. לפירוט החשבוניות הפתוחות פנו למשרד אורגת.</div>`
+        : ''
+    }
     ${openSection(data)}
     ${historySection(data)}
   `;

@@ -12,11 +12,18 @@ export async function serverPasskeysEnabled(): Promise<boolean> {
   if (cachedServerEnabled !== null) return cachedServerEnabled;
   try {
     const { webauthn } = await api.get<{ webauthn: boolean }>('/api/auth/capabilities');
-    cachedServerEnabled = webauthn;
+    cachedServerEnabled = webauthn; // cache only a real answer
+    return webauthn;
   } catch {
-    cachedServerEnabled = false;
+    return false; // transient failure — don't cache, retry next time
   }
-  return cachedServerEnabled;
+}
+
+// True when the user cancelled/declined the ceremony (don't show a scary error).
+export function isPasskeyCancel(ex: unknown): boolean {
+  const name = ex instanceof Error ? ex.name : '';
+  const msg = ex instanceof Error ? ex.message : String(ex);
+  return /NotAllowedError|AbortError/.test(name) || /NotAllowed|AbortError|cancel|timed out/i.test(msg);
 }
 
 /** Usernameless login. Throws on failure/cancel. */

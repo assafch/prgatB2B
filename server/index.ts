@@ -336,6 +336,9 @@ app.post('/api/auth/change-password', requireAuth, sensitiveLimiter, ah(async (r
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.user!.id);
   // Anyone else holding this account's session (e.g. a stolen device) is kicked out.
   revokeOtherSessions(req.user!.id, req.sessionId);
+  // ...and any passkey enrolled by an attacker during a hijacked session is killed,
+  // so a passkey can't outlive the password reset the user did to recover the account.
+  db.prepare('DELETE FROM webauthn_credentials WHERE user_id = ?').run(req.user!.id);
   res.json({ ok: true });
 }));
 
@@ -434,7 +437,7 @@ app.post('/api/webauthn/login/verify', requireWebauthn, passkeyLimiter, ah(async
   res.json({ user });
 }));
 
-app.get('/api/auth/passkeys', requireAuth, (req: AuthedRequest, res) => {
+app.get('/api/auth/passkeys', requireAuth, passkeyLimiter, (req: AuthedRequest, res) => {
   const list = listUserCredentials(req.user!.id).map((c) => ({
     id: c.id,
     device_name: c.device_name,
@@ -444,7 +447,7 @@ app.get('/api/auth/passkeys', requireAuth, (req: AuthedRequest, res) => {
   res.json({ passkeys: list, webauthn: webauthnEnabled() });
 });
 
-app.patch('/api/auth/passkeys/:id', requireAuth, (req: AuthedRequest, res) => {
+app.patch('/api/auth/passkeys/:id', requireAuth, passkeyLimiter, (req: AuthedRequest, res) => {
   const { name } = (req.body || {}) as { name?: string };
   if (!name) {
     res.status(400).json({ error: 'name_required' });
@@ -454,7 +457,7 @@ app.patch('/api/auth/passkeys/:id', requireAuth, (req: AuthedRequest, res) => {
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });
 
-app.delete('/api/auth/passkeys/:id', requireAuth, (req: AuthedRequest, res) => {
+app.delete('/api/auth/passkeys/:id', requireAuth, passkeyLimiter, (req: AuthedRequest, res) => {
   const ok = deleteCredential(req.user!.id, Number(req.params.id));
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });

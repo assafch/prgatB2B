@@ -123,9 +123,22 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
     tryGet(`obligo:${custname}`, () => memo(`obligo:${custname}`, () => getObligo(config, custname))),
   ]);
 
-  const balanceOk = open !== null;
+  // AUTHORITATIVE open debt = OBLIGO.ACC_DEBIT (the AR account debit), which
+  // matches Priority's official "חובות שטרם שולמו" statement. OPENINVOICES proved
+  // unreliable on this tenant (returns 0 rows for customers who genuinely owe — it
+  // missed a real overdue invoice), so it is NOT used for the debt total; we keep
+  // it only as a best-effort line-item list. Post-dated cheques (CHEQUE_DEBIT) are
+  // deliberately NOT counted as debt — the customer already handed over the cheques.
+  const accDebit =
+    obligo && typeof obligo.ACC_DEBIT === 'number' ? Math.max(0, round2(obligo.ACC_DEBIT)) : null;
+  const openSum = open ? round2(open.reduce((sum, iv) => sum + (Number(iv.TOTPRICE) || 0), 0)) : null;
+  const openTotal = accDebit ?? openSum ?? 0;
+  const balanceOk = accDebit !== null || openSum !== null;
+
   const balance: BalanceSummary = {
-    openTotal: open ? round2(open.reduce((sum, iv) => sum + (Number(iv.TOTPRICE) || 0), 0)) : 0,
+    openTotal,
+    // From OPENINVOICES — a HINT only (may undercount). The UI must not claim
+    // "0 open invoices" when openTotal > 0.
     openCount: open ? open.length : 0,
     obligo: obligo && typeof obligo.OBLIGO === 'number' ? round2(obligo.OBLIGO) : null,
     creditLimit:
@@ -137,8 +150,7 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
   return {
     profile: shapeProfile(custname, customer),
     balance,
-    // priorityOk = we reached Priority for at least one form (profile or balance).
-    priorityOk: customer !== null || open !== null,
+    priorityOk: customer !== null || obligo !== null || open !== null,
     balanceOk,
   };
 }
@@ -174,6 +186,10 @@ export interface InvoicesResult {
   /** true when the open-invoices form is API-disabled (distinct from a network outage) */
   openUnavailable?: boolean;
   historyUnavailable?: boolean;
+  /** openTotal came from the authoritative OBLIGO.ACC_DEBIT but the per-invoice
+   *  open LIST (from OPENINVOICES) is empty/incomplete — UI should say so rather
+   *  than imply "no open invoices". */
+  openListIncomplete?: boolean;
 }
 
 export async function getInvoices(custname: string): Promise<InvoicesResult> {
@@ -182,12 +198,13 @@ export async function getInvoices(custname: string): Promise<InvoicesResult> {
     return { open: [], history: [], summary: { openTotal: 0, openCount: 0 }, priorityOk: false };
   }
 
-  const [open, history] = await Promise.all([
+  const [open, history, obligo] = await Promise.all([
     tryGet(`open:${custname}`, () => memo(`open:${custname}`, () => listOpenInvoices(config, custname))),
     tryGet(`invoices:${custname}`, () => memo(`invoices:${custname}`, () => listInvoices(config, custname))),
+    tryGet(`obligo:${custname}`, () => memo(`obligo:${custname}`, () => getObligo(config, custname))),
   ]);
 
-  // Both forms blocked/unreachable → signal a hard failure to the UI.
+  // Both invoice forms blocked/unreachable → signal a hard failure to the UI.
   if (open === null && history === null) {
     return { open: [], history: [], summary: { openTotal: 0, openCount: 0 }, priorityOk: false };
   }
@@ -217,7 +234,14 @@ export async function getInvoices(custname: string): Promise<InvoicesResult> {
         isCredit: (Number(iv.TOTPRICE) || 0) < 0 || String(iv.IVNUM ?? '').startsWith('IK'),
       }));
 
-    const openTotal = round2(openViews.reduce((sum, iv) => sum + iv.amount, 0));
+    // Authoritative open debt = OBLIGO.ACC_DEBIT (matches the official statement);
+    // OPENINVOICES sum is the fallback when OBLIGO is unavailable.
+    const accDebit =
+      obligo && typeof obligo.ACC_DEBIT === 'number' ? Math.max(0, round2(obligo.ACC_DEBIT)) : null;
+    const openListSum = round2(openViews.reduce((sum, iv) => sum + iv.amount, 0));
+    const openTotal = accDebit ?? openListSum;
+    // We owe money (per the AR balance) but the per-invoice open list is empty.
+    const openListIncomplete = openTotal > 0.005 && openViews.length === 0;
 
     return {
       open: openViews,
@@ -226,6 +250,7 @@ export async function getInvoices(custname: string): Promise<InvoicesResult> {
       priorityOk: true,
       openUnavailable: open === null,
       historyUnavailable: history === null,
+      openListIncomplete,
     };
   } catch (err) {
     console.warn('[finance] getInvoices shaping failed:', err);
