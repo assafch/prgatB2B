@@ -5,7 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
-import { db } from './db.js';
+import { db, getSettingBool } from './db.js';
 import {
   getPriorityConfig,
   listProducts,
@@ -234,6 +234,10 @@ export function queryCatalog(
   const page = Math.max(1, q.page || 1);
   const pageSize = Math.min(100, Math.max(10, q.pageSize || 50));
   const offset = (page - 1) * pageSize;
+  // Per-customer pricing is OFF for now (admin choice): everyone sees the base
+  // מחירון price. Flip the 'customer_pricing_enabled' setting to re-enable the
+  // per-customer override later.
+  const usePersonal = getSettingBool('customer_pricing_enabled', false);
 
   const conds: string[] = ['c.active = 1', 'c.b2b_visible = 1'];
   const params: unknown[] = [];
@@ -302,7 +306,7 @@ export function queryCatalog(
     min_qty: r.b2b_min_qty ?? r.box_size,
     featured: r.b2b_featured,
     description: r.b2b_description,
-    price: r.personal_price ?? r.list_price,
+    price: usePersonal ? r.personal_price ?? r.list_price : r.list_price,
   }));
 
   return { items, total };
@@ -342,6 +346,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     | undefined;
   if (!row) return null;
   if (!row.active || !row.b2b_visible) return null;
+  const usePersonal = getSettingBool('customer_pricing_enabled', false);
   return {
     partname: row.partname,
     partdes: row.b2b_partdes_override || row.partdes,
@@ -354,7 +359,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     min_qty: row.b2b_min_qty ?? row.box_size,
     featured: row.b2b_featured,
     description: row.b2b_description,
-    price: row.personal_price ?? row.list_price,
+    price: usePersonal ? row.personal_price ?? row.list_price : row.list_price,
   };
 }
 
