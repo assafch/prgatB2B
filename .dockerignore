@@ -1,0 +1,16 @@
+# Keep the build context lean and, critically, keep host (macOS) node_modules out
+# so `npm ci` inside the image installs correct linux-native bindings.
+node_modules
+dist
+data
+.git
+.gitignore
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+.railway-deploy.json
+.railway-finish-url
+*.log
+.DS_Store
