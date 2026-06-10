@@ -115,6 +115,27 @@ CREATE TABLE IF NOT EXISTS card_payments (
 CREATE INDEX IF NOT EXISTS idx_cardpay_user ON card_payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_cardpay_status ON card_payments(status);
 
+CREATE TABLE IF NOT EXISTS templates (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  custname TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS template_lines (
+  template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+  partname TEXT NOT NULL,
+  quantity REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_templates_user ON templates(user_id);
+
+CREATE TABLE IF NOT EXISTS favorites (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  partname TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, partname)
+);
+
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
   business_name TEXT,

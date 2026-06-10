@@ -95,6 +95,10 @@ async function load(shell: HTMLElement): Promise<void> {
       <button id="checkout" style="flex:1" ${hasUnavailable ? 'disabled' : ''}>המשך לסיום הזמנה ←</button>
     </div>
     ${hasUnavailable ? `<div class="error" style="text-align:center;margin-top:0.5rem;font-size:0.9rem">יש להסיר פריטים שאינם זמינים כדי להמשיך</div>` : ''}
+    <div style="display:flex;gap:1rem;justify-content:center;margin-top:0.6rem;font-size:0.9rem">
+      <button id="save-tpl" style="background:none;border:none;color:var(--brand);cursor:pointer;padding:0">💾 שמירה כתבנית</button>
+      <a href="#templates">📋 התבניות שלי</a>
+    </div>
   `;
 
   bindSteppers(shell, async (part, qty) => {
@@ -126,6 +130,17 @@ async function load(shell: HTMLElement): Promise<void> {
 
   shell.querySelector('#checkout')?.addEventListener('click', () => {
     location.hash = '#checkout';
+  });
+
+  shell.querySelector('#save-tpl')?.addEventListener('click', async () => {
+    const name = window.prompt('שם התבנית:', 'הסדר הקבוע');
+    if (!name) return;
+    try {
+      await api.post('/api/templates', { name });
+      toast('התבנית נשמרה ✓', 'ok');
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : String(ex), 'error');
+    }
   });
 }
 

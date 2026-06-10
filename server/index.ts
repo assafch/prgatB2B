@@ -14,6 +14,7 @@ import { runAssistant, assistantEnabled } from './assistant.js';
 import { upayEnabled } from './upay.js';
 import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments } from './cardPayments.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
+import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -634,6 +635,42 @@ app.put('/api/cart/lines/:partname', requireCustomer, cartLimiter, (req: AuthedR
 app.delete('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
   clearCart(req.user!.id);
   res.json({ ok: true });
+});
+
+// ---------- Saved-basket templates + favorites ----------
+app.get('/api/templates', requireCustomer, (req: AuthedRequest, res) => {
+  res.json({ templates: listTemplates(req.user!.id) });
+});
+app.post('/api/templates', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  const name = typeof (req.body as { name?: unknown })?.name === 'string' ? (req.body as { name: string }).name : '';
+  try {
+    res.json({ id: saveTemplate(req.user!.id, req.user!.custname!, name) });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה' });
+  }
+});
+app.post('/api/templates/:id/apply', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  try {
+    res.json({ added: applyTemplate(req.user!.id, req.user!.custname!, Number(req.params.id)) });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה' });
+  }
+});
+app.delete('/api/templates/:id', requireCustomer, (req: AuthedRequest, res) => {
+  const ok = deleteTemplate(req.user!.id, Number(req.params.id));
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
+});
+
+app.get('/api/favorites', requireCustomer, (req: AuthedRequest, res) => {
+  res.json({ partnames: listFavorites(req.user!.id) });
+});
+app.post('/api/favorites', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  const partname = typeof (req.body as { partname?: unknown })?.partname === 'string' ? (req.body as { partname: string }).partname : '';
+  if (!partname) {
+    res.status(400).json({ error: 'partname_required' });
+    return;
+  }
+  res.json({ favorited: toggleFavorite(req.user!.id, partname) });
 });
 
 app.post('/api/orders', requireCustomer, blockIfMaintenance, ordersMinuteLimiter, ordersDailyLimiter, ah(async (req, res) => {

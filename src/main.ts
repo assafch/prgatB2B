@@ -21,6 +21,7 @@ import { renderPayments } from './pages/payments.js';
 import { renderAssistant } from './pages/assistant.js';
 import { renderAccessibility } from './pages/accessibility.js';
 import { renderPayCard, renderPayCardReturn } from './pages/payCard.js';
+import { renderTemplates } from './pages/templates.js';
 import { renderAdmin } from './pages/admin.js';
 
 const root = document.getElementById('app')!;
@@ -191,6 +192,7 @@ async function route(): Promise<void> {
   if (hash === '#pay/check') return renderPayCheck(mount(''));
   if (hash === '#payments') return renderPayments(mount(''));
   if (hash === '#assistant') return renderAssistant(mount(''));
+  if (hash === '#templates') return renderTemplates(mount(''));
 
   // Unknown route → home
   location.hash = '#home';
