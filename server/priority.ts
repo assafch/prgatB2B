@@ -102,14 +102,15 @@ export interface PriorityProduct {
   PARTDES?: string;
   FAMILYNAME?: string;
   BARCODE?: string;
-  LASTPRICE?: number;
+  BASEPLPRICE?: number; // base price-list price (מחיר מחירון בסיס), BEFORE VAT — the selling price
+  LASTPRICE?: number; // last transaction price (near cost) — NOT a selling price
   STATDES?: string;
 }
 
 export async function listProducts(config: PriorityConfig): Promise<PriorityProduct[]> {
   const items = await loadAllFromPriority(
     config,
-    `LOGPART?$select=PARTNAME,PARTDES,FAMILYNAME,BARCODE,LASTPRICE,STATDES`
+    `LOGPART?$select=PARTNAME,PARTDES,FAMILYNAME,BARCODE,BASEPLPRICE,LASTPRICE,STATDES`
   );
   return items as unknown as PriorityProduct[];
 }

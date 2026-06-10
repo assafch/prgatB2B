@@ -87,7 +87,9 @@ export async function refreshCatalogFromPriority(): Promise<{
         family,
         familyDesc,
         String(p.BARCODE || '').trim() || null,
-        typeof p.LASTPRICE === 'number' ? p.LASTPRICE : null,
+        // Selling base price = מחיר מחירון בסיס (BASEPLPRICE, before VAT). LASTPRICE
+        // is the last transaction price (near cost) and must NOT be shown to customers.
+        typeof p.BASEPLPRICE === 'number' && p.BASEPLPRICE > 0 ? p.BASEPLPRICE : null,
         active
       );
     }
