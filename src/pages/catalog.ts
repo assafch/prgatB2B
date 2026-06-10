@@ -118,18 +118,34 @@ async function load(shell: HTMLElement): Promise<void> {
     grid.className = isList ? 'cat-list' : '';
     grid.style.cssText = isList ? '' : 'display:grid;grid-template-columns:repeat(2,1fr);gap:0.75rem;';
     if (isList) {
-      // Grouped under family headers (server already sorts by family).
-      let html = '';
-      let curFam: string | null = null;
+      // Group consecutive same-family rows (server sorts by family) into collapsible
+      // accordion sections — click a family title to fold/unfold its products.
+      const groups: Array<{ fam: string; items: CatalogItem[] }> = [];
       for (const it of items) {
         const fam = it.family_desc || it.family || 'ללא משפחה';
-        if (fam !== curFam) {
-          html += `<div class="cat-fam-head">${escapeHtml(fam)}</div>`;
-          curFam = fam;
-        }
-        html += listRow(it);
+        if (!groups.length || groups[groups.length - 1].fam !== fam) groups.push({ fam, items: [] });
+        groups[groups.length - 1].items.push(it);
       }
-      grid.innerHTML = html;
+      grid.innerHTML = groups
+        .map(
+          (g) => `
+        <div class="cat-fam-group">
+          <button type="button" class="cat-fam-head" aria-expanded="true">
+            <span class="cat-fam-chev">▾</span>
+            <span class="cat-fam-name">${escapeHtml(g.fam)}</span>
+            <span class="cat-fam-count">${g.items.length}</span>
+          </button>
+          <div class="cat-fam-items">${g.items.map(listRow).join('')}</div>
+        </div>`
+        )
+        .join('');
+      grid.querySelectorAll<HTMLButtonElement>('.cat-fam-head').forEach((h) => {
+        h.addEventListener('click', () => {
+          const group = h.closest('.cat-fam-group');
+          const collapsed = group?.classList.toggle('collapsed');
+          h.setAttribute('aria-expanded', String(!collapsed));
+        });
+      });
     } else {
       grid.innerHTML = items.map(gridCard).join('');
     }
