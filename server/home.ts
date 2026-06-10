@@ -21,6 +21,7 @@ export interface HomeData {
   custDesc: string | null;
   balance: BalanceSummary;
   priorityOk: boolean;
+  balanceOk: boolean;
   lastOrder: LastOrderView | null;
   suggestions: ReorderSuggestion[];
   /** server-owned feature flags so the client never shows dead CTAs */
@@ -66,6 +67,7 @@ export async function getHomeData(
     custDesc,
     balance: summary.balance,
     priorityOk: summary.priorityOk,
+    balanceOk: summary.balanceOk,
     lastOrder,
     suggestions: getReorderSuggestions(userId, custname),
     features: { payments: process.env.PAYMENTS_ENABLED === 'true' },

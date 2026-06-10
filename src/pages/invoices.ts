@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { formatMoney, formatDate, escapeHtml } from '../format.js';
+import { emptyState, skeleton } from '../ui.js';
 
 interface OpenInvoiceView {
   date: string | null;
@@ -10,7 +11,6 @@ interface OpenInvoiceView {
   ordname: string | null;
   reference: string | null;
 }
-
 interface InvoiceView {
   ivnum: string;
   date: string | null;
@@ -21,126 +21,93 @@ interface InvoiceView {
   ordname: string | null;
   isCredit: boolean;
 }
-
 interface InvoicesResult {
   open: OpenInvoiceView[];
   history: InvoiceView[];
   summary: { openTotal: number; openCount: number };
   priorityOk: boolean;
+  openUnavailable?: boolean;
+  historyUnavailable?: boolean;
 }
 
 export async function renderInvoices(shell: HTMLElement): Promise<void> {
-  shell.innerHTML = `<div class="muted">טוען חשבוניות…</div>`;
+  shell.innerHTML = `<div class="card">${skeleton(3)}</div>`;
+  let data: InvoicesResult;
   try {
-    const data = await api.get<InvoicesResult>('/api/invoices');
-
-    if (!data.priorityOk) {
-      shell.innerHTML = `
-        <div class="card">
-          <h1 style="margin-top:0">חשבוניות ויתרה</h1>
-          <div class="empty">לא ניתן לטעון נתונים מ-Priority כרגע. נסו שוב מאוחר יותר.</div>
-        </div>`;
-      return;
-    }
-
-    shell.innerHTML = `
-      ${balanceCard(data.summary)}
-      ${openTable(data.open)}
-      ${historyTable(data.history)}
-    `;
+    data = await api.get<InvoicesResult>('/api/invoices');
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
+    return;
   }
+
+  // Both forms blocked / Priority unreachable.
+  if (!data.priorityOk) {
+    shell.innerHTML = `<div class="card">${emptyState(
+      '🧾',
+      'נתוני החשבוניות אינם זמינים כעת',
+      'המידע יתעדכן בקרוב. לפרטים מיידיים פנו למשרד אורגת.'
+    )}</div>`;
+    return;
+  }
+
+  shell.innerHTML = `
+    ${balanceCard(data)}
+    ${openSection(data)}
+    ${historySection(data)}
+  `;
 }
 
-function balanceCard(summary: { openTotal: number; openCount: number }): string {
-  const hasDebt = summary.openTotal > 0.005;
+function balanceCard(d: InvoicesResult): string {
+  if (d.openUnavailable) {
+    return `<div class="card debt-card"><div class="amount" style="color:var(--muted);font-size:1.3rem">היתרה לא זמינה כעת</div><div class="label">לפרטים על חוב פתוח פנו למשרד</div></div>`;
+  }
+  const hasDebt = d.summary.openTotal > 0.005;
+  return hasDebt
+    ? `<div class="card debt-card owing">
+         <div class="label">יתרה לתשלום · ${d.summary.openCount} חשבוניות פתוחות</div>
+         <div class="amount">${formatMoney(d.summary.openTotal)}</div>
+       </div>`
+    : `<div class="card debt-card clear">
+         <div class="amount">✓ אין חוב פתוח</div>
+         <div class="label">כל החשבוניות שולמו</div>
+       </div>`;
+}
+
+function openSection(d: InvoicesResult): string {
+  if (d.openUnavailable || d.open.length === 0) return '';
   return `
-    <div class="card">
-      <h1 style="margin-top:0">חשבוניות ויתרה</h1>
-      <div class="summary-grid">
-        ${
-          hasDebt
-            ? `<div class="stat debt">
-                 <div class="num">${formatMoney(summary.openTotal)}</div>
-                 <div class="label">יתרה לתשלום · ${summary.openCount} חשבוניות פתוחות</div>
-               </div>`
-            : `<div class="stat clear">
-                 <div class="num">אין יתרה ✓</div>
-                 <div class="label">כל החשבוניות שולמו</div>
-               </div>`
-        }
-      </div>
-    </div>`;
+    <div class="sec-head"><h2>חשבוניות פתוחות</h2><span class="muted">${d.open.length}</span></div>
+    ${d.open
+      .map(
+        (iv) => `
+      <div class="card dash-row" style="margin-bottom:0.5rem">
+        <div class="grow">
+          <div style="font-weight:700">${escapeHtml(iv.docNo || iv.reference || iv.ordname || 'חשבונית')}</div>
+          <div class="muted" style="font-size:0.83rem">${formatDate(iv.date)}${iv.ordname ? ' · הזמנה ' + escapeHtml(iv.ordname) : ''}</div>
+        </div>
+        <div style="font-weight:800;color:var(--err)">${formatMoney(iv.amount)}</div>
+      </div>`
+      )
+      .join('')}`;
 }
 
-function openTable(open: OpenInvoiceView[]): string {
-  if (open.length === 0) return '';
-  const total = open.reduce((s, iv) => s + iv.amount, 0);
-  return `
-    <div class="card">
-      <div class="section-title"><h2 style="margin:0">חשבוניות פתוחות לתשלום</h2><span class="count">${open.length}</span></div>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>תאריך</th>
-            <th>מס׳ מסמך</th>
-            <th>אסמכתא / הזמנה</th>
-            <th>סכום לתשלום</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${open
-            .map(
-              (iv) => `
-            <tr>
-              <td>${formatDate(iv.date)}</td>
-              <td>${escapeHtml(iv.docNo || '-')}</td>
-              <td>${escapeHtml(iv.reference || iv.ordname || '-')}</td>
-              <td class="amount">${formatMoney(iv.amount)}</td>
-            </tr>`
-            )
-            .join('')}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="3">סה״כ לתשלום</td>
-            <td class="amount">${formatMoney(total)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>`;
-}
-
-function historyTable(history: InvoiceView[]): string {
-  if (history.length === 0) {
-    return `<div class="card"><div class="empty">אין חשבוניות בהיסטוריה.</div></div>`;
+function historySection(d: InvoicesResult): string {
+  if (d.historyUnavailable) return '';
+  if (d.history.length === 0) {
+    return `<div class="card">${emptyState('📄', 'אין חשבוניות בהיסטוריה')}</div>`;
   }
   return `
-    <div class="card">
-      <div class="section-title"><h2 style="margin:0">היסטוריית חשבוניות</h2><span class="count">${history.length}</span></div>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>מס׳ חשבונית</th>
-            <th>תאריך</th>
-            <th>הזמנה</th>
-            <th>סכום כולל מע״מ</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${history
-            .map(
-              (iv) => `
-            <tr>
-              <td>${escapeHtml(iv.ivnum)} ${iv.isCredit ? '<span class="badge credit">זיכוי</span>' : ''}</td>
-              <td>${formatDate(iv.date)}</td>
-              <td>${escapeHtml(iv.ordname || '-')}</td>
-              <td class="amount">${formatMoney(iv.amount)}</td>
-            </tr>`
-            )
-            .join('')}
-        </tbody>
-      </table>
-    </div>`;
+    <div class="sec-head"><h2>היסטוריית חשבוניות</h2><span class="muted">${d.history.length}</span></div>
+    ${d.history
+      .map(
+        (iv) => `
+      <div class="card dash-row" style="margin-bottom:0.5rem">
+        <div class="grow">
+          <div style="font-weight:700">${escapeHtml(iv.ivnum)} ${iv.isCredit ? '<span class="chip info">זיכוי</span>' : ''}</div>
+          <div class="muted" style="font-size:0.83rem">${formatDate(iv.date)}${iv.ordname ? ' · הזמנה ' + escapeHtml(iv.ordname) : ''}</div>
+        </div>
+        <div style="font-weight:700">${formatMoney(iv.amount)}</div>
+      </div>`
+      )
+      .join('')}`;
 }

@@ -67,7 +67,23 @@ export interface BalanceSummary {
 export interface AccountSummary {
   profile: CustomerProfile | null;
   balance: BalanceSummary;
+  /** could we reach Priority at all (the customer profile loaded)? */
   priorityOk: boolean;
+  /** did the open-balance/obligo forms load? They may be API-disabled per the
+   *  API user's form permissions even when the profile loads fine. */
+  balanceOk: boolean;
+}
+
+// Run a Priority call but never throw — return null on any failure (incl. a
+// form that isn't API-enabled, which 400s). Lets the summary show what IS
+// available instead of collapsing entirely when one form is blocked.
+async function tryGet<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn(`[finance] ${label} unavailable:`, err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 function shapeProfile(custname: string, c: PriorityCustomerFull | null): CustomerProfile | null {
@@ -92,45 +108,39 @@ function shapeProfile(custname: string, c: PriorityCustomerFull | null): Custome
 }
 
 export async function getAccountSummary(custname: string): Promise<AccountSummary> {
+  const emptyBalance: BalanceSummary = { openTotal: 0, openCount: 0, obligo: null, creditLimit: null };
   const config = getPriorityConfig();
   if (!config) {
-    return {
-      profile: null,
-      balance: { openTotal: 0, openCount: 0, obligo: null, creditLimit: null },
-      priorityOk: false,
-    };
+    return { profile: null, balance: emptyBalance, priorityOk: false, balanceOk: false };
   }
 
-  try {
-    const [customer, open, obligo] = await Promise.all([
-      memo(`customer:${custname}`, () => getCustomer(config, custname)),
-      memo(`open:${custname}`, () => listOpenInvoices(config, custname)),
-      memo(`obligo:${custname}`, () => getObligo(config, custname)),
-    ]);
+  // Each form is fetched independently and tolerates failure — a single
+  // API-disabled form (OPENINVOICES/OBLIGO commonly need the form ticked for the
+  // API user) must not hide the customer profile.
+  const [customer, open, obligo] = await Promise.all([
+    tryGet(`customer:${custname}`, () => memo(`customer:${custname}`, () => getCustomer(config, custname))),
+    tryGet(`open:${custname}`, () => memo(`open:${custname}`, () => listOpenInvoices(config, custname))),
+    tryGet(`obligo:${custname}`, () => memo(`obligo:${custname}`, () => getObligo(config, custname))),
+  ]);
 
-    const openTotal = round2(open.reduce((sum, iv) => sum + (Number(iv.TOTPRICE) || 0), 0));
+  const balanceOk = open !== null;
+  const balance: BalanceSummary = {
+    openTotal: open ? round2(open.reduce((sum, iv) => sum + (Number(iv.TOTPRICE) || 0), 0)) : 0,
+    openCount: open ? open.length : 0,
+    obligo: obligo && typeof obligo.OBLIGO === 'number' ? round2(obligo.OBLIGO) : null,
+    creditLimit:
+      obligo && typeof obligo.MAX_CREDIT === 'number' && obligo.MAX_CREDIT > 0
+        ? round2(obligo.MAX_CREDIT)
+        : null,
+  };
 
-    return {
-      profile: shapeProfile(custname, customer),
-      balance: {
-        openTotal,
-        openCount: open.length,
-        obligo: obligo && typeof obligo.OBLIGO === 'number' ? round2(obligo.OBLIGO) : null,
-        creditLimit:
-          obligo && typeof obligo.MAX_CREDIT === 'number' && obligo.MAX_CREDIT > 0
-            ? round2(obligo.MAX_CREDIT)
-            : null,
-      },
-      priorityOk: true,
-    };
-  } catch (err) {
-    console.warn('[finance] getAccountSummary failed:', err);
-    return {
-      profile: null,
-      balance: { openTotal: 0, openCount: 0, obligo: null, creditLimit: null },
-      priorityOk: false,
-    };
-  }
+  return {
+    profile: shapeProfile(custname, customer),
+    balance,
+    // priorityOk = we reached Priority for at least one form (profile or balance).
+    priorityOk: customer !== null || open !== null,
+    balanceOk,
+  };
 }
 
 // ---------- Invoices (open + history) ----------
@@ -161,6 +171,9 @@ export interface InvoicesResult {
   history: InvoiceView[];
   summary: { openTotal: number; openCount: number };
   priorityOk: boolean;
+  /** true when the open-invoices form is API-disabled (distinct from a network outage) */
+  openUnavailable?: boolean;
+  historyUnavailable?: boolean;
 }
 
 export async function getInvoices(custname: string): Promise<InvoicesResult> {
@@ -169,13 +182,18 @@ export async function getInvoices(custname: string): Promise<InvoicesResult> {
     return { open: [], history: [], summary: { openTotal: 0, openCount: 0 }, priorityOk: false };
   }
 
-  try {
-    const [open, history] = await Promise.all([
-      memo(`open:${custname}`, () => listOpenInvoices(config, custname)),
-      memo(`invoices:${custname}`, () => listInvoices(config, custname)),
-    ]);
+  const [open, history] = await Promise.all([
+    tryGet(`open:${custname}`, () => memo(`open:${custname}`, () => listOpenInvoices(config, custname))),
+    tryGet(`invoices:${custname}`, () => memo(`invoices:${custname}`, () => listInvoices(config, custname))),
+  ]);
 
-    const openViews: OpenInvoiceView[] = open.map((iv) => ({
+  // Both forms blocked/unreachable → signal a hard failure to the UI.
+  if (open === null && history === null) {
+    return { open: [], history: [], summary: { openTotal: 0, openCount: 0 }, priorityOk: false };
+  }
+
+  try {
+    const openViews: OpenInvoiceView[] = (open ?? []).map((iv) => ({
       date: iv.CURDATE ?? null,
       docNo: iv.DOCNO != null ? String(iv.DOCNO) : iv.DOCREF ?? null,
       amount: round2(Number(iv.TOTPRICE) || 0),
@@ -186,7 +204,7 @@ export async function getInvoices(custname: string): Promise<InvoicesResult> {
     }));
 
     // Customers should only see finalized documents (hide drafts/cancelled).
-    const historyViews: InvoiceView[] = history
+    const historyViews: InvoiceView[] = (history ?? [])
       .filter((iv) => (iv.STATDES || '').trim() === 'סופית')
       .map((iv) => ({
         ivnum: String(iv.IVNUM ?? ''),
@@ -206,9 +224,11 @@ export async function getInvoices(custname: string): Promise<InvoicesResult> {
       history: historyViews,
       summary: { openTotal, openCount: openViews.length },
       priorityOk: true,
+      openUnavailable: open === null,
+      historyUnavailable: history === null,
     };
   } catch (err) {
-    console.warn('[finance] getInvoices failed:', err);
+    console.warn('[finance] getInvoices shaping failed:', err);
     return { open: [], history: [], summary: { openTotal: 0, openCount: 0 }, priorityOk: false };
   }
 }

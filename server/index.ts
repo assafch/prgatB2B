@@ -553,6 +553,7 @@ app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => 
     profile: summary.profile,
     balance: summary.balance,
     priorityOk: summary.priorityOk,
+    balanceOk: summary.balanceOk,
   });
 }));
 

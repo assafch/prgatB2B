@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { formatMoney, formatDate, formatDateTime, escapeHtml } from '../format.js';
+import { statusChip, emptyState, skeleton, toast } from '../ui.js';
+import { refreshCartCount } from '../main.js';
 
 interface OrderRow {
   id: number;
@@ -10,7 +12,6 @@ interface OrderRow {
   created_at: string;
   submitted_at: string | null;
 }
-
 interface PriorityOrder {
   ORDNAME?: string;
   CDES?: string;
@@ -19,108 +20,79 @@ interface PriorityOrder {
   DETAILS?: string;
 }
 
+const LOCAL_STATUS: Record<string, string> = {
+  submitting: 'בשליחה',
+  submitted: 'נשלחה',
+  failed: 'נכשלה',
+  draft: 'טיוטה',
+};
+
 export async function renderOrders(shell: HTMLElement): Promise<void> {
-  shell.innerHTML = `<div class="muted">טוען הזמנות…</div>`;
+  shell.innerHTML = `<div class="card">${skeleton(3)}</div>`;
   try {
-    // Local orders are portal-submitted; Priority orders are the full ERP history
-    // (incl. orders placed by phone/agent). Priority may be slow → fetch in parallel,
-    // and it degrades to [] on its own if unreachable.
     const [{ orders }, priority] = await Promise.all([
       api.get<{ orders: OrderRow[] }>('/api/orders'),
-      api
-        .get<{ orders: PriorityOrder[] }>('/api/orders/priority')
-        .catch(() => ({ orders: [] as PriorityOrder[] })),
+      api.get<{ orders: PriorityOrder[] }>('/api/orders/priority').catch(() => ({ orders: [] as PriorityOrder[] })),
     ]);
 
     if (orders.length === 0 && priority.orders.length === 0) {
-      shell.innerHTML = `
-        <div class="card empty">
-          <h2>אין הזמנות עדיין</h2>
-          <p><a href="#catalog">צא לקטלוג והזמן</a></p>
-        </div>`;
+      shell.innerHTML = `<div class="card">${emptyState('📦', 'אין הזמנות עדיין', 'צאו לקטלוג והזמינו', '#catalog', 'לקטלוג')}</div>`;
       return;
     }
 
     shell.innerHTML = `
-      ${localOrdersCard(orders)}
-      ${priorityOrdersCard(priority.orders)}
+      ${orders.length ? `<div class="sec-head"><h2>הזמנות מהפורטל</h2><span class="muted">${orders.length}</span></div>` : ''}
+      ${orders.map(portalCard).join('')}
+      ${priority.orders.length ? `<div class="sec-head"><h2>היסטוריית הזמנות</h2><span class="muted">${priority.orders.length}</span></div>` : ''}
+      ${priority.orders.map(priorityCard).join('')}
     `;
+
+    shell.querySelectorAll<HTMLButtonElement>('button.reorder').forEach((b) => {
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const r = await api.post<{ lines: number }>(`/api/orders/${b.dataset.id}/reorder`);
+          await refreshCartCount();
+          if (!r.lines) {
+            toast('אף מוצר מההזמנה אינו זמין כעת', 'error');
+            b.disabled = false;
+            return;
+          }
+          toast(`${r.lines} מוצרים נוספו לעגלה`, 'ok');
+          location.hash = '#cart';
+        } catch (ex) {
+          toast(ex instanceof Error ? ex.message : String(ex), 'error');
+          b.disabled = false;
+        }
+      });
+    });
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
 }
 
-function localOrdersCard(orders: OrderRow[]): string {
-  if (orders.length === 0) return '';
+function portalCard(o: OrderRow): string {
   return `
-    <div class="card">
-      <div class="section-title"><h1 style="margin:0">הזמנות מהפורטל</h1><span class="count">${orders.length}</span></div>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>תאריך</th>
-            <th>מס׳ Priority</th>
-            <th>סטטוס</th>
-            <th>סכום</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${orders
-            .map(
-              (o) => `
-            <tr>
-              <td>${formatDateTime(o.created_at)}</td>
-              <td>${escapeHtml(o.priority_ordname || '-')}</td>
-              <td>${statusLabel(o.status)}</td>
-              <td class="amount">${o.total != null ? formatMoney(o.total) : '-'}</td>
-              <td><a href="#orders/${o.id}">פרטים</a></td>
-            </tr>`
-            )
-            .join('')}
-        </tbody>
-      </table>
+    <div class="card dash-row" style="margin-bottom:0.6rem">
+      <div class="grow">
+        <div style="font-weight:700">${escapeHtml(o.priority_ordname || 'הזמנה #' + o.id)}</div>
+        <div class="muted" style="font-size:0.83rem">${formatDateTime(o.created_at)} · ${o.total != null ? formatMoney(o.total) : '-'}</div>
+        <div style="margin-top:0.35rem">${statusChip(LOCAL_STATUS[o.status] || o.status)}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.4rem">
+        <a href="#orders/${o.id}" class="es-cta" style="padding:0.4rem 0.8rem;font-size:0.85rem;text-align:center">פרטים</a>
+        <button class="ghost reorder" data-id="${o.id}" style="padding:0.4rem 0.8rem;font-size:0.85rem">הזמנה חוזרת</button>
+      </div>
     </div>`;
 }
 
-function priorityOrdersCard(orders: PriorityOrder[]): string {
-  if (orders.length === 0) return '';
+function priorityCard(o: PriorityOrder): string {
   return `
-    <div class="card">
-      <div class="section-title"><h2 style="margin:0">כל ההזמנות (Priority)</h2><span class="count">${orders.length}</span></div>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>תאריך</th>
-            <th>מס׳ הזמנה</th>
-            <th>תיאור</th>
-            <th>סטטוס</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${orders
-            .map(
-              (o) => `
-            <tr>
-              <td>${formatDate(o.CURDATE)}</td>
-              <td>${escapeHtml(o.ORDNAME || '-')}</td>
-              <td>${escapeHtml(o.CDES || o.DETAILS || '-')}</td>
-              <td>${escapeHtml(o.ORDSTATUSDES || '-')}</td>
-            </tr>`
-            )
-            .join('')}
-        </tbody>
-      </table>
+    <div class="card dash-row" style="margin-bottom:0.6rem">
+      <div class="grow">
+        <div style="font-weight:700">${escapeHtml(o.ORDNAME || '-')}</div>
+        <div class="muted" style="font-size:0.83rem">${formatDate(o.CURDATE)}${o.CDES || o.DETAILS ? ' · ' + escapeHtml(o.CDES || o.DETAILS || '') : ''}</div>
+      </div>
+      <div>${statusChip(o.ORDSTATUSDES || null)}</div>
     </div>`;
-}
-
-function statusLabel(s: string): string {
-  return (
-    {
-      submitting: '<span class="muted">נשלח…</span>',
-      submitted: '<span class="ok">נשלח ✓</span>',
-      failed: '<span class="error">נכשל</span>',
-      draft: 'טיוטה',
-    }[s] || escapeHtml(s)
-  );
 }

@@ -25,6 +25,7 @@ interface HomeData {
   custDesc: string | null;
   balance: { openTotal: number; openCount: number; obligo: number | null; creditLimit: number | null };
   priorityOk: boolean;
+  balanceOk: boolean;
   lastOrder: LastOrder | null;
   suggestions: Suggestion[];
   features: { payments: boolean };
@@ -44,10 +45,10 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
   const name = d.custDesc || state.me?.cust_desc || '';
   const owing = d.balance.openTotal > 0;
 
-  // Debt headline. When Priority is unreachable we can't trust the balance, so we
-  // show an honest "unavailable" instead of a misleading ₪0.
+  // Debt headline. When the balance form is unreachable/not-API-enabled we can't
+  // trust the number, so we show an honest "unavailable" instead of a misleading ₪0.
   let debtCard: string;
-  if (!d.priorityOk) {
+  if (!d.balanceOk) {
     debtCard = `
       <div class="card debt-card">
         <div class="amount" style="color:var(--muted);font-size:1.4rem">לא זמין כעת</div>

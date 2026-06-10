@@ -30,6 +30,7 @@ interface Account {
   profile: Profile | null;
   balance: Balance;
   priorityOk: boolean;
+  balanceOk: boolean;
 }
 
 export async function renderAccount(shell: HTMLElement): Promise<void> {
@@ -81,7 +82,7 @@ export async function renderAccount(shell: HTMLElement): Promise<void> {
 }
 
 function balanceSection(a: Account): string {
-  if (!a.priorityOk) return '';
+  if (!a.balanceOk) return '';
   const b = a.balance;
   const hasDebt = b.openTotal > 0.005;
   const extra: string[] = [];
