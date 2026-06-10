@@ -103,6 +103,7 @@ async function load(shell: HTMLElement): Promise<void> {
     const params = new URLSearchParams();
     if (state.q) params.set('q', state.q);
     if (state.family) params.set('family', state.family);
+    if (state.view === 'list') params.set('sort', 'family'); // group consecutive same-family rows
     params.set('page', String(state.page));
     params.set('pageSize', String(state.pageSize));
     const { items, total } = await api.get<{ items: CatalogItem[]; total: number }>(
@@ -116,7 +117,22 @@ async function load(shell: HTMLElement): Promise<void> {
     const isList = state.view === 'list';
     grid.className = isList ? 'cat-list' : '';
     grid.style.cssText = isList ? '' : 'display:grid;grid-template-columns:repeat(2,1fr);gap:0.75rem;';
-    grid.innerHTML = items.map(isList ? listRow : gridCard).join('');
+    if (isList) {
+      // Grouped under family headers (server already sorts by family).
+      let html = '';
+      let curFam: string | null = null;
+      for (const it of items) {
+        const fam = it.family_desc || it.family || 'ללא משפחה';
+        if (fam !== curFam) {
+          html += `<div class="cat-fam-head">${escapeHtml(fam)}</div>`;
+          curFam = fam;
+        }
+        html += listRow(it);
+      }
+      grid.innerHTML = html;
+    } else {
+      grid.innerHTML = items.map(gridCard).join('');
+    }
 
     const stepInput = (part: string, delta: number): void => {
       const input = grid.querySelector<HTMLInputElement>(`input.qty[data-part="${cssEscape(part)}"]`);

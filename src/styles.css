@@ -231,6 +231,8 @@ input:focus, select:focus, textarea:focus {
 .view-toggle button { background: #fff; color: var(--muted); border: none; padding: 0.4rem 0.7rem; font-size: 1rem; cursor: pointer; border-radius: 0; }
 .view-toggle button.active { background: var(--brand); color: #fff; }
 .cat-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.cat-fam-head { position: sticky; top: 0; z-index: 2; background: var(--brand); color: #fff; font-weight: 700; padding: 0.4rem 0.8rem; border-radius: 8px; margin-top: 0.4rem; }
+.cat-fam-head:first-child { margin-top: 0; }
 .cat-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.7rem; }
 .cat-thumb { width: 48px; height: 48px; flex: none; border-radius: 6px; background: #f3f4f6; display: grid; place-items: center; overflow: hidden; color: #9ca3af; }
 .cat-thumb img { max-width: 100%; max-height: 100%; }

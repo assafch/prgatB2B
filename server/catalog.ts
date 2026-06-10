@@ -210,6 +210,7 @@ export interface CatalogQuery {
   family?: string;
   page?: number;
   pageSize?: number;
+  sort?: 'family';
 }
 
 export interface CatalogItem {
@@ -273,7 +274,7 @@ export function queryCatalog(
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
        WHERE ${where}
-       ORDER BY c.b2b_sort_priority DESC, c.partdes ASC
+       ORDER BY ${q.sort === 'family' ? 'c.family_desc IS NULL, c.family_desc COLLATE NOCASE ASC, c.partdes COLLATE NOCASE ASC' : 'c.b2b_sort_priority DESC, c.partdes ASC'}
        LIMIT ? OFFSET ?`
     )
     .all(custname, ...params, pageSize, offset) as Array<{

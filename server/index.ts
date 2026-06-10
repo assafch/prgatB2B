@@ -581,12 +581,13 @@ app.post('/api/reorder/add-all', requireCustomer, cartLimiter, (req: AuthedReque
 
 // ---------- Customer ----------
 app.get('/api/catalog', requireCustomer, (req: AuthedRequest, res) => {
-  const { q, family, page, pageSize } = req.query;
+  const { q, family, page, pageSize, sort } = req.query;
   const result = queryCatalog(req.user!.custname, {
     q: typeof q === 'string' ? q : undefined,
     family: typeof family === 'string' ? family : undefined,
     page: page ? Number(page) : undefined,
     pageSize: pageSize ? Number(pageSize) : undefined,
+    sort: sort === 'family' ? 'family' : undefined,
   });
   res.json(result);
 });
