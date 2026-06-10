@@ -29,6 +29,8 @@ interface HomeData {
   lastOrder: LastOrder | null;
   suggestions: Suggestion[];
   features: { payments: boolean; checkPayment: boolean };
+  banner: { text: string } | null;
+  maintenance: { enabled: boolean; message: string };
 }
 
 export async function renderHome(shell: HTMLElement): Promise<void> {
@@ -141,8 +143,19 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       <a class="dash-action" href="#account"><span class="ico">👤</span><span>החשבון שלי</span><span class="sub">פרטים והגדרות</span></a>
     </div>`;
 
+  // Admin-controlled customer notices (rendered escaped — plain text only).
+  const maintenanceCard = d.maintenance?.enabled
+    ? `<div class="card" style="border:1px solid var(--err);background:#fdecec"><div style="font-weight:700;color:var(--err)">🛠️ ${escapeHtml(d.maintenance.message)}</div></div>`
+    : '';
+  const bannerCard =
+    d.banner && d.banner.text
+      ? `<div class="card" style="border:1px solid var(--brand);background:#fff6f6"><div>📣 ${escapeHtml(d.banner.text)}</div></div>`
+      : '';
+
   shell.innerHTML = `
     <p class="dash-greet">שלום${name ? `, <b>${escapeHtml(name)}</b>` : ''} 👋</p>
+    ${maintenanceCard}
+    ${bannerCard}
     ${debtCard}
     ${utilBar}
     ${lastOrderCard}

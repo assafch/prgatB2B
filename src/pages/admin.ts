@@ -1,6 +1,9 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
 import { renderAdminProducts } from './adminProducts.js';
+import { renderSettingsAdmin } from './adminSettings.js';
+import { renderUsersAdmin } from './adminUsers.js';
+import { renderAnalyticsAdmin } from './adminAnalytics.js';
 
 interface Stats {
   users: number;
@@ -43,11 +46,14 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
     <div class="card" style="margin-bottom:0.75rem">
       <nav style="display:flex;gap:0.5rem;flex-wrap:wrap">
         <a href="#admin/dashboard" class="${tab === '#admin/dashboard' ? 'active' : ''}">לוח בקרה</a>
+        <a href="#admin/analytics" class="${tab === '#admin/analytics' ? 'active' : ''}">דוחות</a>
         <a href="#admin/products" class="${tab === '#admin/products' ? 'active' : ''}">ניהול מוצרים</a>
         <a href="#admin/catalog" class="${tab === '#admin/catalog' ? 'active' : ''}">סנכרון Priority</a>
+        <a href="#admin/users" class="${tab === '#admin/users' ? 'active' : ''}">משתמשים</a>
         <a href="#admin/invites" class="${tab === '#admin/invites' ? 'active' : ''}">הזמנות-לקוח</a>
         <a href="#admin/payments" class="${tab === '#admin/payments' ? 'active' : ''}">תשלומים</a>
         <a href="#admin/leads" class="${tab === '#admin/leads' ? 'active' : ''}">לידים</a>
+        <a href="#admin/settings" class="${tab === '#admin/settings' ? 'active' : ''}">הגדרות</a>
       </nav>
     </div>
     <div id="admin-content"></div>
@@ -55,11 +61,14 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
   const c = shell.querySelector('#admin-content') as HTMLDivElement;
 
   if (tab === '#admin/dashboard') await renderDashboard(c);
+  else if (tab === '#admin/analytics') await renderAnalyticsAdmin(c);
   else if (tab === '#admin/products') await renderAdminProducts(c);
   else if (tab === '#admin/catalog') await renderCatalogAdmin(c);
+  else if (tab === '#admin/users') await renderUsersAdmin(c);
   else if (tab === '#admin/invites') await renderInvitesAdmin(c);
   else if (tab === '#admin/payments') await renderPaymentsAdmin(c);
   else if (tab === '#admin/leads') await renderLeadsAdmin(c);
+  else if (tab === '#admin/settings') await renderSettingsAdmin(c);
 }
 
 interface AdminCheck {
