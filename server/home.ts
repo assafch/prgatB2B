@@ -3,7 +3,7 @@
 // down) with purely-local data (last order, heuristic reorder) so the dashboard
 // always renders something useful even if the ERP is unreachable.
 
-import { db } from './db.js';
+import { db, getSetting, getSettingBool } from './db.js';
 import { getAccountSummary, type BalanceSummary } from './finance.js';
 import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
 
@@ -26,6 +26,10 @@ export interface HomeData {
   suggestions: ReorderSuggestion[];
   /** server-owned feature flags so the client never shows dead CTAs */
   features: { payments: boolean; checkPayment: boolean };
+  /** admin-controlled customer announcement (plain text, rendered escaped) */
+  banner: { text: string } | null;
+  /** admin-controlled maintenance mode — client blocks ordering + shows a notice */
+  maintenance: { enabled: boolean; message: string };
 }
 
 export async function getHomeData(
@@ -71,8 +75,16 @@ export async function getHomeData(
     lastOrder,
     suggestions: getReorderSuggestions(userId, custname),
     features: {
-      payments: process.env.PAYMENTS_ENABLED === 'true', // card (P3) — still gated
-      checkPayment: true, // check-by-photo is live (manual entry always works; AI when keyed)
+      // Admin-toggleable (settings table), with the original env/default as fallback.
+      payments: getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true'),
+      checkPayment: getSettingBool('check_payment_enabled', true),
+    },
+    banner: getSettingBool('announcement_enabled', false)
+      ? { text: getSetting('announcement_text') || '' }
+      : null,
+    maintenance: {
+      enabled: getSettingBool('maintenance_enabled', false),
+      message: getSetting('maintenance_message') || 'המערכת בתחזוקה זמנית. נחזור בקרוב.',
     },
   };
 }

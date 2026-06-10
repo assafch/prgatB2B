@@ -287,6 +287,25 @@ export function setSetting(key: string, value: string): void {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
 }
 
+export function getSettingBool(key: string, fallback: boolean): boolean {
+  const v = getSetting(key);
+  return v == null ? fallback : v === 'true';
+}
+export function setSettingBool(key: string, value: boolean): void {
+  setSetting(key, value ? 'true' : 'false');
+}
+export function getSettingInt(key: string, fallback: number): number {
+  const v = getSetting(key);
+  const n = v == null ? NaN : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** All settings as a flat map (admin panel). */
+export function getAllSettings(): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>;
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
 export interface UserRow {
   id: number;
   username: string;

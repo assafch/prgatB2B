@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-import { db } from './db.js';
+import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSettings } from './db.js';
+import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
+import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -258,6 +260,17 @@ const sensitiveLimiter = perUser(60_000, 5); // password change etc.
 const csvImportLimiter = perUser(60_000, 10);
 const imageUploadLimiter = perUser(60_000, 20);
 const adminHeavyLimiter = perUser(60_000, 4); // full catalog/pricing refresh hits Priority hard
+const adminAnalyticsLimiter = perUser(60_000, 30); // analytics is cached server-side; this just bounds abuse
+
+// Maintenance mode: block transactional customer actions (ordering, paying) while
+// reads stay up so the customer still sees the maintenance notice on the home screen.
+function blockIfMaintenance(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (getSettingBool('maintenance_enabled', false)) {
+    res.status(503).json({ error: getSetting('maintenance_message') || 'המערכת בתחזוקה זמנית. נחזור בקרוב.' });
+    return;
+  }
+  next();
+}
 
 /**
  * Error text that is safe to return to an ADMIN client: ERP failures can embed
@@ -617,7 +630,7 @@ app.delete('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/orders', requireCustomer, ordersMinuteLimiter, ordersDailyLimiter, ah(async (req, res) => {
+app.post('/api/orders', requireCustomer, blockIfMaintenance, ordersMinuteLimiter, ordersDailyLimiter, ah(async (req, res) => {
   const { details } = (req.body || {}) as { details?: string };
   try {
     const result = await submitOrder(req.user!.id, req.user!.custname!, details);
@@ -729,6 +742,7 @@ function shapeCheck(c: CheckRow) {
 app.post(
   '/api/payments/check/parse',
   requireCustomer,
+  blockIfMaintenance,
   checkParseGlobalLimiter,
   checkParseLimiter,
   checkParseDailyLimiter,
@@ -777,7 +791,7 @@ app.post(
 }));
 
 // Customer confirms the human-verified amount/date → promise-to-pay recorded.
-app.post('/api/payments/check/:id/confirm', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+app.post('/api/payments/check/:id/confirm', requireCustomer, blockIfMaintenance, cartLimiter, (req: AuthedRequest, res) => {
   const b = (req.body || {}) as Record<string, unknown>;
   const amount = Number(b.amount);
   const checkDate = typeof b.checkDate === 'string' ? b.checkDate : '';
@@ -932,6 +946,90 @@ app.patch('/api/admin/leads/:id', requireAdmin, (req, res) => {
   updateLeadStatus(Number(req.params.id), status);
   res.json({ ok: true });
 });
+
+// ---------- Admin: app settings ----------
+// Only these keys are settable from the panel (allowlist — no arbitrary writes).
+const SETTABLE = new Set([
+  'payments_enabled',
+  'check_payment_enabled',
+  'maintenance_enabled',
+  'maintenance_message',
+  'announcement_enabled',
+  'announcement_text',
+]);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled']);
+
+app.get('/api/admin/settings', requireAdmin, (_req, res) => {
+  res.json({ settings: getAllSettings() });
+});
+
+app.patch('/api/admin/settings', requireAdmin, (req, res) => {
+  const updates = (req.body || {}) as Record<string, unknown>;
+  const applied: string[] = [];
+  for (const [key, value] of Object.entries(updates)) {
+    if (!SETTABLE.has(key)) continue;
+    if (BOOL_SETTINGS.has(key)) setSettingBool(key, value === true || value === 'true');
+    else setSetting(key, String(value ?? '').slice(0, 1000));
+    applied.push(key);
+  }
+  if (!applied.length) {
+    res.status(400).json({ error: 'no_valid_settings' });
+    return;
+  }
+  res.json({ ok: true, applied });
+});
+
+// ---------- Admin: customer / login management ----------
+app.get('/api/admin/users/detailed', requireAdmin, (_req, res) => {
+  res.json({ users: listAllUsers() });
+});
+
+app.post('/api/admin/users', requireAdmin, sensitiveLimiter, ah(async (req: AuthedRequest, res) => {
+  const b = (req.body || {}) as Record<string, string>;
+  const result = await createCustomerLogin({
+    username: b.username || '',
+    password: b.password || '',
+    custname: b.custname || '',
+    cust_desc: b.cust_desc,
+    email: b.email,
+    phone: b.phone,
+  });
+  res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true, id: result.id } : { error: result.error });
+}));
+
+app.post('/api/admin/users/:id/reset-password', requireAdmin, sensitiveLimiter, ah(async (req: AuthedRequest, res) => {
+  const { new_password } = (req.body || {}) as { new_password?: string };
+  const result = await resetUserPassword(Number(req.params.id), new_password || '');
+  res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true } : { error: result.error });
+}));
+
+app.post('/api/admin/users/:id/status', requireAdmin, (req: AuthedRequest, res) => {
+  const { status } = (req.body || {}) as { status?: string };
+  if (status !== 'active' && status !== 'disabled') {
+    res.status(400).json({ error: 'bad_status' });
+    return;
+  }
+  const result = setUserStatus(Number(req.params.id), status);
+  res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true } : { error: result.error });
+});
+
+// ---------- Admin: business analytics (from Priority; cached) ----------
+app.get('/api/admin/analytics/revenue', requireAdmin, adminAnalyticsLimiter, ah(async (_req, res) => {
+  const config = getPriorityConfig();
+  res.json({ revenue: config ? await getRevenueByMonth(config, 12) : [] });
+}));
+app.get('/api/admin/analytics/top-products', requireAdmin, adminAnalyticsLimiter, ah(async (_req, res) => {
+  const config = getPriorityConfig();
+  res.json({ products: config ? await getTopProducts(config, 6, 15) : [] });
+}));
+app.get('/api/admin/analytics/debtors', requireAdmin, adminAnalyticsLimiter, ah(async (_req, res) => {
+  const config = getPriorityConfig();
+  res.json({ debtors: config ? await getTopDebtors(config, 20) : [] });
+}));
+app.get('/api/admin/analytics/inactive', requireAdmin, adminAnalyticsLimiter, ah(async (_req, res) => {
+  const config = getPriorityConfig();
+  res.json({ inactive: config ? await getInactiveCustomers(config, 90) : [] });
+}));
 
 // ---------- Admin: Product control panel ----------
 app.get('/api/admin/products', requireAdmin, (req, res) => {
