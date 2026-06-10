@@ -344,11 +344,14 @@ export async function getInvoiceWithItems(
 ): Promise<(PriorityInvoice & { items: PriorityInvoiceLine[] }) | null> {
   const safeIv = ivnum.replace(/'/g, "''");
   const safeCust = custname.replace(/'/g, "''");
+  // NOTE: Priority returns 200 but drops the connection mid-body ("terminated")
+  // when AINVOICEITEMS_SUBFORM is expanded WITH an inner $select. A bare $expand
+  // (no inner/outer $select) responds reliably, so we pull full rows and map the
+  // fields we need in code (finance.ts) instead of constraining them server-side.
   const result = await priorityRequest(
     config,
     `AINVOICES?$filter=IVNUM eq '${safeIv}' and CUSTNAME eq '${safeCust}'&$top=1` +
-      `&$select=IVNUM,IVTYPE,CDES,IVDATE,TOTPRICE,QPRICE,VAT,DISCOUNT,ORDNAME,STATDES` +
-      `&$expand=AINVOICEITEMS_SUBFORM($select=PARTNAME,PDES,TQUANT,UNITNAME,PRICE,QPRICE,TOTPRICE)`
+      `&$expand=AINVOICEITEMS_SUBFORM`
   );
   const rows = (result.value || []) as Array<
     PriorityInvoice & { AINVOICEITEMS_SUBFORM?: PriorityInvoiceLine[] }
