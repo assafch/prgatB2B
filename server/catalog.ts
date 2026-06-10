@@ -74,7 +74,8 @@ export async function refreshCatalogFromPriority(): Promise<{
       const partname = String(p.PARTNAME || '').trim();
       if (!partname) continue;
       const family = String(p.FAMILYNAME || '').trim() || null;
-      const familyDesc = family ? famMap.get(family) || null : null;
+      // Hebrew family name is on LOGPART.FAMILYDES directly (FAMILY_LOG is API-disabled).
+      const familyDesc = String(p.FAMILYDES || '').trim() || (family ? famMap.get(family) || null : null);
       // Show only SELLABLE parts. Priority statuses on this tenant: "פעיל" (active),
       // "לא פעיל" (inactive), "אסור למכירה" (forbidden for sale) — hide anything that
       // isn't explicitly active. Keep an empty/unknown status visible so a future
