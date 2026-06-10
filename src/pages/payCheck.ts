@@ -42,7 +42,7 @@ export function renderPayCheck(shell: HTMLElement): void {
       <input type="file" id="pc-cam" accept="image/*" capture="environment" hidden/>
       <input type="file" id="pc-gal" accept="image/*" multiple hidden/>
       <div style="display:flex;gap:0.5rem">
-        <button id="pc-cam-btn" style="flex:1">📸 צלם צ׳ק</button>
+        <button id="pc-cam-btn" style="flex:1">📸 סרוק צ׳ק</button>
         <button id="pc-gal-btn" class="ghost" style="flex:1">🖼️ מהגלריה</button>
       </div>
     </div>
@@ -55,7 +55,10 @@ export function renderPayCheck(shell: HTMLElement): void {
   const footer = shell.querySelector('#pc-footer') as HTMLElement;
   const items: CheckItem[] = [];
 
-  (shell.querySelector('#pc-cam-btn') as HTMLButtonElement).onclick = () => cam.click();
+  // Live guided scanner where supported (needs a camera + secure context); otherwise
+  // fall back to the OS camera/file picker.
+  const canScan = !!navigator.mediaDevices?.getUserMedia && window.isSecureContext;
+  (shell.querySelector('#pc-cam-btn') as HTMLButtonElement).onclick = () => (canScan ? openScanner() : cam.click());
   (shell.querySelector('#pc-gal-btn') as HTMLButtonElement).onclick = () => gal.click();
 
   const onFiles = async (files: FileList | null) => {
@@ -72,8 +75,69 @@ export function renderPayCheck(shell: HTMLElement): void {
     gal.value = '';
   });
 
-  async function addCheck(file: File): Promise<void> {
-    const item: CheckItem = { draftId: null, previewUrl: URL.createObjectURL(file), ai: null, aiAvailable: false };
+  // Full-screen guided scanner: live rear camera with a cheque-shaped frame guide.
+  function openScanner(): void {
+    const ov = document.createElement('div');
+    ov.className = 'scan-overlay';
+    ov.innerHTML = `
+      <video class="scan-video" autoplay playsinline muted></video>
+      <div class="scan-mask"><div class="scan-frame"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div></div>
+      <div class="scan-hint">מקמו את הצ׳ק בתוך המסגרת<br/><span>מואר, חד, וממלא את כל המסגרת</span></div>
+      <button class="scan-close" type="button" aria-label="סגירה">✕</button>
+      <div class="scan-err"></div>
+      <div class="scan-bar"><button class="scan-shutter" type="button" aria-label="צלם"></button></div>
+    `;
+    document.body.appendChild(ov);
+    const video = ov.querySelector('.scan-video') as HTMLVideoElement;
+    const errEl = ov.querySelector('.scan-err') as HTMLElement;
+    let stream: MediaStream | null = null;
+    const close = () => {
+      stream?.getTracks().forEach((t) => t.stop());
+      stream = null;
+      ov.remove();
+      window.removeEventListener('hashchange', close);
+    };
+    window.addEventListener('hashchange', close);
+    (ov.querySelector('.scan-close') as HTMLButtonElement).onclick = close;
+
+    navigator.mediaDevices
+      .getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      })
+      .then((s) => {
+        stream = s;
+        video.srcObject = s;
+      })
+      .catch(() => {
+        errEl.textContent = 'לא ניתן לגשת למצלמה. אשרו הרשאת מצלמה או השתמשו ב״מהגלריה״.';
+        errEl.style.display = 'block';
+      });
+
+    (ov.querySelector('.scan-shutter') as HTMLButtonElement).onclick = () => {
+      if (!stream || !video.videoWidth) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        async (blob) => {
+          close();
+          if (blob) {
+            await addCheck(blob);
+            renderFooter();
+          }
+        },
+        'image/jpeg',
+        0.92
+      );
+    };
+  }
+
+  async function addCheck(blob: Blob): Promise<void> {
+    const item: CheckItem = { draftId: null, previewUrl: URL.createObjectURL(blob), ai: null, aiAvailable: false };
     items.push(item);
     const card = document.createElement('div');
     card.className = 'card';
@@ -82,7 +146,7 @@ export function renderPayCheck(shell: HTMLElement): void {
     list.appendChild(card);
     try {
       const fd = new FormData();
-      fd.append('image', file);
+      fd.append('image', blob, 'cheque.jpg');
       const res = await fetch('/api/payments/check/parse', { method: 'POST', credentials: 'include', body: fd });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       const r: ParseResult = await res.json();
