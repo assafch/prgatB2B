@@ -2,155 +2,226 @@ import { api } from '../api.js';
 import { escapeHtml } from '../format.js';
 import { toast } from '../ui.js';
 
+interface ParseAi {
+  isCheck: boolean;
+  amount: number | null;
+  date: string | null;
+  isPostdated: boolean | null;
+  bank: string | null;
+  branch: string | null;
+  account: string | null;
+  checkNumber: string | null;
+  confidence: number;
+  legible: boolean;
+  notes: string | null;
+}
 interface ParseResult {
   id: string;
   aiAvailable: boolean;
-  ai: null | {
-    isCheck: boolean;
-    amount: number | null;
-    date: string | null;
-    isPostdated: boolean | null;
-    bank: string | null;
-    branch: string | null;
-    account: string | null;
-    checkNumber: string | null;
-    confidence: number;
-    legible: boolean;
-    notes: string | null;
-  };
+  ai: ParseAi | null;
 }
+
+interface CheckItem {
+  draftId: string | null;
+  previewUrl: string;
+  ai: ParseAi | null;
+  aiAvailable: boolean;
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
 
 export function renderPayCheck(shell: HTMLElement): void {
   shell.innerHTML = `
     <div class="card">
       <h1 style="margin-top:0">תשלום בצ׳ק</h1>
-      <p class="muted" style="margin-top:-0.3rem">צלמו את הצ׳ק — נזהה את הסכום והתאריך אוטומטית. הצ׳ק הפיזי ייאסף ע״י הנהג כרגיל.</p>
-      <label id="capture" class="check-capture">
-        <input type="file" id="check-file" accept="image/*" capture="environment" hidden/>
-        <div class="cc-inner">
-          <div style="font-size:2.5rem">📸</div>
-          <div style="font-weight:700;margin-top:0.3rem">צלמו או בחרו תמונה של הצ׳ק</div>
-          <div class="muted" style="font-size:0.85rem">JPG / PNG, עד 8MB</div>
-        </div>
-      </label>
-      <div id="pc-body"></div>
+      <p class="muted" style="margin-top:-0.3rem">צלמו כל צ׳ק — נזהה אוטומטית את הסכום והתאריך. אפשר להוסיף כמה צ׳קים יחד.</p>
+      <div class="muted" style="font-size:0.82rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.7rem;margin-bottom:0.75rem">
+        💡 צלמו את כל הצ׳ק במסגרת, ממוקד ומואר היטב — התמונה משמשת לפירעון הצ׳ק.
+      </div>
+      <input type="file" id="pc-cam" accept="image/*" capture="environment" hidden/>
+      <input type="file" id="pc-gal" accept="image/*" multiple hidden/>
+      <div style="display:flex;gap:0.5rem">
+        <button id="pc-cam-btn" style="flex:1">📸 צלם צ׳ק</button>
+        <button id="pc-gal-btn" class="ghost" style="flex:1">🖼️ מהגלריה</button>
+      </div>
     </div>
+    <div id="pc-list"></div>
+    <div id="pc-footer"></div>
   `;
-  const fileInput = shell.querySelector('#check-file') as HTMLInputElement;
-  const capture = shell.querySelector('#capture') as HTMLElement;
-  const body = shell.querySelector('#pc-body') as HTMLElement;
+  const cam = shell.querySelector('#pc-cam') as HTMLInputElement;
+  const gal = shell.querySelector('#pc-gal') as HTMLInputElement;
+  const list = shell.querySelector('#pc-list') as HTMLElement;
+  const footer = shell.querySelector('#pc-footer') as HTMLElement;
+  const items: CheckItem[] = [];
 
-  capture.addEventListener('click', (e) => {
-    // The <label> already triggers the input; guard against double-fire.
-    if ((e.target as HTMLElement).id !== 'check-file') fileInput.click();
+  (shell.querySelector('#pc-cam-btn') as HTMLButtonElement).onclick = () => cam.click();
+  (shell.querySelector('#pc-gal-btn') as HTMLButtonElement).onclick = () => gal.click();
+
+  const onFiles = async (files: FileList | null) => {
+    if (!files || !files.length) return;
+    for (const file of Array.from(files)) await addCheck(file);
+    renderFooter();
+  };
+  cam.addEventListener('change', () => {
+    onFiles(cam.files);
+    cam.value = '';
+  });
+  gal.addEventListener('change', () => {
+    onFiles(gal.files);
+    gal.value = '';
   });
 
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files?.[0];
-    if (!file) return;
-    body.innerHTML = `<div class="card" style="text-align:center"><div class="muted">מעלה וקורא את הצ׳ק…</div></div>`;
-    const fd = new FormData();
-    fd.append('image', file);
-    let result: ParseResult;
+  async function addCheck(file: File): Promise<void> {
+    const item: CheckItem = { draftId: null, previewUrl: URL.createObjectURL(file), ai: null, aiAvailable: false };
+    items.push(item);
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.marginTop = '0.6rem';
+    card.innerHTML = `<div class="muted" style="text-align:center;padding:1rem">קורא את הצ׳ק…</div>`;
+    list.appendChild(card);
     try {
+      const fd = new FormData();
+      fd.append('image', file);
       const res = await fetch('/api/payments/check/parse', { method: 'POST', credentials: 'include', body: fd });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-      result = await res.json();
+      const r: ParseResult = await res.json();
+      item.draftId = r.id;
+      item.ai = r.ai;
+      item.aiAvailable = r.aiAvailable;
     } catch (ex) {
-      body.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
+      card.innerHTML = `<div class="error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
       return;
     }
-    renderConfirm(body, file, result);
-  });
-}
+    renderCard(card, item);
+  }
 
-function renderConfirm(body: HTMLElement, file: File, r: ParseResult): void {
-  const ai = r.ai;
-  const previewUrl = URL.createObjectURL(file);
-  const amount = ai?.amount != null ? String(ai.amount) : '';
-  const date = ai?.date || '';
-  const aiNote = ai
-    ? ai.isCheck === false
-      ? '⚠️ לא זוהה צ׳ק בתמונה — אנא הזינו את הפרטים ידנית.'
-      : ai.legible === false
-        ? '⚠️ הצ׳ק לא נקרא בבירור — בדקו את הפרטים.'
-        : `זוהה אוטומטית (ביטחון ${Math.round((ai.confidence || 0) * 100)}%). אנא אשרו את הפרטים.`
-    : r.aiAvailable
-      ? 'לא הצלחנו לקרוא את הצ׳ק — הזינו את הפרטים ידנית.'
-      : 'הזינו את פרטי הצ׳ק.';
+  function renderCard(card: HTMLElement, item: CheckItem): void {
+    const ai = item.ai;
+    const unreadable = !!ai && (ai.isCheck === false || ai.legible === false);
+    const amount = ai?.amount != null ? String(ai.amount) : '';
+    const date = ai?.date || '';
+    const note = ai
+      ? unreadable
+        ? '⚠️ הצ׳ק לא נקרא בבירור — צלמו שוב או הזינו ידנית'
+        : `זוהה אוטומטית (ביטחון ${Math.round((ai.confidence || 0) * 100)}%) · אשרו את הפרטים`
+      : item.aiAvailable
+        ? 'לא הצלחנו לקרוא — הזינו את הפרטים'
+        : 'הזינו את פרטי הצ׳ק';
 
-  body.innerHTML = `
-    <div class="card" style="margin-top:0.75rem">
-      <img src="${previewUrl}" alt="צ׳ק" style="width:100%;max-height:240px;object-fit:contain;border:1px solid var(--border);border-radius:8px;background:#fff"/>
-      <div class="${ai && (ai.isCheck === false || ai.legible === false) ? 'error' : 'muted'}" style="margin-top:0.5rem;font-size:0.88rem">${escapeHtml(aiNote)}</div>
-
-      <label style="margin-top:0.75rem">סכום (₪)</label>
-      <input id="pc-amount" type="number" inputmode="decimal" min="0" step="0.01" value="${escapeHtml(amount)}" placeholder="0.00"/>
-
-      <label style="margin-top:0.5rem">תאריך הצ׳ק</label>
-      <input id="pc-date" type="date" value="${escapeHtml(date)}"/>
-      <div id="pc-postdated" class="badge warn" style="display:${ai?.isPostdated ? 'inline-block' : 'none'};margin-top:0.4rem">צ׳ק דחוי</div>
-
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>צ׳ק</strong>
+        <button class="pc-remove" type="button" style="background:none;border:none;color:var(--err);cursor:pointer;font-size:0.85rem;padding:0">הסר ✕</button>
+      </div>
+      <img src="${item.previewUrl}" alt="צ׳ק" style="width:100%;max-height:180px;object-fit:contain;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:0.4rem"/>
+      <div class="${unreadable ? 'error' : 'muted'}" style="margin-top:0.4rem;font-size:0.85rem">${escapeHtml(note)}</div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <div style="flex:1">
+          <label>סכום (₪)</label>
+          <input class="pc-amount" type="number" inputmode="decimal" min="0" step="0.01" value="${escapeHtml(amount)}" placeholder="0.00"/>
+        </div>
+        <div style="flex:1">
+          <label>תאריך הצ׳ק</label>
+          <input class="pc-date" type="date" value="${escapeHtml(date)}"/>
+        </div>
+      </div>
+      <div class="pc-postdated badge warn" style="display:${date && date > today() ? 'inline-block' : 'none'};margin-top:0.4rem">צ׳ק דחוי</div>
       ${ai && (ai.bank || ai.checkNumber)
-        ? `<div class="muted" style="font-size:0.82rem;margin-top:0.6rem">${[ai.bank, ai.branch ? 'סניף ' + ai.branch : '', ai.account ? 'חשבון ' + ai.account : '', ai.checkNumber ? 'צ׳ק ' + ai.checkNumber : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>`
+        ? `<div class="muted" style="font-size:0.8rem;margin-top:0.5rem">${[ai.bank, ai.branch ? 'סניף ' + ai.branch : '', ai.account ? 'חשבון ' + ai.account : '', ai.checkNumber ? 'צ׳ק ' + ai.checkNumber : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>`
         : ''}
+      ${unreadable ? `<button class="ghost pc-retake" type="button" style="margin-top:0.5rem;width:100%">📸 צלם שוב</button>` : ''}
+    `;
 
-      <label style="margin-top:0.6rem">הערה (אופציונלי)</label>
-      <input id="pc-note" placeholder="לדוגמה: על חשבון חוב פתוח"/>
+    const amountEl = card.querySelector('.pc-amount') as HTMLInputElement;
+    const dateEl = card.querySelector('.pc-date') as HTMLInputElement;
+    const postBadge = card.querySelector('.pc-postdated') as HTMLElement;
+    amountEl.addEventListener('input', renderFooter);
+    dateEl.addEventListener('change', () => {
+      postBadge.style.display = dateEl.value && dateEl.value > today() ? 'inline-block' : 'none';
+    });
+    (card.querySelector('.pc-remove') as HTMLButtonElement).onclick = () => {
+      URL.revokeObjectURL(item.previewUrl);
+      const idx = items.indexOf(item);
+      if (idx >= 0) items.splice(idx, 1);
+      card.remove();
+      renderFooter();
+    };
+    const retake = card.querySelector('.pc-retake') as HTMLButtonElement | null;
+    if (retake) retake.onclick = () => cam.click();
+  }
 
-      <button id="pc-submit" style="width:100%;margin-top:1rem;padding:0.8rem;font-weight:700">שליחת הצ׳ק לתשלום</button>
-      <div id="pc-msg" style="margin-top:0.5rem;text-align:center"></div>
-      <p class="muted" style="font-size:0.78rem;margin-top:0.5rem">הצ׳ק הפיזי ייאסף ע״י הנהג. זהו רישום הודעת תשלום בלבד.</p>
-    </div>
-  `;
-
-  const dateInput = body.querySelector('#pc-date') as HTMLInputElement;
-  const postBadge = body.querySelector('#pc-postdated') as HTMLElement;
-  const recomputePostdated = () => {
-    const v = dateInput.value;
-    postBadge.style.display = v && v > new Date().toISOString().slice(0, 10) ? 'inline-block' : 'none';
-  };
-  dateInput.addEventListener('change', recomputePostdated);
-
-  const submit = body.querySelector('#pc-submit') as HTMLButtonElement;
-  const msg = body.querySelector('#pc-msg') as HTMLDivElement;
-  submit.addEventListener('click', async () => {
-    const amountVal = Number((body.querySelector('#pc-amount') as HTMLInputElement).value);
-    const dateVal = dateInput.value;
-    if (!isFinite(amountVal) || amountVal <= 0) {
-      msg.textContent = 'יש להזין סכום תקין';
-      msg.className = 'error';
+  function renderFooter(): void {
+    const ready = items.filter((i) => i.draftId);
+    if (!ready.length) {
+      footer.innerHTML = '';
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
-      msg.textContent = 'יש להזין תאריך תקין';
-      msg.className = 'error';
-      return;
+    const amounts = Array.from(list.querySelectorAll<HTMLInputElement>('.pc-amount')).map((el) => Number(el.value) || 0);
+    const total = amounts.reduce((a, b) => a + b, 0);
+    footer.innerHTML = `
+      <div class="card" style="margin-top:0.6rem;position:sticky;bottom:0.5rem">
+        <div style="display:flex;justify-content:space-between;font-weight:700">
+          <span>${ready.length} צ׳קים</span><span>סה״כ ₪${total.toFixed(2)}</span>
+        </div>
+        <button id="pc-submit-all" style="width:100%;margin-top:0.6rem;padding:0.8rem;font-weight:700">שליחת כל הצ׳קים</button>
+        <div id="pc-msg" style="margin-top:0.4rem;text-align:center"></div>
+        <p class="muted" style="font-size:0.78rem;margin-top:0.4rem">הצ׳קים שצולמו יופקדו לפירעון. אין צורך למסור צ׳ק פיזי.</p>
+      </div>`;
+    (footer.querySelector('#pc-submit-all') as HTMLButtonElement).onclick = submitAll;
+  }
+
+  async function submitAll(): Promise<void> {
+    const msg = footer.querySelector('#pc-msg') as HTMLDivElement;
+    const cards = Array.from(list.children) as HTMLElement[];
+    const jobs: { card: HTMLElement; item: CheckItem; amount: number; date: string }[] = [];
+    for (let i = 0; i < cards.length; i++) {
+      const item = items[i];
+      if (!item?.draftId) continue;
+      const amount = Number((cards[i].querySelector('.pc-amount') as HTMLInputElement).value);
+      const date = (cards[i].querySelector('.pc-date') as HTMLInputElement).value;
+      if (!isFinite(amount) || amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        msg.textContent = `בצ׳ק ${i + 1}: יש להזין סכום ותאריך תקינים`;
+        msg.className = 'error';
+        cards[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      jobs.push({ card: cards[i], item, amount, date });
     }
-    submit.disabled = true;
+    if (!jobs.length) return;
+    const btn = footer.querySelector('#pc-submit-all') as HTMLButtonElement;
+    btn.disabled = true;
     msg.textContent = 'שולח…';
     msg.className = 'muted';
-    try {
-      await api.post(`/api/payments/check/${r.id}/confirm`, {
-        amount: amountVal,
-        checkDate: dateVal,
-        isPostdated: dateVal > new Date().toISOString().slice(0, 10),
-        note: (body.querySelector('#pc-note') as HTMLInputElement).value || undefined,
-      });
-      URL.revokeObjectURL(previewUrl);
-      body.innerHTML = `
-        <div class="empty-state">
-          <div class="es-icon">✅</div>
-          <div class="es-title">הצ׳ק התקבל</div>
-          <div class="es-sub">רשמנו תשלום בצ׳ק על סך ₪${amountVal.toFixed(2)} לתאריך ${escapeHtml(dateVal)}.<br/>הנהג יאסוף את הצ׳ק הפיזי.</div>
-          <a class="es-cta" href="#payments">התשלומים שלי</a>
-          <div style="margin-top:0.75rem"><a href="#home">חזרה לדף הבית</a></div>
-        </div>`;
-      toast('הצ׳ק נרשם ✓', 'ok');
-    } catch (ex) {
-      msg.textContent = ex instanceof Error ? ex.message : String(ex);
-      msg.className = 'error';
-      submit.disabled = false;
+    let ok = 0;
+    let total = 0;
+    for (const j of jobs) {
+      try {
+        await api.post(`/api/payments/check/${j.item.draftId}/confirm`, {
+          amount: j.amount,
+          checkDate: j.date,
+          isPostdated: j.date > today(),
+        });
+        ok++;
+        total += j.amount;
+      } catch {
+        /* continue; report partial below */
+      }
     }
-  });
+    if (ok === 0) {
+      msg.textContent = 'השליחה נכשלה — נסו שוב';
+      msg.className = 'error';
+      btn.disabled = false;
+      return;
+    }
+    items.forEach((it) => URL.revokeObjectURL(it.previewUrl));
+    shell.innerHTML = `
+      <div class="empty-state">
+        <div class="es-icon">✅</div>
+        <div class="es-title">${ok > 1 ? `${ok} צ׳קים התקבלו` : 'הצ׳ק התקבל'}</div>
+        <div class="es-sub">רשמנו תשלום על סך ₪${total.toFixed(2)}.<br/>הצ׳קים יופקדו לפירעון.${ok < jobs.length ? `<br/><span style="color:var(--err)">שימו לב: ${jobs.length - ok} צ׳קים לא נשלחו, נסו שוב.</span>` : ''}</div>
+        <a class="es-cta" href="#payments">התשלומים שלי</a>
+        <div style="margin-top:0.75rem"><a href="#home">חזרה לדף הבית</a></div>
+      </div>`;
+    toast(ok > 1 ? `${ok} צ׳קים נרשמו ✓` : 'הצ׳ק נרשם ✓', 'ok');
+  }
 }
