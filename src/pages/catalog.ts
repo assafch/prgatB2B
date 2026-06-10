@@ -20,14 +20,18 @@ interface Family {
   count: number;
 }
 
-const state = { q: '', family: '', page: 1, pageSize: 24 };
+const state = { q: '', family: '', page: 1, pageSize: 24, view: 'grid' as 'grid' | 'list' };
 
 export async function renderCatalog(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `
     <div class="card" style="margin-bottom:0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
-      <input id="q" placeholder="חיפוש מוצר / מק״ט / ברקוד" style="flex:1;min-width:240px" />
+      <input id="q" placeholder="חיפוש מוצר / מק״ט / ברקוד" style="flex:1;min-width:200px" />
       <select id="family" style="width:auto"><option value="">כל המשפחות</option></select>
       <button id="search">חפש</button>
+      <div class="view-toggle" role="group" aria-label="תצוגה">
+        <button id="view-grid" title="תצוגת רשת" aria-label="רשת">▦</button>
+        <button id="view-list" title="תצוגת רשימה" aria-label="רשימה">☰</button>
+      </div>
     </div>
     <div id="catalog-grid"></div>
     <div id="pager" style="text-align:center;margin-top:1rem"></div>
@@ -37,6 +41,25 @@ export async function renderCatalog(shell: HTMLElement): Promise<void> {
   const btn = shell.querySelector('#search') as HTMLButtonElement;
   q.value = state.q;
   famSel.value = state.family;
+
+  // View preference (grid/list) persists across visits.
+  const saved = localStorage.getItem('catalog_view');
+  if (saved === 'list' || saved === 'grid') state.view = saved;
+  const gridBtn = shell.querySelector('#view-grid') as HTMLButtonElement;
+  const listBtn = shell.querySelector('#view-list') as HTMLButtonElement;
+  const syncToggle = () => {
+    gridBtn.classList.toggle('active', state.view === 'grid');
+    listBtn.classList.toggle('active', state.view === 'list');
+  };
+  const setView = (v: 'grid' | 'list') => {
+    state.view = v;
+    localStorage.setItem('catalog_view', v);
+    syncToggle();
+    load(shell);
+  };
+  gridBtn.addEventListener('click', () => setView('grid'));
+  listBtn.addEventListener('click', () => setView('list'));
+  syncToggle();
 
   try {
     const { families } = await api.get<{ families: Family[] }>('/api/catalog/families');
@@ -90,36 +113,10 @@ async function load(shell: HTMLElement): Promise<void> {
       pager.innerHTML = '';
       return;
     }
-    grid.style.cssText = `
-      display:grid;
-      grid-template-columns:repeat(2,1fr);
-      gap:0.75rem;
-    `;
-    grid.innerHTML = items
-      .map(
-        (it) => `
-      <div class="card" style="display:flex;flex-direction:column;gap:0.5rem">
-        <div style="aspect-ratio:1;background:#f3f4f6;border-radius:6px;display:grid;place-items:center;color:#9ca3af;font-size:0.85rem">
-          ${it.image_url ? `<img src="${escapeAttr(it.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
-        </div>
-        <a href="#product/${encodeURIComponent(it.partname)}" style="font-weight:500;color:var(--text)">
-          ${escapeHtml(it.partdes || it.partname)}
-        </a>
-        <div class="muted" style="font-size:0.85rem">${escapeHtml(it.partname)} · ארגז: ${it.box_size}</div>
-        <div style="font-weight:700;color:var(--brand)">
-          ${it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>'}
-        </div>
-        <div style="display:flex;gap:0.25rem;align-items:stretch">
-          <div style="display:flex;flex-direction:column;gap:1px">
-            <button class="step-up" data-part="${escapeAttr(it.partname)}" data-step="${it.box_size}" title="הוסף ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▲</button>
-            <button class="step-down" data-part="${escapeAttr(it.partname)}" data-step="${it.box_size}" title="הפחת ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▼</button>
-          </div>
-          <input type="number" min="0" step="1" value="0" class="qty" data-part="${escapeAttr(it.partname)}" style="width:60px;text-align:center"/>
-          <button class="add" data-part="${escapeAttr(it.partname)}" style="flex:1">הוסף</button>
-        </div>
-      </div>`
-      )
-      .join('');
+    const isList = state.view === 'list';
+    grid.className = isList ? 'cat-list' : '';
+    grid.style.cssText = isList ? '' : 'display:grid;grid-template-columns:repeat(2,1fr);gap:0.75rem;';
+    grid.innerHTML = items.map(isList ? listRow : gridCard).join('');
 
     const stepInput = (part: string, delta: number): void => {
       const input = grid.querySelector<HTMLInputElement>(`input.qty[data-part="${cssEscape(part)}"]`);
@@ -180,6 +177,49 @@ async function load(shell: HTMLElement): Promise<void> {
   } catch (ex) {
     grid.innerHTML = `<div class="card error">שגיאת טעינה: ${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
+}
+
+function priceHtml(it: CatalogItem): string {
+  return it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>';
+}
+
+function gridCard(it: CatalogItem): string {
+  return `
+    <div class="card" style="display:flex;flex-direction:column;gap:0.5rem">
+      <div style="aspect-ratio:1;background:#f3f4f6;border-radius:6px;display:grid;place-items:center;color:#9ca3af;font-size:0.85rem">
+        ${it.image_url ? `<img src="${escapeAttr(it.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
+      </div>
+      <a href="#product/${encodeURIComponent(it.partname)}" style="font-weight:500;color:var(--text)">${escapeHtml(it.partdes || it.partname)}</a>
+      <div class="muted" style="font-size:0.85rem">${escapeHtml(it.partname)} · ארגז: ${it.box_size}</div>
+      <div style="font-weight:700;color:var(--brand)">${priceHtml(it)}<span class="muted" style="font-weight:400;font-size:0.8rem"> ליח׳</span></div>
+      <div style="display:flex;gap:0.25rem;align-items:stretch">
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <button class="step-up" data-part="${escapeAttr(it.partname)}" data-step="${it.box_size}" title="הוסף ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▲</button>
+          <button class="step-down" data-part="${escapeAttr(it.partname)}" data-step="${it.box_size}" title="הפחת ${it.box_size}" style="padding:0 0.5rem;height:1.1rem;line-height:1;font-size:0.7rem">▼</button>
+        </div>
+        <input type="number" min="0" step="1" value="0" class="qty" data-part="${escapeAttr(it.partname)}" style="width:60px;text-align:center"/>
+        <button class="add" data-part="${escapeAttr(it.partname)}" style="flex:1">הוסף</button>
+      </div>
+    </div>`;
+}
+
+// Compact list row: small thumbnail · name/SKU · unit price · qty + add.
+function listRow(it: CatalogItem): string {
+  return `
+    <div class="card cat-row">
+      <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">
+        ${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}
+      </a>
+      <div class="cat-row-main">
+        <a href="#product/${encodeURIComponent(it.partname)}">${escapeHtml(it.partdes || it.partname)}</a>
+        <div class="muted" style="font-size:0.76rem">${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
+      </div>
+      <div class="cat-row-price">${priceHtml(it)}<span class="muted">ליח׳</span></div>
+      <div class="cat-row-add">
+        <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${escapeAttr(it.partname)}"/>
+        <button class="add" data-part="${escapeAttr(it.partname)}">הוסף</button>
+      </div>
+    </div>`;
 }
 
 function cssEscape(s: string): string {

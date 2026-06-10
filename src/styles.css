@@ -226,6 +226,23 @@ input:focus, select:focus, textarea:focus {
 .debt-card .pay-btn { margin-top: 1rem; width: 100%; max-width: 320px; padding: 0.8rem; font-size: 1.05rem; font-weight: 700; display: inline-block; background: var(--brand); color: #fff; border: none; border-radius: var(--radius); text-decoration: none; cursor: pointer; }
 .debt-card a.pay-btn:hover { background: var(--brand-dark); text-decoration: none; }
 
+/* Catalog view toggle + list view */
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.view-toggle button { background: #fff; color: var(--muted); border: none; padding: 0.4rem 0.7rem; font-size: 1rem; cursor: pointer; border-radius: 0; }
+.view-toggle button.active { background: var(--brand); color: #fff; }
+.cat-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.cat-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.7rem; }
+.cat-thumb { width: 48px; height: 48px; flex: none; border-radius: 6px; background: #f3f4f6; display: grid; place-items: center; overflow: hidden; color: #9ca3af; }
+.cat-thumb img { max-width: 100%; max-height: 100%; }
+.cat-row-main { flex: 1; min-width: 0; }
+.cat-row-main a { font-weight: 500; color: var(--text); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-row-price { font-weight: 700; color: var(--brand); white-space: nowrap; text-align: end; }
+.cat-row-price .muted { display: block; font-weight: 400; font-size: 0.72rem; }
+.cat-row-add { display: flex; gap: 0.25rem; flex: none; }
+.cat-row-add input { width: 52px; text-align: center; }
+.cat-row-add .add { padding: 0 0.7rem; }
+@media (max-width: 420px) { .cat-row-add input { width: 44px; } .cat-row-main a { font-size: 0.9rem; } }
+
 /* Cart promotions */
 .cart-gift { display: flex; justify-content: space-between; align-items: center; background: #f0f7ff; border: 1px solid var(--brand); border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 0.5rem; font-weight: 600; }
 .cart-gift span { color: #1a7a3a; font-weight: 700; }
