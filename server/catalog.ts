@@ -75,9 +75,12 @@ export async function refreshCatalogFromPriority(): Promise<{
       if (!partname) continue;
       const family = String(p.FAMILYNAME || '').trim() || null;
       const familyDesc = family ? famMap.get(family) || null : null;
-      // "פעיל" = active, "לא פעיל" = inactive. Anything starting with "לא" treated as inactive.
+      // Show only SELLABLE parts. Priority statuses on this tenant: "פעיל" (active),
+      // "לא פעיל" (inactive), "אסור למכירה" (forbidden for sale) — hide anything that
+      // isn't explicitly active. Keep an empty/unknown status visible so a future
+      // form/permission change can't silently empty the whole catalog.
       const stat = String(p.STATDES || '').trim();
-      const active = stat && stat.startsWith('לא') ? 0 : 1;
+      const active = !stat || stat === 'פעיל' ? 1 : 0;
       upsert.run(
         partname,
         String(p.PARTDES || '').trim() || null,
