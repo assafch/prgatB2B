@@ -29,8 +29,11 @@ function deliveryOptions(count = 5): { iso: string; dow: string; dnum: string; l
   while (out.length < count) {
     const day = d.getDay(); // 0=Sun … 6=Sat
     if (day !== 5 && day !== 6) {
+      const pad = (n: number) => String(n).padStart(2, '0');
       out.push({
-        iso: d.toISOString().slice(0, 10),
+        // Local date parts — toISOString() is UTC and would roll back a day when
+        // the owner opens checkout just after local midnight.
+        iso: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
         dow: HE_DOW[day],
         dnum: `${d.getDate()}/${d.getMonth() + 1}`,
         label: `יום ${HE_DOW[day]} ${d.getDate()}/${d.getMonth() + 1}`,

@@ -64,11 +64,18 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
             : `<a class="es-cta" href="#invoices" style="margin-top:1rem">צפייה בחשבוניות הפתוחות</a>`
         }
       </div>`;
-  } else {
+  } else if (d.lastOrder) {
     debtCard = `
       <div class="card debt-card clear">
         <div class="amount">✓ אין חוב פתוח</div>
         <div class="label">כל החשבוניות שולמו — כל הכבוד!</div>
+      </div>`;
+  } else {
+    // First-time customer with no history — welcome, don't congratulate.
+    debtCard = `
+      <div class="card debt-card clear">
+        <div class="amount">👋 ברוכים הבאים</div>
+        <div class="label">אין חשבוניות פתוחות — הזמינו עכשיו דרך הקטלוג</div>
       </div>`;
   }
 
@@ -98,7 +105,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
         <div class="grow">
           <div style="font-weight:700">${lo.ordname ? escapeHtml(lo.ordname) : 'הזמנה #' + lo.id} · ${lo.itemCount} פריטים</div>
           <div class="muted" style="font-size:0.85rem">${formatDateTime(lo.created_at)} · ${formatMoney(lo.total)}</div>
-          <div style="margin-top:0.35rem">${statusChip(null, statusLabel(lo.status))}</div>
+          <div style="margin-top:0.35rem">${statusChip(statusLabel(lo.status))}</div>
         </div>
         <button class="ghost" id="reorder-last" data-id="${lo.id}">הזמנה חוזרת</button>
       </div>`;
@@ -142,7 +149,6 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     ${lastOrderCard}
     ${suggestionCard}
     ${quickActions}
-    <a class="fab" href="#catalog"><span>＋</span> הזמנה חדשה</a>
   `;
 
   shell.querySelector('#pay-debt')?.addEventListener('click', () => {
@@ -174,6 +180,11 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     try {
       const r = await api.post<{ added: number }>('/api/reorder/add-all');
       await refreshCartCount();
+      if (!r.added) {
+        toast('אף מוצר מהסל הרגיל אינו זמין כעת', 'error');
+        btn.disabled = false;
+        return;
+      }
       toast(`${r.added} מוצרים נוספו לעגלה`, 'ok');
       location.hash = '#cart';
     } catch (ex) {

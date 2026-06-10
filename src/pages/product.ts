@@ -63,6 +63,7 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
       try {
         await api.put(`/api/cart/lines/${encodeURIComponent(p.partname)}`, {
           quantity: Number(qty.value),
+          mode: 'add',
         });
         await refreshCartCount();
         msg.textContent = '✓ נוסף לסל';

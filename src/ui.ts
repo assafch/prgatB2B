@@ -1,5 +1,5 @@
 // Shared mobile-first UI helpers for the customer app. Vanilla DOM, no framework.
-import { escapeHtml } from './format.js';
+import { escapeHtml, escapeAttr } from './format.js';
 
 export interface NavState {
   active: string; // route key: 'home' | 'catalog' | 'cart' | 'orders' | 'account'
@@ -54,16 +54,27 @@ export function confirmDialog(message: string, okLabel = 'אישור', cancelLab
           <button data-act="ok">${escapeHtml(okLabel)}</button>
         </div>
       </div>`;
+    let done = false;
     const close = (val: boolean) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('hashchange', onNav);
       back.remove();
       resolve(val);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close(false);
+    };
+    // A route change must dismiss the dialog rather than orphan it on document.body.
+    const onNav = () => close(false);
     back.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
-      if (t === back) close(false);
-      if (t.dataset.act === 'cancel') close(false);
+      if (t === back || t.dataset.act === 'cancel') close(false);
       if (t.dataset.act === 'ok') close(true);
     });
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('hashchange', onNav);
     document.body.appendChild(back);
   });
 }
@@ -106,8 +117,8 @@ export function statusChip(statusDes: string | null, fallbackKey?: string): stri
   // Map common Hebrew Priority statuses to a tone.
   let tone = 'info';
   if (/בוצע|הושלם|נשלח|סופק/.test(s)) tone = 'ok';
-  else if (/בוטל|נדחה/.test(s)) tone = 'error';
-  else if (/ממתין|טיוטא|חדש/.test(s)) tone = 'warn';
+  else if (/בוטל|נדחה|נכשל/.test(s)) tone = 'error';
+  else if (/ממתין|טיוטא|חדש|בשליח/.test(s)) tone = 'warn';
   const label = s || fallbackKey || '—';
   return `<span class="chip ${tone}">${escapeHtml(label)}</span>`;
 }
@@ -117,12 +128,15 @@ export function skeleton(lines = 3): string {
 }
 
 export function emptyState(icon: string, title: string, sub?: string, ctaHref?: string, ctaLabel?: string): string {
+  // icon/href are developer literals today, but escape them so a future caller
+  // passing catalog/customer data can't turn this into an XSS sink.
+  const safeHref = ctaHref && /^[#/]/.test(ctaHref) ? ctaHref : '#'; // only same-app links
   return `
     <div class="empty-state">
-      <div class="es-icon">${icon}</div>
+      <div class="es-icon">${escapeHtml(icon)}</div>
       <div class="es-title">${escapeHtml(title)}</div>
       ${sub ? `<div class="es-sub">${escapeHtml(sub)}</div>` : ''}
-      ${ctaHref && ctaLabel ? `<a href="${ctaHref}" class="es-cta">${escapeHtml(ctaLabel)}</a>` : ''}
+      ${ctaHref && ctaLabel ? `<a href="${escapeAttr(safeHref)}" class="es-cta">${escapeHtml(ctaLabel)}</a>` : ''}
     </div>`;
 }
 

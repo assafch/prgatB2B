@@ -39,18 +39,25 @@ export function getCart(userId: number, custname: string): { lines: CartLine[]; 
   return { lines, total };
 }
 
+/**
+ * Set or increment a cart line.
+ * - mode 'set' (default): quantity is the absolute new value (cart steppers).
+ * - mode 'add': quantity is ADDED to whatever is already in the cart, so tapping
+ *   "הוסף" twice from the catalog accumulates instead of silently overwriting.
+ */
 export function setCartLine(
   userId: number,
   custname: string,
   partname: string,
-  quantity: number
+  quantity: number,
+  mode: 'set' | 'add' = 'set'
 ): void {
-  if (quantity <= 0) {
+  if (mode === 'set' && quantity <= 0) {
     // Always allow removal, even of items that have since been hidden/deactivated.
     db.prepare('DELETE FROM cart_lines WHERE user_id = ? AND partname = ?').run(userId, partname);
     return;
   }
-  if (quantity > MAX_LINE_QTY) throw new OrderError('כמות גדולה מדי');
+  if (quantity <= 0) return; // add of 0/negative is a no-op
   // Only items that are active AND b2b_visible may enter a cart — getProduct
   // returns null otherwise. Without this check a logged-in customer could PUT any
   // partname (including hidden/internal SKUs) and push it into the ERP order.
@@ -61,13 +68,21 @@ export function setCartLine(
   if (typeof prod.price !== 'number' || prod.price <= 0) {
     throw new OrderError('למוצר אין מחיר זמין — פנו אלינו ונשלים את המחיר');
   }
+  let finalQty = quantity;
+  if (mode === 'add') {
+    const existing = db
+      .prepare('SELECT quantity FROM cart_lines WHERE user_id = ? AND partname = ?')
+      .get(userId, partname) as { quantity: number } | undefined;
+    finalQty = (existing?.quantity ?? 0) + quantity;
+  }
+  if (finalQty > MAX_LINE_QTY) throw new OrderError('כמות גדולה מדי');
   db.prepare(
     `INSERT INTO cart_lines (user_id, partname, quantity, updated_at)
      VALUES (?, ?, ?, datetime('now'))
      ON CONFLICT(user_id, partname) DO UPDATE SET
        quantity = excluded.quantity,
        updated_at = datetime('now')`
-  ).run(userId, partname, quantity);
+  ).run(userId, partname, finalQty);
 }
 
 export function clearCart(userId: number): void {

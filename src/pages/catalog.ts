@@ -147,7 +147,7 @@ async function load(shell: HTMLElement): Promise<void> {
         }
         b.disabled = true;
         try {
-          await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty });
+          await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty, mode: 'add' });
           await refreshCartCount();
           b.textContent = '✓ נוסף';
           input.value = '0';

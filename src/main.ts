@@ -127,6 +127,13 @@ async function route(): Promise<void> {
     return;
   }
 
+  // Already-authenticated users have no business on the public auth screens —
+  // send them to their home (prevents the "login form with customer chrome" state).
+  if (state.me && (hash === '#login' || hash === '#lead' || hash.startsWith('#invite/'))) {
+    location.hash = state.me.role === 'admin' ? '#admin' : '#home';
+    return;
+  }
+
   // Public routes
   if (hash === '#login') return renderLogin(mount(''), onAuthChanged);
   if (hash === '#lead') return renderLead(mount(''));
@@ -185,9 +192,19 @@ window.addEventListener('hashchange', () => {
   });
 });
 
-// Re-check auth when the tab regains focus (the session may have idled out).
+// Re-check auth when the tab regains focus (the session may have idled out while
+// backgrounded). If the identity changed or the session died, re-route so the UI
+// reflects it immediately instead of waiting for the next tap to 401.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.me) refreshMe();
+  if (document.visibilityState !== 'visible' || !state.me) return;
+  const prev = state.me;
+  refreshMe()
+    .then(() => {
+      if (!state.me || state.me.id !== prev.id || state.me.role !== prev.role) {
+        return route();
+      }
+    })
+    .catch(() => {});
 });
 
 (async () => {

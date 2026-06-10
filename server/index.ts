@@ -222,6 +222,10 @@ const ordersDailyLimiter = rateLimit({
 });
 const cartLimiter = perUser(60_000, 60);
 const financeLimiter = perUser(60_000, 20);
+// Home is the post-login landing and is re-pulled by checkout — give it its own,
+// roomier bucket so bouncing between screens can't 429 the dashboard. Underlying
+// Priority load is already shielded by the 5-min finance memo.
+const homeLimiter = perUser(60_000, 60);
 const sensitiveLimiter = perUser(60_000, 5); // password change etc.
 // Separate buckets: a CSV import dry-run + real-run pair must not eat the budget
 // of a bulk image-upload session (review finding).
@@ -409,7 +413,7 @@ app.post('/api/leads', publicLimiter, (req, res) => {
 });
 
 // ---------- Customer: home dashboard ----------
-app.get('/api/home', requireCustomer, financeLimiter, ah(async (req, res) => {
+app.get('/api/home', requireCustomer, homeLimiter, ah(async (req, res) => {
   const data = await getHomeData(req.user!.id, req.user!.custname!, req.user!.cust_desc);
   res.json(data);
 }));
@@ -460,13 +464,19 @@ app.get('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
 });
 
 app.put('/api/cart/lines/:partname', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
-  const { quantity } = (req.body || {}) as { quantity?: number };
+  const { quantity, mode } = (req.body || {}) as { quantity?: number; mode?: 'set' | 'add' };
   if (typeof quantity !== 'number' || !isFinite(quantity)) {
     res.status(400).json({ error: 'bad_quantity' });
     return;
   }
   try {
-    setCartLine(req.user!.id, req.user!.custname!, req.params.partname, quantity);
+    setCartLine(
+      req.user!.id,
+      req.user!.custname!,
+      req.params.partname,
+      quantity,
+      mode === 'add' ? 'add' : 'set'
+    );
   } catch (err) {
     if (err instanceof OrderError) {
       res.status(400).json({ error: err.message });
