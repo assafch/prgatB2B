@@ -19,6 +19,7 @@ import { renderInvoiceDetail } from './pages/invoiceDetail.js';
 import { renderPayCheck } from './pages/payCheck.js';
 import { renderPayments } from './pages/payments.js';
 import { renderAssistant } from './pages/assistant.js';
+import { renderAccessibility } from './pages/accessibility.js';
 import { renderAdmin } from './pages/admin.js';
 
 const root = document.getElementById('app')!;
@@ -49,6 +50,7 @@ function topbar(): string {
         <nav>
           <a href="#login" class="${location.hash === '#login' || !location.hash ? 'active' : ''}">התחברות</a>
           <a href="#lead" class="${location.hash === '#lead' ? 'active' : ''}">צור קשר</a>
+          <a href="#accessibility" class="${location.hash === '#accessibility' ? 'active' : ''}">נגישות</a>
         </nav>
       </div>`;
   }
@@ -141,6 +143,7 @@ async function route(): Promise<void> {
   // Public routes
   if (hash === '#login') return renderLogin(mount(''), onAuthChanged);
   if (hash === '#lead') return renderLead(mount(''));
+  if (hash === '#accessibility') return renderAccessibility(mount(''));
   if (hash.startsWith('#invite/')) {
     const token = hash.slice('#invite/'.length);
     return renderInvite(mount(''), token, onAuthChanged);
