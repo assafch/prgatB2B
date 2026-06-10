@@ -15,6 +15,7 @@ import { upayEnabled } from './upay.js';
 import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments } from './cardPayments.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
+import { listStaff, createStaff, setStaffStatus, resetStaffPassword } from './staff.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -31,6 +32,7 @@ import {
   requireAdmin,
   requireAuth,
   requireCustomer,
+  requireOwner,
   revokeOtherSessions,
   setSessionCookie,
   sweepSessions,
@@ -334,6 +336,7 @@ app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res
       id: user.id,
       username: user.username,
       role: user.role,
+      customer_role: user.customer_role,
       custname: user.custname,
       cust_desc: user.cust_desc,
     },
@@ -508,6 +511,7 @@ app.get('/api/auth/me', (req: AuthedRequest, res: Response) => {
       id: req.user.id,
       username: req.user.username,
       role: req.user.role,
+      customer_role: req.user.customer_role,
       custname: req.user.custname,
       cust_desc: req.user.cust_desc,
     },
@@ -666,6 +670,29 @@ app.delete('/api/templates/:id', requireCustomer, (req: AuthedRequest, res) => {
 app.get('/api/favorites', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ partnames: listFavorites(req.user!.id) });
 });
+// ---------- Per-store staff (owner-managed) ----------
+app.get('/api/account/staff', requireOwner, (req: AuthedRequest, res) => {
+  res.json({ staff: listStaff(req.user!.custname!) });
+});
+app.post('/api/account/staff', requireOwner, sensitiveLimiter, ah(async (req: AuthedRequest, res) => {
+  const b = (req.body || {}) as { username?: string; password?: string };
+  const r = await createStaff(req.user!.custname!, req.user!.cust_desc, b.username || '', b.password || '');
+  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, id: r.id } : { error: r.error });
+}));
+app.post('/api/account/staff/:id/status', requireOwner, (req: AuthedRequest, res) => {
+  const { status } = (req.body || {}) as { status?: string };
+  if (status !== 'active' && status !== 'disabled') {
+    res.status(400).json({ error: 'bad_status' });
+    return;
+  }
+  const ok = setStaffStatus(req.user!.custname!, Number(req.params.id), status);
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
+});
+app.post('/api/account/staff/:id/reset-password', requireOwner, sensitiveLimiter, ah(async (req: AuthedRequest, res) => {
+  const r = await resetStaffPassword(req.user!.custname!, Number(req.params.id), ((req.body || {}) as { new_password?: string }).new_password || '');
+  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true } : { error: r.error });
+}));
+
 app.get('/api/favorites/products', requireCustomer, (req: AuthedRequest, res) => {
   const items = listFavorites(req.user!.id)
     .map((p) => getProduct(p, req.user!.custname))
@@ -749,13 +776,13 @@ app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => 
   });
 }));
 
-app.get('/api/invoices', requireCustomer, financeLimiter, ah(async (req, res) => {
+app.get('/api/invoices', requireOwner, financeLimiter, ah(async (req, res) => {
   const result = await getInvoices(req.user!.custname!);
   res.json(result);
 }));
 
 // Single invoice detail (line items) — scoped to the session custname (IDOR-safe).
-app.get('/api/invoices/:ivnum', requireCustomer, financeLimiter, ah(async (req, res) => {
+app.get('/api/invoices/:ivnum', requireOwner, financeLimiter, ah(async (req, res) => {
   const detail = await getInvoiceDetail(req.user!.custname!, req.params.ivnum);
   if (!detail) {
     res.status(404).json({ error: 'not_found' });
@@ -795,7 +822,7 @@ function shapeCheck(c: CheckRow) {
 // → AI extraction (if a key is set) → return a draft id + extracted fields.
 app.post(
   '/api/payments/check/parse',
-  requireCustomer,
+  requireOwner,
   blockIfMaintenance,
   checkParseGlobalLimiter,
   checkParseLimiter,
@@ -845,7 +872,7 @@ app.post(
 }));
 
 // Customer confirms the human-verified amount/date → promise-to-pay recorded.
-app.post('/api/payments/check/:id/confirm', requireCustomer, blockIfMaintenance, cartLimiter, (req: AuthedRequest, res) => {
+app.post('/api/payments/check/:id/confirm', requireOwner, blockIfMaintenance, cartLimiter, (req: AuthedRequest, res) => {
   const b = (req.body || {}) as Record<string, unknown>;
   const amount = Number(b.amount);
   const checkDate = typeof b.checkDate === 'string' ? b.checkDate : '';
@@ -869,7 +896,7 @@ app.post('/api/payments/check/:id/confirm', requireCustomer, blockIfMaintenance,
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });
 
-app.get('/api/payments', requireCustomer, (req: AuthedRequest, res) => {
+app.get('/api/payments', requireOwner, (req: AuthedRequest, res) => {
   res.json({ checks: listChecksForUser(req.user!.id).map(shapeCheck) });
 });
 
@@ -902,7 +929,7 @@ function appBaseUrl(req: Request): string {
   return process.env.APP_BASE_URL || process.env.WEB_ORIGIN || `${req.protocol}://${req.get('host')}`;
 }
 
-app.post('/api/payments/card/create', requireCustomer, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+app.post('/api/payments/card/create', requireOwner, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
   if (!paymentsLive()) {
     res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
     return;
@@ -923,7 +950,7 @@ app.post('/api/payments/card/create', requireCustomer, blockIfMaintenance, cardP
 }));
 
 // Owner-scoped status poll — re-queries UPay to confirm.
-app.get('/api/payments/card/:id', requireCustomer, ah(async (req: AuthedRequest, res) => {
+app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, res) => {
   let row = getCardForUser(req.user!.id, req.params.id);
   if (!row) {
     res.status(404).json({ error: 'not_found' });
@@ -972,7 +999,7 @@ app.get('/api/admin/card-payments', requireAdmin, (_req, res) => {
 });
 
 // Stream the cheque image to its owner only (decrypted; never cached).
-app.get('/api/payments/:id/image', requireCustomer, (req: AuthedRequest, res) => {
+app.get('/api/payments/:id/image', requireOwner, (req: AuthedRequest, res) => {
   const c = getCheckForUser(req.user!.id, req.params.id);
   if (!c || !c.image_path) {
     res.status(404).json({ error: 'not_found' });

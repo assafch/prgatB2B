@@ -1,7 +1,8 @@
 import { api } from '../api.js';
-import { formatMoney, escapeHtml, formatDateTime } from '../format.js';
+import { formatMoney, escapeHtml, escapeAttr, formatDateTime } from '../format.js';
 import { toast, confirmDialog } from '../ui.js';
 import { supportsPasskeys, serverPasskeysEnabled, passkeyRegister, isPasskeyCancel } from '../webauthn.js';
+import { state } from '../main.js';
 
 interface Profile {
   custname: string;
@@ -60,10 +61,11 @@ export async function renderAccount(shell: HTMLElement): Promise<void> {
       ['סוכן', p?.agent || null],
     ];
 
+    const isOwner = state.me?.customer_role !== 'orderer';
     shell.innerHTML = `
       <div class="card" style="max-width:720px;margin:0 auto">
         <h1 style="margin-top:0">החשבון שלי</h1>
-        ${balanceSection(a)}
+        ${isOwner ? balanceSection(a) : ''}
         <dl class="kv" style="margin-top:1.25rem">
           ${rows
             .filter(([, v]) => v && v !== '-')
@@ -78,8 +80,10 @@ export async function renderAccount(shell: HTMLElement): Promise<void> {
         <p class="muted" style="margin-top:1.5rem">לשינוי פרטים — צרו קשר עם משרד אורגת.</p>
       </div>
       <div id="passkey-card"></div>
+      <div id="staff-card"></div>
     `;
     renderPasskeys(shell.querySelector('#passkey-card') as HTMLElement);
+    if (isOwner) void renderStaff(shell.querySelector('#staff-card') as HTMLElement);
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
   }
@@ -139,6 +143,87 @@ async function renderPasskeys(host: HTMLElement): Promise<void> {
     );
   };
   await load();
+}
+
+interface Staff { id: number; username: string; status: string; created_at: string; last_login_at: string | null }
+
+// Owner-only: create/manage staff (orderer) logins for the store.
+async function renderStaff(host: HTMLElement): Promise<void> {
+  let staff: Staff[] = [];
+  try {
+    staff = (await api.get<{ staff: Staff[] }>('/api/account/staff')).staff;
+  } catch {
+    return; // 403 for non-owners → just hide the section
+  }
+  const draw = (list: Staff[]) => {
+    host.innerHTML = `
+      <div class="card" style="max-width:720px;margin:1rem auto 0">
+        <h2 style="margin-top:0">משתמשי החנות</h2>
+        <p class="muted" style="margin-top:-0.3rem">הוסיפו משתמשים לעובדים שמזמינים — הם רואים קטלוג ומזמינים, אך ללא גישה לחוב/חשבוניות/תשלומים.</p>
+        <div class="form-grid">
+          <input id="st-user" placeholder="שם משתמש"/>
+          <input id="st-pass" placeholder="סיסמה (10+ תווים)"/>
+        </div>
+        <button id="st-add" style="width:100%;margin-top:0.5rem">הוסף עובד</button>
+        <div id="st-msg" style="margin-top:0.4rem;text-align:center"></div>
+        <div id="st-list" style="margin-top:0.75rem">
+          ${
+            list.length
+              ? list
+                  .map(
+                    (s) => `
+            <div class="dash-row" style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+              <div class="grow"><div style="font-weight:600">👤 ${escapeHtml(s.username)} ${s.status !== 'active' ? '<span class="chip error">מושבת</span>' : ''}</div>
+                <div class="muted" style="font-size:0.8rem">התחבר: ${s.last_login_at ? escapeHtml(s.last_login_at.slice(0, 10)) : '—'}</div></div>
+              <button class="ghost st-reset" data-id="${s.id}" data-name="${escapeAttr(s.username)}">איפוס סיסמה</button>
+              <button class="ghost st-toggle" data-id="${s.id}" data-status="${escapeAttr(s.status)}">${s.status === 'active' ? 'השבת' : 'הפעל'}</button>
+            </div>`
+                  )
+                  .join('')
+              : '<p class="muted">אין עדיין עובדים נוספים.</p>'
+          }
+        </div>
+      </div>`;
+    const msg = host.querySelector('#st-msg') as HTMLDivElement;
+    (host.querySelector('#st-add') as HTMLButtonElement).onclick = async () => {
+      msg.textContent = 'יוצר…';
+      msg.className = 'muted';
+      try {
+        await api.post('/api/account/staff', {
+          username: (host.querySelector('#st-user') as HTMLInputElement).value.trim(),
+          password: (host.querySelector('#st-pass') as HTMLInputElement).value,
+        });
+        void renderStaff(host);
+      } catch (ex) {
+        msg.textContent = ex instanceof Error ? ex.message : String(ex);
+        msg.className = 'error';
+      }
+    };
+    host.querySelectorAll<HTMLButtonElement>('.st-toggle').forEach((b) => {
+      b.onclick = async () => {
+        try {
+          await api.post(`/api/account/staff/${b.dataset.id}/status`, { status: b.dataset.status === 'active' ? 'disabled' : 'active' });
+          void renderStaff(host);
+        } catch (ex) {
+          msg.textContent = ex instanceof Error ? ex.message : String(ex);
+          msg.className = 'error';
+        }
+      };
+    });
+    host.querySelectorAll<HTMLButtonElement>('.st-reset').forEach((b) => {
+      b.onclick = async () => {
+        const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (10+ תווים):`);
+        if (!np) return;
+        try {
+          await api.post(`/api/account/staff/${b.dataset.id}/reset-password`, { new_password: np });
+          toast('הסיסמה אופסה ✓', 'ok');
+        } catch (ex) {
+          toast(ex instanceof Error ? ex.message : String(ex), 'error');
+        }
+      };
+    });
+  };
+  draw(staff);
 }
 
 function balanceSection(a: Account): string {

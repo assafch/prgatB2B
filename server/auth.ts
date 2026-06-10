@@ -200,7 +200,7 @@ export function userFromSession(token: string): SessionLookup | null {
   // Absolute expiry and role-dependent idle timeout are both enforced here.
   const row = db
     .prepare(
-      `SELECT u.id, u.username, u.role, u.custname, u.cust_desc, u.email, u.phone,
+      `SELECT u.id, u.username, u.role, u.customer_role, u.custname, u.cust_desc, u.email, u.phone,
               u.status, u.created_at, u.last_login_at,
               s.id AS session_id
        FROM users u
@@ -297,6 +297,19 @@ export function requireCustomer(req: AuthedRequest, res: Response, next: NextFun
   }
   if (req.user.role !== 'customer' || !req.user.custname) {
     res.status(403).json({ error: 'customer_only' });
+    return;
+  }
+  next();
+}
+
+/** Owner-only (finance, payments, staff management). 'orderer' staff are rejected. */
+export function requireOwner(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'unauthorized' });
+    return;
+  }
+  if (req.user.role !== 'customer' || !req.user.custname || req.user.customer_role === 'orderer') {
+    res.status(403).json({ error: 'owner_only' });
     return;
   }
   next();

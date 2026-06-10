@@ -78,6 +78,7 @@ export interface MeUser {
   id: number;
   username: string;
   role: 'customer' | 'admin';
+  customer_role?: 'owner' | 'orderer';
   custname: string | null;
   cust_desc: string | null;
 }

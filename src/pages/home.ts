@@ -46,11 +46,19 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
 
   const name = d.custDesc || state.me?.cust_desc || '';
   const owing = d.balance.openTotal > 0;
+  // 'orderer' staff don't see finance (debt/pay) — that's the owner's view.
+  const isOrderer = state.me?.customer_role === 'orderer';
 
   // Debt headline. When the balance form is unreachable/not-API-enabled we can't
   // trust the number, so we show an honest "unavailable" instead of a misleading ₪0.
   let debtCard: string;
-  if (!d.balanceOk) {
+  if (isOrderer) {
+    debtCard = `
+      <div class="card debt-card clear">
+        <div class="amount">👋 ${name ? escapeHtml(name) : 'שלום'}</div>
+        <div class="label">בחרו מוצרים והוסיפו לסל — ההזמנה תישלח לאישור</div>
+      </div>`;
+  } else if (!d.balanceOk) {
     debtCard = `
       <div class="card debt-card">
         <div class="amount" style="color:var(--muted);font-size:1.4rem">לא זמין כעת</div>
@@ -138,7 +146,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
   const quickActions = `
     <div class="dash-actions">
       <a class="dash-action" href="#catalog"><span class="ico">🛍️</span><span>הזמנה חדשה</span><span class="sub">עיון בקטלוג</span></a>
-      <a class="dash-action" href="#invoices"><span class="ico">🧾</span><span>חשבוניות</span><span class="sub">מסמכים ויתרה</span></a>
+      ${isOrderer ? '' : '<a class="dash-action" href="#invoices"><span class="ico">🧾</span><span>חשבוניות</span><span class="sub">מסמכים ויתרה</span></a>'}
       <a class="dash-action" href="#orders"><span class="ico">📦</span><span>ההזמנות שלי</span><span class="sub">מעקב סטטוס</span></a>
       <a class="dash-action" href="#account"><span class="ico">👤</span><span>החשבון שלי</span><span class="sub">פרטים והגדרות</span></a>
     </div>`;

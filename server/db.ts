@@ -328,6 +328,8 @@ ensureColumn('catalog_cache', 'b2b_category_override', 'TEXT');
 // x_/y_ columns stay, unused). params holds the per-type rule JSON.
 ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('promotions', 'priority', 'INTEGER NOT NULL DEFAULT 0');
+// Per-store roles: existing customers default to 'owner'; staff logins are 'orderer'.
+ensureColumn('users', 'customer_role', "TEXT NOT NULL DEFAULT 'owner'");
 
 export function getSetting(key: string): string | null {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
@@ -363,6 +365,8 @@ export interface UserRow {
   /** Only populated by the login query; deliberately NOT selected for session-loaded users. */
   password_hash?: string;
   role: 'customer' | 'admin';
+  /** for customers: 'owner' sees finance/payments + manages staff; 'orderer' can only browse/order */
+  customer_role: 'owner' | 'orderer';
   custname: string | null;
   cust_desc: string | null;
   email: string | null;
