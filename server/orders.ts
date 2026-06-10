@@ -3,6 +3,7 @@
 import { db } from './db.js';
 import { createOrder, getPriorityConfig, listOrdersForCustomer } from './priority.js';
 import { getProduct } from './catalog.js';
+import { applyPromotions, type PromoResult } from './promotions.js';
 
 export interface CartLine {
   partname: string;
@@ -16,7 +17,13 @@ export interface CartLine {
 
 const MAX_LINE_QTY = 9999;
 
-export function getCart(userId: number, custname: string): { lines: CartLine[]; total: number } {
+export interface CartResult {
+  lines: CartLine[];
+  total: number; // items subtotal (pre-promotion), for backward compatibility
+  promotions: PromoResult;
+}
+
+export function getCart(userId: number, custname: string): CartResult {
   const rows = db
     .prepare('SELECT partname, quantity FROM cart_lines WHERE user_id = ? ORDER BY updated_at')
     .all(userId) as Array<{ partname: string; quantity: number }>;
@@ -36,7 +43,17 @@ export function getCart(userId: number, custname: string): { lines: CartLine[]; 
       available: prod !== null,
     });
   }
-  return { lines, total };
+  const promotions = applyPromotions(
+    lines.filter((l) => l.available && typeof l.price === 'number' && l.price > 0).map((l) => ({
+      partname: l.partname,
+      partdes: l.partdes,
+      quantity: l.quantity,
+      price: l.price as number,
+      line_total: l.line_total,
+    })),
+    custname
+  );
+  return { lines, total: Math.round(total * 100) / 100, promotions };
 }
 
 /**
@@ -114,8 +131,18 @@ export async function submitOrder(
   custname: string,
   details?: string
 ): Promise<SubmitResult> {
-  const { lines, total } = getCart(userId, custname);
+  const { lines, total, promotions } = getCart(userId, custname);
   if (lines.length === 0) throw new OrderError('הסל ריק');
+
+  // Promo summary into the order note so the office honours the discount / adds the
+  // gift in Priority (Priority prices the lines itself). Gifts ship as lines too.
+  const promoNote = promotions.applied.length
+    ? 'מבצעים: ' +
+      promotions.applied.map((a) => `${a.name} (חיסכון ₪${a.savings.toFixed(2)})`).join('; ') +
+      (promotions.gifts.length ? ' | מתנות: ' + promotions.gifts.map((g) => `${g.partdes || g.partname} ×${g.qty}`).join(', ') : '') +
+      ' — נא ליישם'
+    : '';
+  const fullDetails = [details, promoNote].filter(Boolean).join(' | ') || null;
 
   // Re-validate every line against the live catalog at submit time. The cart may
   // hold items that were hidden/deactivated since they were added, or items with
@@ -141,7 +168,7 @@ export async function submitOrder(
       `INSERT INTO orders_local (user_id, custname, status, total, details)
        VALUES (?, ?, 'submitting', ?, ?)`
     )
-    .run(userId, custname, total, details ?? null).lastInsertRowid as number);
+    .run(userId, custname, promotions.total, fullDetails).lastInsertRowid as number);
 
   const insertLine = db.prepare(
     `INSERT INTO order_lines (order_id, partname, pdes, quantity, price, is_promotion_freebie, promotion_id)
@@ -150,6 +177,9 @@ export async function submitOrder(
   const tx = db.transaction(() => {
     for (const ln of lines) {
       insertLine.run(localOrderId, ln.partname, ln.partdes, ln.quantity, ln.price ?? 0, 0, null);
+    }
+    for (const g of promotions.gifts) {
+      insertLine.run(localOrderId, g.partname, g.partdes, g.qty, 0, 1, null); // promo gift, free
     }
   });
   tx();
@@ -163,11 +193,11 @@ export async function submitOrder(
     ordname = await createOrder(
       config,
       custname,
-      lines.map((ln) => ({
-        PARTNAME: ln.partname,
-        TQUANT: ln.quantity,
-      })),
-      details,
+      [
+        ...lines.map((ln) => ({ PARTNAME: ln.partname, TQUANT: ln.quantity })),
+        ...promotions.gifts.map((g) => ({ PARTNAME: g.partname, TQUANT: g.qty })),
+      ],
+      fullDetails ?? undefined,
       `B2B-${localOrderId}`
     );
   } catch (err) {

@@ -13,6 +13,7 @@ import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers 
 import { runAssistant, assistantEnabled } from './assistant.js';
 import { upayEnabled } from './upay.js';
 import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments } from './cardPayments.js';
+import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -890,6 +891,27 @@ app.get('/api/payments/upay/ipn', ah(async (req, res) => {
   if (id) await confirmCard(id).catch(() => null);
   res.status(200).send('ok');
 }));
+
+// ---------- Admin: promotions ----------
+app.get('/api/admin/promotions', requireAdmin, (_req, res) => {
+  res.json({ promotions: listPromotions() });
+});
+app.post('/api/admin/promotions', requireAdmin, (req, res) => {
+  const b = (req.body || {}) as Partial<PromoInput>;
+  if (!b.name || !b.type || !b.params) {
+    res.status(400).json({ error: 'name_type_params_required' });
+    return;
+  }
+  res.json({ id: createPromotion(b as PromoInput) });
+});
+app.patch('/api/admin/promotions/:id', requireAdmin, (req, res) => {
+  const ok = updatePromotion(Number(req.params.id), (req.body || {}) as Partial<PromoInput>);
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
+});
+app.delete('/api/admin/promotions/:id', requireAdmin, (req, res) => {
+  const ok = deletePromotion(Number(req.params.id));
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
+});
 
 app.get('/api/admin/card-payments', requireAdmin, (_req, res) => {
   res.json({

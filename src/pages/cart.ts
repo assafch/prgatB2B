@@ -11,9 +11,18 @@ interface CartLine {
   line_total: number;
   available: boolean;
 }
+interface Promotions {
+  subtotal: number;
+  discount: number;
+  total: number;
+  applied: { id: number; name: string; type: string; savings: number }[];
+  gifts: { partname: string; partdes: string | null; qty: number; price: number }[];
+  giftProgress: { name: string; min: number; remaining: number; giftDes: string | null } | null;
+}
 interface CartResp {
   lines: CartLine[];
   total: number;
+  promotions?: Promotions;
 }
 
 export async function renderCart(shell: HTMLElement): Promise<void> {
@@ -37,15 +46,47 @@ async function load(shell: HTMLElement): Promise<void> {
 
   const hasUnavailable = cart.lines.some((l) => !l.available);
 
+  const promo = cart.promotions;
+  const hasDiscount = !!promo && promo.discount > 0;
+  const finalTotal = promo ? promo.total : cart.total;
+  const giftsHtml =
+    promo && promo.gifts.length
+      ? promo.gifts
+          .map(
+            (g) => `<div class="cart-gift">🎁 מתנה: ${escapeHtml(g.partdes || g.partname)} ×${g.qty} <span>חינם</span></div>`
+          )
+          .join('')
+      : '';
+  const promoLinesHtml = hasDiscount
+    ? promo!.applied
+        .filter((a) => a.savings > 0)
+        .map((a) => `<div class="cart-promo-line"><span>🏷️ ${escapeHtml(a.name)}</span><span>−${formatMoney(a.savings)}</span></div>`)
+        .join('')
+    : '';
+  const giftNudge =
+    promo && promo.giftProgress
+      ? `<div class="cart-gift-nudge">עוד ${formatMoney(promo.giftProgress.remaining)} ומקבלים מתנה: ${escapeHtml(promo.giftProgress.giftDes || '')} 🎁</div>`
+      : '';
+
   shell.innerHTML = `
     <div class="card">
       <h1 style="margin-top:0">הסל שלי</h1>
       <div id="cart-lines">
         ${cart.lines.map(lineRow).join('')}
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem;padding-top:0.75rem;border-top:2px solid var(--border)">
-        <span style="font-weight:700">סה״כ</span>
-        <span style="font-weight:900;font-size:1.3rem;color:var(--brand)">${formatMoney(cart.total)}</span>
+      ${giftsHtml}
+      ${giftNudge}
+      ${
+        hasDiscount
+          ? `<div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border)">
+               <div class="cart-promo-line muted"><span>סכום ביניים</span><span>${formatMoney(cart.total)}</span></div>
+               ${promoLinesHtml}
+             </div>`
+          : ''
+      }
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;padding-top:0.75rem;border-top:2px solid var(--border)">
+        <span style="font-weight:700">סה״כ${hasDiscount ? ' לתשלום' : ''}</span>
+        <span style="font-weight:900;font-size:1.3rem;color:var(--brand)">${formatMoney(finalTotal)}</span>
       </div>
       <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">המחיר הסופי ייקבע ב-Priority לפי ההסכם שלך</div>
     </div>
