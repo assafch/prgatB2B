@@ -11,6 +11,30 @@ interface Item {
   box_size: number;
 }
 
+function row(it: Item): string {
+  const p = escapeAttr(it.partname);
+  return `
+    <div class="card cat-row" data-part="${p}">
+      <div class="cat-row-top">
+        <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
+        <a class="cat-row-name" href="#product/${encodeURIComponent(it.partname)}">
+          <div class="nm">${escapeHtml(it.partdes || it.partname)}</div>
+          <div class="sku">${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
+        </a>
+        <button class="fav on" data-part="${p}" type="button" aria-label="הסר ממועדפים">♥</button>
+      </div>
+      <div class="cat-row-bottom">
+        <div class="cat-row-price">${it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>'}<span class="muted"> ליח׳</span></div>
+        <div class="cat-row-buy">
+          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
+          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
+          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
+          <button class="add" data-part="${p}">הוסף</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 export async function renderFavorites(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `<div class="card">${skeleton(3)}</div>`;
   let items: Item[] = [];
@@ -26,57 +50,57 @@ export async function renderFavorites(shell: HTMLElement): Promise<void> {
   }
   shell.innerHTML = `
     <div class="sec-head"><h1 style="margin:0;font-size:1.3rem">המועדפים שלי</h1></div>
-    <div class="cat-list">
-      ${items
-        .map(
-          (it) => `
-        <div class="card cat-row" data-part="${escapeAttr(it.partname)}">
-          <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
-          <div class="cat-row-main">
-            <a href="#product/${encodeURIComponent(it.partname)}">${escapeHtml(it.partdes || it.partname)}</a>
-            <div class="muted" style="font-size:0.76rem">${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
-          </div>
-          <div class="cat-row-price">${it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>'}<span class="muted">ליח׳</span></div>
-          <button class="fav on" data-part="${escapeAttr(it.partname)}" type="button" aria-label="הסר ממועדפים">♥</button>
-          <div class="cat-row-add">
-            <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${escapeAttr(it.partname)}"/>
-            <button class="add" data-part="${escapeAttr(it.partname)}">הוסף</button>
-          </div>
-        </div>`
-        )
-        .join('')}
-    </div>`;
+    <div class="cat-list">${items.map(row).join('')}</div>`;
 
-  shell.querySelectorAll<HTMLButtonElement>('button.add').forEach((b) => {
-    b.addEventListener('click', async () => {
-      const part = b.dataset.part!;
-      const input = shell.querySelector<HTMLInputElement>(`input.qty[data-part="${part.replace(/(["\\])/g, '\\$1')}"]`)!;
-      const qty = Number(input.value);
-      if (!isFinite(qty) || qty <= 0) return;
-      b.disabled = true;
+  const esc = (s: string) => s.replace(/(["\\])/g, '\\$1');
+  const qtyOf = (part: string) => shell.querySelector<HTMLInputElement>(`input.qty[data-part="${esc(part)}"]`);
+
+  shell.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+    const up = t.closest('button.step-up') as HTMLButtonElement | null;
+    const down = t.closest('button.step-down') as HTMLButtonElement | null;
+    if (up || down) {
+      const b = (up || down)!;
+      const input = qtyOf(b.dataset.part!);
+      if (input) {
+        const step = Number(b.dataset.step) || 1;
+        input.value = String(Math.max(0, (Number(input.value) || 0) + (up ? step : -step)));
+      }
+      return;
+    }
+    const add = t.closest('button.add') as HTMLButtonElement | null;
+    if (add) {
+      const input = qtyOf(add.dataset.part!);
+      const qty = Number(input?.value);
+      if (!input || !isFinite(qty) || qty <= 0) {
+        input?.focus();
+        return;
+      }
+      add.disabled = true;
       try {
-        await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty, mode: 'add' });
+        await api.put(`/api/cart/lines/${encodeURIComponent(add.dataset.part!)}`, { quantity: qty, mode: 'add' });
         await refreshCartCount();
-        b.textContent = '✓ נוסף';
+        add.textContent = '✓ נוסף';
         setTimeout(() => {
-          b.textContent = 'הוסף';
-          b.disabled = false;
+          add.textContent = 'הוסף';
+          add.disabled = false;
         }, 1200);
       } catch (ex) {
         toast(ex instanceof Error ? ex.message : String(ex), 'error');
-        b.disabled = false;
+        add.disabled = false;
       }
-    });
-  });
-  shell.querySelectorAll<HTMLButtonElement>('button.fav').forEach((b) => {
-    b.addEventListener('click', async () => {
+      return;
+    }
+    const fav = t.closest('button.fav') as HTMLButtonElement | null;
+    if (fav) {
+      e.preventDefault();
       try {
-        await api.post('/api/favorites', { partname: b.dataset.part });
-        b.closest('.cat-row')?.remove();
+        await api.post('/api/favorites', { partname: fav.dataset.part });
+        fav.closest('.cat-row')?.remove();
         if (!shell.querySelector('.cat-row')) renderFavorites(shell);
       } catch (ex) {
         toast(ex instanceof Error ? ex.message : String(ex), 'error');
       }
-    });
+    }
   });
 }
