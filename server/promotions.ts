@@ -74,12 +74,19 @@ export interface GiftItem {
   qty: number;
   price: number;
 }
+/** bogo free units, per product — materialized as 0₪ lines on the Priority order */
+export interface FreebieItem {
+  partname: string;
+  partdes: string | null;
+  qty: number;
+}
 export interface PromoResult {
   subtotal: number;
   discount: number;
   total: number;
   applied: AppliedPromo[];
   gifts: GiftItem[];
+  freebies: FreebieItem[];
   /** the nearest unmet gift threshold, to nudge "add ₪X more for a gift" */
   giftProgress: { name: string; min: number; remaining: number; giftDes: string | null } | null;
 }
@@ -91,6 +98,7 @@ export function applyPromotions(lines: PromoLine[], custname: string): PromoResu
   const subtotal = round2(lines.reduce((s, l) => s + (l.line_total || 0), 0));
   const applied: AppliedPromo[] = [];
   const gifts: GiftItem[] = [];
+  const freebies: FreebieItem[] = [];
   let discount = 0;
   let giftProgress: PromoResult['giftProgress'] = null;
 
@@ -115,6 +123,7 @@ export function applyPromotions(lines: PromoLine[], custname: string): PromoResu
         const savings = round2(freeUnits * line.price);
         discount += savings;
         applied.push({ id: p.id, name: p.name, type: p.type, savings });
+        freebies.push({ partname: line.partname, partdes: line.partdes, qty: freeUnits });
       }
     } else if (p.type === 'percent' || p.type === 'fixed') {
       const minSub = num(pr.minSubtotal, 0);
@@ -156,7 +165,7 @@ export function applyPromotions(lines: PromoLine[], custname: string): PromoResu
   }
 
   discount = round2(Math.min(discount, subtotal));
-  return { subtotal, discount, total: round2(subtotal - discount), applied, gifts, giftProgress };
+  return { subtotal, discount, total: round2(subtotal - discount), applied, gifts, freebies, giftProgress };
 }
 
 // --- admin CRUD ---

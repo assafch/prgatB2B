@@ -134,15 +134,27 @@ export async function submitOrder(
   const { lines, total, promotions } = getCart(userId, custname);
   if (lines.length === 0) throw new OrderError('הסל ריק');
 
-  // Promo summary into the order note so the office honours the discount / adds the
-  // gift in Priority (Priority prices the lines itself). Gifts ship as lines too.
-  const promoNote = promotions.applied.length
-    ? 'מבצעים: ' +
-      promotions.applied.map((a) => `${a.name} (חיסכון ₪${a.savings.toFixed(2)})`).join('; ') +
-      (promotions.gifts.length ? ' | מתנות: ' + promotions.gifts.map((g) => `${g.partdes || g.partname} ×${g.qty}`).join(', ') : '') +
-      ' — נא ליישם'
-    : '';
+  // Promo handling: bogo free units and gift items are MATERIALIZED as separate
+  // 0₪ order lines (the invoice comes out ready — e.g. buy-5-get-6 posts 5 paid +
+  // 1 at PRICE 0). Percent/fixed discounts are NOT — the app must not override
+  // Priority's per-customer pricing — so those still go as a note for the office.
+  const manualPromos = promotions.applied.filter((a) => a.type === 'percent' || a.type === 'fixed');
+  const autoPromos = promotions.applied.filter((a) => a.type === 'bogo' || a.type === 'gift');
+  const noteParts: string[] = [];
+  if (manualPromos.length) {
+    noteParts.push(
+      'מבצעים: ' + manualPromos.map((a) => `${a.name} (חיסכון ₪${a.savings.toFixed(2)})`).join('; ') + ' — נא ליישם'
+    );
+  }
+  if (autoPromos.length) {
+    noteParts.push('מבצע ' + autoPromos.map((a) => a.name).join('; ') + ' — שורות חינם במחיר 0 כבר בהזמנה');
+  }
+  const promoNote = noteParts.join(' | ');
   const fullDetails = [details, promoNote].filter(Boolean).join(' | ') || null;
+
+  // Free units per product (bogo) — split off the paid line below.
+  const freeQty = new Map<string, number>();
+  for (const f of promotions.freebies) freeQty.set(f.partname, (freeQty.get(f.partname) || 0) + f.qty);
 
   // Re-validate every line against the live catalog at submit time. The cart may
   // hold items that were hidden/deactivated since they were added, or items with
@@ -176,7 +188,9 @@ export async function submitOrder(
   );
   const tx = db.transaction(() => {
     for (const ln of lines) {
-      insertLine.run(localOrderId, ln.partname, ln.partdes, ln.quantity, ln.price ?? 0, 0, null);
+      const free = freeQty.get(ln.partname) || 0;
+      insertLine.run(localOrderId, ln.partname, ln.partdes, ln.quantity - free, ln.price ?? 0, 0, null);
+      if (free > 0) insertLine.run(localOrderId, ln.partname, ln.partdes, free, 0, 1, null); // bogo freebie
     }
     for (const g of promotions.gifts) {
       insertLine.run(localOrderId, g.partname, g.partdes, g.qty, 0, 1, null); // promo gift, free
@@ -184,18 +198,27 @@ export async function submitOrder(
   });
   tx();
 
-  // POST to Priority. PRICE is deliberately omitted: Priority prices each line from
-  // its own price lists / customer agreements, exactly as a phoned-in order would be
-  // priced. The portal's cached price (stored on orders_local above) is display-only —
-  // sending it would let a stale or wrong cache write prices into the ERP.
+  // POST to Priority. PRICE is deliberately omitted on PAID lines: Priority prices
+  // each line from its own price lists / customer agreements, exactly as a phoned-in
+  // order would be priced. The portal's cached price (stored on orders_local above)
+  // is display-only — sending it would let a stale cache write prices into the ERP.
+  // The ONLY priced lines are promo freebies/gifts, sent explicitly at PRICE 0 so
+  // the order (and invoice) comes out ready without office intervention.
   let ordname: string;
   try {
     ordname = await createOrder(
       config,
       custname,
       [
-        ...lines.map((ln) => ({ PARTNAME: ln.partname, TQUANT: ln.quantity })),
-        ...promotions.gifts.map((g) => ({ PARTNAME: g.partname, TQUANT: g.qty })),
+        ...lines.flatMap((ln) => {
+          const free = freeQty.get(ln.partname) || 0;
+          const out: { PARTNAME: string; TQUANT: number; PRICE?: number }[] = [
+            { PARTNAME: ln.partname, TQUANT: ln.quantity - free },
+          ];
+          if (free > 0) out.push({ PARTNAME: ln.partname, TQUANT: free, PRICE: 0 });
+          return out;
+        }),
+        ...promotions.gifts.map((g) => ({ PARTNAME: g.partname, TQUANT: g.qty, PRICE: 0 })),
       ],
       fullDetails ?? undefined,
       `B2B-${localOrderId}`
