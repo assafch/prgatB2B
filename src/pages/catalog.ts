@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
 import { toast } from '../ui.js';
-import { refreshCartCount } from '../main.js';
+import { refreshCartCount, state as app } from '../main.js';
 import { showUpsell } from './upsell.js';
 
 interface CatalogItem {
@@ -52,20 +52,25 @@ function isGrouped(): boolean {
 export async function renderCatalog(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `
     <div class="card cat-filters">
-      <input id="q" class="cat-search" placeholder="חיפוש מוצר / מק״ט / ברקוד" />
+      <div class="cat-search-wrap">
+        <input id="q" class="cat-search" placeholder="חיפוש מוצר / מק״ט / ברקוד" />
+        <a href="#scan" class="cat-scan-in" title="סריקת ברקוד" aria-label="סריקת ברקוד">📷</a>
+        <span class="cat-search-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/></svg></span>
+      </div>
       <div class="cat-filters-row">
+        <select id="family"><option value="">כל המשפחות</option></select>
+        <a href="#favorites" class="fav-link" title="המועדפים שלי" aria-label="מועדפים">❤️</a>
         <div class="view-toggle" role="group" aria-label="תצוגה">
           <button id="view-grid" title="תצוגת רשת" aria-label="רשת">▦</button>
           <button id="view-list" title="תצוגת רשימה" aria-label="רשימה">☰</button>
         </div>
-        <select id="family"><option value="">כל המשפחות</option></select>
-        <a href="#favorites" class="fav-link" title="המועדפים שלי" aria-label="מועדפים">❤️</a>
-        <a href="#scan" class="fav-link" title="סריקת ברקוד" aria-label="סריקת ברקוד">📷</a>
+        <button id="btn-search" class="cat-search-btn">חפש</button>
       </div>
     </div>
     <div id="catalog-grid"></div>
     <div id="cat-sentinel" style="height:1px"></div>
     <div id="cat-status" class="muted" style="text-align:center;margin:1rem 0"></div>
+    <a href="#cart" class="cart-fab" aria-label="עגלת קניות">🛒</a>
   `;
   const q = shell.querySelector('#q') as HTMLInputElement;
   const famSel = shell.querySelector('#family') as HTMLSelectElement;
@@ -122,9 +127,11 @@ export async function renderCatalog(shell: HTMLElement): Promise<void> {
     debounce = window.setTimeout(doSearch, 350);
   });
   famSel.addEventListener('change', doSearch);
+  (shell.querySelector('#btn-search') as HTMLButtonElement).addEventListener('click', doSearch);
 
   bindDelegation(shell);
   setupObserver(shell);
+  syncCartFab(shell);
   await resetAndLoad(shell);
 }
 
@@ -185,6 +192,7 @@ function bindDelegation(shell: HTMLElement): void {
       try {
         await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty, mode: 'add' });
         await refreshCartCount();
+        syncCartFab(shell);
         add.textContent = '✓ נוסף';
         setTimeout(() => {
           add.textContent = 'הוסף';
@@ -303,9 +311,8 @@ function appendGrouped(grid: HTMLElement, items: CatalogItem[]): void {
       group.className = 'cat-fam-group' + (collapsed ? ' collapsed' : '');
       group.innerHTML = `
         <button type="button" class="cat-fam-head" aria-expanded="${!collapsed}">
+          <span class="cat-fam-name">${escapeHtml(label)} <span class="cat-fam-count">(0)</span></span>
           <span class="cat-fam-chev">▾</span>
-          <span class="cat-fam-name">${escapeHtml(label)}</span>
-          <span class="cat-fam-count">0</span>
         </button>
         <div class="cat-fam-items${isGridView ? ' cat-fam-grid' : ''}"></div>`;
       grid.appendChild(group);
@@ -314,7 +321,7 @@ function appendGrouped(grid: HTMLElement, items: CatalogItem[]): void {
     }
     lastItemsEl.insertAdjacentHTML('beforeend', isGridView ? gridCard(it) : listRow(it));
     const countEl = lastItemsEl.parentElement!.querySelector('.cat-fam-count') as HTMLElement;
-    countEl.textContent = String(lastItemsEl.children.length);
+    countEl.textContent = `(${lastItemsEl.children.length})`;
   }
 }
 
@@ -350,12 +357,12 @@ function gridCard(it: CatalogItem): string {
       </div>
       <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
       <div class="cat-card-buy">
-        <button class="add" data-part="${p}">הוסף</button>
         <div class="cat-stepper">
           <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
           <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
           <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
         </div>
+        <button class="add" data-part="${p}">הוסף</button>
       </div>
     </div>`;
 }
@@ -381,4 +388,21 @@ function listRow(it: CatalogItem): string {
 
 function cssEscape(s: string): string {
   return s.replace(/(["\\])/g, '\\$1');
+}
+
+// Floating cart button badge — mirrors the bottom-nav cart count.
+function syncCartFab(shell: HTMLElement): void {
+  const fab = shell.querySelector('.cart-fab') as HTMLElement | null;
+  if (!fab) return;
+  let badge = fab.querySelector('.cart-fab-badge') as HTMLElement | null;
+  if (app.cartCount > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'cart-fab-badge';
+      fab.appendChild(badge);
+    }
+    badge.textContent = app.cartCount > 99 ? '99+' : String(app.cartCount);
+  } else {
+    badge?.remove();
+  }
 }
