@@ -43,6 +43,12 @@ let loadGen = 0;
 let autoPulls = 0;
 const MAX_AUTO_PULLS = 20;
 
+// Browse (no text query) → group products under collapsible family bars. A text
+// search → flat, relevance-ranked results (best matches first, no headers).
+function isGrouped(): boolean {
+  return !state.q;
+}
+
 export async function renderCatalog(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `
     <div class="card cat-filters">
@@ -215,7 +221,9 @@ async function resetAndLoad(shell: HTMLElement): Promise<void> {
   state.loading = false;
   lastFam = null;
   lastItemsEl = null;
-  grid.className = state.view === 'list' ? 'cat-list' : 'cat-grid';
+  // Grouped → outer column of family sections (cards/rows live inside each group);
+  // flat grid → 2-up grid container; flat list → column.
+  grid.className = !isGrouped() && state.view === 'grid' ? 'cat-grid' : 'cat-list';
   grid.innerHTML = '';
   try {
     favSet = new Set((await api.get<{ partnames: string[] }>('/api/favorites')).partnames);
@@ -238,7 +246,7 @@ async function loadMore(shell: HTMLElement): Promise<void> {
     const params = new URLSearchParams();
     if (state.q) params.set('q', state.q);
     if (state.family) params.set('family', state.family);
-    if (state.view === 'list') params.set('sort', 'family');
+    if (isGrouped()) params.set('sort', 'family'); // contiguous families for grouping
     params.set('page', String(state.page));
     params.set('pageSize', String(state.pageSize));
     const { items, total } = await api.get<{ items: CatalogItem[]; total: number }>(`/api/catalog?${params}`);
@@ -250,8 +258,8 @@ async function loadMore(shell: HTMLElement): Promise<void> {
       state.hasMore = false;
       return;
     }
-    if (state.view === 'list') appendList(grid, items);
-    else grid.insertAdjacentHTML('beforeend', items.map(gridCard).join(''));
+    if (isGrouped()) appendGrouped(grid, items);
+    else grid.insertAdjacentHTML('beforeend', items.map(state.view === 'grid' ? gridCard : listRow).join(''));
     state.loaded += items.length;
     state.page += 1;
     state.hasMore = state.loaded < total && items.length > 0;
@@ -277,30 +285,32 @@ async function loadMore(shell: HTMLElement): Promise<void> {
   }
 }
 
-// Append rows into family sections, continuing a family across pages. Groups are
-// keyed on the family CODE (the field the server sorts by) so continuity/counts are
-// correct even if two codes share a description. When searching/filtering, groups
-// start expanded so results aren't hidden behind collapsed headers.
-function appendList(grid: HTMLElement, items: CatalogItem[]): void {
-  const expanded = !!(state.q || state.family);
+// Append items into family sections, continuing a family across pages. Groups are
+// keyed on the family CODE (what the server sorts by) so continuity/counts are correct
+// even if two codes share a description. Grid view = 2-up compact cards inside each
+// group; list view = stacked rows. List browse opens collapsed (clean family directory),
+// grid opens expanded (browse products) — a chosen family filter is always expanded.
+function appendGrouped(grid: HTMLElement, items: CatalogItem[]): void {
+  const isGridView = state.view === 'grid';
+  const collapsed = state.view === 'list' && !state.family;
   for (const it of items) {
     const key = it.family || it.family_desc || 'ללא משפחה';
     const label = it.family_desc || it.family || 'ללא משפחה';
     if (key !== lastFam || !lastItemsEl) {
       const group = document.createElement('div');
-      group.className = expanded ? 'cat-fam-group' : 'cat-fam-group collapsed';
+      group.className = 'cat-fam-group' + (collapsed ? ' collapsed' : '');
       group.innerHTML = `
-        <button type="button" class="cat-fam-head" aria-expanded="${expanded}">
+        <button type="button" class="cat-fam-head" aria-expanded="${!collapsed}">
           <span class="cat-fam-chev">▾</span>
           <span class="cat-fam-name">${escapeHtml(label)}</span>
           <span class="cat-fam-count">0</span>
         </button>
-        <div class="cat-fam-items"></div>`;
+        <div class="cat-fam-items${isGridView ? ' cat-fam-grid' : ''}"></div>`;
       grid.appendChild(group);
       lastFam = key;
       lastItemsEl = group.querySelector('.cat-fam-items') as HTMLElement;
     }
-    lastItemsEl.insertAdjacentHTML('beforeend', listRow(it));
+    lastItemsEl.insertAdjacentHTML('beforeend', isGridView ? gridCard(it) : listRow(it));
     const countEl = lastItemsEl.parentElement!.querySelector('.cat-fam-count') as HTMLElement;
     countEl.textContent = String(lastItemsEl.children.length);
   }
@@ -321,17 +331,30 @@ function stepperHtml(it: CatalogItem): string {
     </div>`;
 }
 
+// Compact grouped-grid card: name + SKU (right), small thumbnail (left), price,
+// then [הוסף] + [− qty +] stepper.
 function gridCard(it: CatalogItem): string {
+  const p = escapeAttr(it.partname);
+  const enc = encodeURIComponent(it.partname);
   return `
     <div class="card cat-card">
-      <div class="cat-card-img">
-        ${it.image_url ? `<img src="${escapeAttr(it.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
-        <button class="fav fav-over ${favSet.has(it.partname) ? 'on' : ''}" data-part="${escapeAttr(it.partname)}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
+      <button class="fav fav-card ${favSet.has(it.partname) ? 'on' : ''}" data-part="${p}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
+      <div class="cat-card-top">
+        <a class="cat-card-info" href="#product/${enc}">
+          <div class="nm">${escapeHtml(it.partdes || it.partname)}</div>
+          <div class="sku">מק"ט: ${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
+        </a>
+        <a class="cat-card-thumb" href="#product/${enc}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
       </div>
-      <a class="cat-card-name" href="#product/${encodeURIComponent(it.partname)}">${escapeHtml(it.partdes || it.partname)}</a>
-      <div class="muted" style="font-size:0.8rem">${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
       <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
-      ${stepperHtml(it)}
+      <div class="cat-card-buy">
+        <button class="add" data-part="${p}">הוסף</button>
+        <div class="cat-stepper">
+          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
+          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
+          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
+        </div>
+      </div>
     </div>`;
 }
 
