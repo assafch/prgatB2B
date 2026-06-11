@@ -37,7 +37,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
       <div style="font-size:2rem;font-weight:800;color:var(--brand);margin:0.4rem 0">${formatMoney(debt)}</div>
       <button id="pc-go" style="width:100%;padding:0.8rem;font-weight:700">לתשלום מאובטח ←</button>
       <div id="pc-msg" style="margin-top:0.5rem"></div>
-      <p class="muted" style="font-size:0.78rem;margin-top:0.6rem">התשלום מתבצע בעמוד מאובטח של UPay. פרטי הכרטיס אינם נשמרים אצלנו.</p>
+      <p class="muted" style="font-size:0.78rem;margin-top:0.6rem">התשלום מתבצע בעמוד תשלום מאובטח (תקן PCI-DSS). פרטי הכרטיס אינם נשמרים אצלנו.</p>
       <div style="margin-top:0.5rem"><a href="#home">ביטול</a></div>
     </div>`;
   const btn = shell.querySelector('#pc-go') as HTMLButtonElement;

@@ -11,8 +11,7 @@ import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSetti
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
-import { upayEnabled } from './upay.js';
-import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments } from './cardPayments.js';
+import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
 import { listStaff, createStaff, setStaffStatus, resetStaffPassword } from './staff.js';
@@ -954,10 +953,10 @@ app.post('/api/assistant', requireCustomer, assistantLimiter, assistantDailyLimi
   res.json(turn);
 }));
 
-// ---------- Card payments via UPay (hosted page; amount fixed server-side) ----------
+// ---------- Card payments via hosted page (UPay / Tranzila; amount fixed server-side) ----------
 const cardPayLimiter = perUser(60_000, 10);
 function paymentsLive(): boolean {
-  return getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true') && upayEnabled();
+  return getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true') && activeCardProvider() !== null;
 }
 function appBaseUrl(req: Request): string {
   return process.env.APP_BASE_URL || process.env.WEB_ORIGIN || `${req.protocol}://${req.get('host')}`;
@@ -999,6 +998,30 @@ app.get('/api/payments/upay/ipn', ah(async (req, res) => {
   const id = typeof req.query.id === 'string' ? req.query.id : '';
   if (id) await confirmCard(id).catch(() => null);
   res.status(200).send('ok');
+}));
+
+// Tranzila callbacks (GET or POST, form-encoded). The payload is only a HINT —
+// we record the transaction index and confirm by re-querying /v1/transactions.
+const tranzilaBody = express.urlencoded({ extended: false });
+function tranzilaCallbackParams(req: Request): { id: string; index: string } {
+  const p = { ...(req.query as Record<string, unknown>), ...((req.body || {}) as Record<string, unknown>) };
+  const id = typeof p.id === 'string' ? p.id : '';
+  const rawIndex = p.transaction_id ?? p.index ?? '';
+  return { id, index: typeof rawIndex === 'string' || typeof rawIndex === 'number' ? String(rawIndex) : '' };
+}
+app.all('/api/payments/tranzila/ipn', tranzilaBody, ah(async (req, res) => {
+  const { id, index } = tranzilaCallbackParams(req);
+  if (id && index) recordTranzilaIndex(id, index);
+  if (id) await confirmCard(id).catch(() => null);
+  res.status(200).send('ok');
+}));
+// success/fail land here (browser redirect target) — capture the hint, then
+// bounce to the SPA result page, which polls the authenticated status endpoint.
+app.all('/api/payments/tranzila/return', tranzilaBody, ah(async (req, res) => {
+  const { id, index } = tranzilaCallbackParams(req);
+  if (id && index) recordTranzilaIndex(id, index);
+  if (id) confirmCard(id).catch(() => null); // fire-and-forget; the SPA polls anyway
+  res.redirect(`/#pay/card/return?id=${encodeURIComponent(id)}`);
 }));
 
 // ---------- Admin: promotions ----------
@@ -1165,6 +1188,7 @@ app.patch('/api/admin/leads/:id', requireAdmin, (req, res) => {
 const SETTABLE = new Set([
   'payments_enabled',
   'check_payment_enabled',
+  'card_provider', // 'upay' | 'tranzila' — which PSP handles new card intents
   'maintenance_enabled',
   'maintenance_message',
   'announcement_enabled',

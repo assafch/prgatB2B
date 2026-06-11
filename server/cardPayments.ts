@@ -1,13 +1,15 @@
-// Card payments via UPay hosted page. Pay the open balance (debt) by card.
+// Card payments via a hosted payment page (UPay or Tranzila — switched by the
+// card_provider setting / CARD_PROVIDER env). Pay the open balance (debt) by card.
 // Amount is fixed SERVER-SIDE from Priority (the client never supplies it).
-// The UPay callback is NEVER trusted — payment is confirmed only by re-querying
-// GETTRANSACTIONS and cross-checking ref + amount. No money posts to Priority
-// (the office reconciles, same as cheques).
+// Provider callbacks are NEVER trusted — payment is confirmed only by re-querying
+// the provider's transactions API and cross-checking ref + amount. No money posts
+// to Priority (the office reconciles, same as cheques).
 
 import crypto from 'node:crypto';
-import { db } from './db.js';
+import { db, getSetting } from './db.js';
 import { getAccountSummary, bustFinanceCache } from './finance.js';
-import { createPaymentPage, getTransaction } from './upay.js';
+import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
+import * as tranzila from './tranzila.js';
 
 export interface CardRow {
   id: string;
@@ -17,6 +19,8 @@ export interface CardRow {
   amount: number;
   status: string;
   upay_cashier_id: string | null;
+  tranzila_index: string | null;
+  psp: string;
   confirmation_code: string | null;
   four_digits: string | null;
   provider: string | null;
@@ -25,6 +29,17 @@ export interface CardRow {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Which PSP handles new intents. Admin setting wins, then env, then whichever
+ *  provider is configured (Tranzila preferred when both are). */
+export function activeCardProvider(): 'upay' | 'tranzila' | null {
+  const pref = (getSetting('card_provider') || process.env.CARD_PROVIDER || '').toLowerCase();
+  if (pref === 'tranzila' && tranzila.tranzilaEnabled()) return 'tranzila';
+  if (pref === 'upay' && upayEnabled()) return 'upay';
+  if (tranzila.tranzilaEnabled()) return 'tranzila';
+  if (upayEnabled()) return 'upay';
+  return null;
+}
 
 /** Create a hosted-page intent to pay the open balance. Returns the UPay URL. */
 export async function createCardDebtIntent(
@@ -42,6 +57,27 @@ export async function createCardDebtIntent(
   if (amount > debt) amount = debt; // never charge more than owed
 
   const id = crypto.randomBytes(12).toString('hex');
+  const psp = activeCardProvider();
+  if (!psp) throw new Error('תשלום בכרטיס אינו זמין כרגע');
+
+  if (psp === 'tranzila') {
+    const created = await tranzila.createPaymentPage({
+      amount,
+      ref: id,
+      description: `תשלום חוב — ${custname}`,
+      successUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}`,
+      failUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}&fail=1`,
+      notifyUrl: `${baseUrl}/api/payments/tranzila/ipn?id=${id}`,
+      contact: custname,
+      phone,
+    });
+    db.prepare(
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp)
+       VALUES (?, ?, ?, 'debt', ?, 'pending', 'tranzila')`
+    ).run(id, userId, custname, amount);
+    return { id, url: created.url, amount };
+  }
+
   const created = await createPaymentPage({
     amount,
     ref: id,
@@ -51,10 +87,17 @@ export async function createCardDebtIntent(
     phone,
   });
   db.prepare(
-    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, upay_cashier_id)
-     VALUES (?, ?, ?, 'debt', ?, 'pending', ?)`
+    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, upay_cashier_id, psp)
+     VALUES (?, ?, ?, 'debt', ?, 'pending', ?, 'upay')`
   ).run(id, userId, custname, amount, created.cashierId);
   return { id, url: created.url, amount };
+}
+
+/** Store the transaction index hinted by Tranzila's notify/return callback.
+ *  The hint is untrusted — it only tells confirmCard where to look. */
+export function recordTranzilaIndex(id: string, index: string): void {
+  if (!/^\d{1,12}$/.test(index)) return;
+  db.prepare(`UPDATE card_payments SET tranzila_index = ? WHERE id = ? AND tranzila_index IS NULL AND psp = 'tranzila'`).run(index, id);
 }
 
 export function getCardForUser(userId: number, id: string): CardRow | null {
@@ -64,12 +107,37 @@ function getCardAny(id: string): CardRow | null {
   return (db.prepare(`SELECT * FROM card_payments WHERE id = ?`).get(id) as CardRow) ?? null;
 }
 
-/** Authoritative confirm via UPay re-query (callback never trusted). Cross-checks
- *  the returned ref === our intent id and the amount before marking paid. */
+/** Authoritative confirm via provider re-query (callback never trusted). Cross-
+ *  checks the returned ref === our intent id and the amount before marking paid. */
 export async function confirmCard(id: string): Promise<CardRow | null> {
   const row = getCardAny(id);
   if (!row) return null;
-  if (row.status === 'paid' || !row.upay_cashier_id) return row;
+  if (row.status === 'paid') return row;
+
+  if (row.psp === 'tranzila') {
+    let tx;
+    try {
+      tx = await tranzila.findTransaction({ ref: id, index: row.tranzila_index, createdAt: row.created_at });
+    } catch (err) {
+      console.warn('[card] tranzila confirm query failed:', err instanceof Error ? err.message : err);
+      return row;
+    }
+    if (!tx) return row;
+    // findTransaction only returns records carrying our ref; still verify amount.
+    const amountOk = tx.amount == null || Math.abs(tx.amount - row.amount) <= 0.01;
+    if (tx.paid && tx.refFound && amountOk) {
+      db.prepare(
+        `UPDATE card_payments SET status = 'paid', confirmation_code = ?, four_digits = ?, provider = 'tranzila',
+           tranzila_index = COALESCE(tranzila_index, ?), paid_at = datetime('now')
+         WHERE id = ? AND status = 'pending'`
+      ).run(tx.confirmationCode, tx.fourDigits, tx.index, id);
+      bustFinanceCache(row.custname);
+      return getCardAny(id);
+    }
+    return row;
+  }
+
+  if (!row.upay_cashier_id) return row;
   let tx;
   try {
     tx = await getTransaction(row.upay_cashier_id);

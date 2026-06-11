@@ -337,6 +337,11 @@ ensureColumn('catalog_cache', 'b2b_category_override', 'TEXT');
 // Promotions table predates the current engine; add the columns it needs (the old
 // x_/y_ columns stay, unused). params holds the per-type rule JSON.
 ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");
+
+// Second card PSP (Tranzila) alongside UPay. psp says who handles the intent;
+// tranzila_index is the provider transaction id (notify hint, verified on confirm).
+ensureColumn('card_payments', 'psp', "TEXT NOT NULL DEFAULT 'upay'");
+ensureColumn('card_payments', 'tranzila_index', 'TEXT');
 ensureColumn('promotions', 'priority', 'INTEGER NOT NULL DEFAULT 0');
 // Per-store roles: existing customers default to 'owner'; staff logins are 'orderer'.
 ensureColumn('users', 'customer_role', "TEXT NOT NULL DEFAULT 'owner'");
