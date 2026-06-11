@@ -52,14 +52,16 @@ function isGrouped(): boolean {
 export async function renderCatalog(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `
     <div class="card cat-filters">
-      <input id="q" placeholder="חיפוש מוצר / מק״ט / ברקוד" />
-      <select id="family"><option value="">כל המשפחות</option></select>
-      <div class="view-toggle" role="group" aria-label="תצוגה">
-        <button id="view-grid" title="תצוגת רשת" aria-label="רשת">▦</button>
-        <button id="view-list" title="תצוגת רשימה" aria-label="רשימה">☰</button>
+      <input id="q" class="cat-search" placeholder="חיפוש מוצר / מק״ט / ברקוד" />
+      <div class="cat-filters-row">
+        <div class="view-toggle" role="group" aria-label="תצוגה">
+          <button id="view-grid" title="תצוגת רשת" aria-label="רשת">▦</button>
+          <button id="view-list" title="תצוגת רשימה" aria-label="רשימה">☰</button>
+        </div>
+        <select id="family"><option value="">כל המשפחות</option></select>
+        <a href="#favorites" class="fav-link" title="המועדפים שלי" aria-label="מועדפים">❤️</a>
+        <a href="#scan" class="fav-link" title="סריקת ברקוד" aria-label="סריקת ברקוד">📷</a>
       </div>
-      <a href="#scan" class="fav-link" title="סריקת ברקוד" aria-label="סריקת ברקוד">📷</a>
-      <a href="#favorites" class="fav-link" title="המועדפים שלי" aria-label="מועדפים">❤️</a>
     </div>
     <div id="catalog-grid"></div>
     <div id="cat-sentinel" style="height:1px"></div>
