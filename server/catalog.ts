@@ -242,16 +242,31 @@ export function queryCatalog(
   const usePersonal = getSettingBool('customer_pricing_enabled', false);
 
   const conds: string[] = ['c.active = 1', 'c.b2b_visible = 1'];
-  const params: unknown[] = [];
+  const params: unknown[] = []; // WHERE params
+  const scoreParams: unknown[] = []; // params for the relevance score in SELECT
+  let scoreSelect = '';
+  let orderPrefix = '';
+
+  // One searchable haystack: description, name, B2B override, barcode, tags, family.
+  const HAY =
+    "(COALESCE(c.partdes,'') || ' ' || c.partname || ' ' || COALESCE(c.b2b_partdes_override,'') || ' ' || COALESCE(c.barcode,'') || ' ' || COALESCE(c.b2b_tags,'') || ' ' || COALESCE(c.family_desc,''))";
 
   if (q.q && q.q.trim()) {
-    const words = q.q.trim().split(/\s+/);
-    for (const w of words) {
-      conds.push(
-        '(c.partdes LIKE ? OR c.partname LIKE ? OR c.barcode LIKE ? OR c.b2b_partdes_override LIKE ? OR c.b2b_tags LIKE ?)'
-      );
-      const like = `%${w}%`;
-      params.push(like, like, like, like, like);
+    const words = q.q.trim().split(/\s+/).filter((w) => w.length >= 2);
+    if (words.length) {
+      // Match ANY word — natural-language descriptors that aren't in the catalog
+      // text (e.g. "קטן", "שקוף") must not zero out a real product. Then rank by how
+      // many words each product matches, so the closest hits come first.
+      conds.push('(' + words.map(() => `${HAY} LIKE ?`).join(' OR ') + ')');
+      for (const w of words) params.push(`%${w}%`);
+      if (q.sort !== 'family') {
+        scoreSelect = ', (' + words.map(() => `(CASE WHEN ${HAY} LIKE ? THEN 1 ELSE 0 END)`).join(' + ') + ') AS _score';
+        for (const w of words) scoreParams.push(`%${w}%`);
+        orderPrefix = '_score DESC, ';
+      }
+    } else {
+      conds.push(`${HAY} LIKE ?`);
+      params.push(`%${q.q.trim()}%`);
     }
   }
   if (q.family && q.family.trim()) {
@@ -271,14 +286,14 @@ export function queryCatalog(
       `SELECT c.partname, c.partdes, c.family, c.family_desc, c.barcode, c.list_price, c.image_url, c.box_size,
               c.b2b_partdes_override, c.b2b_image_path, c.b2b_min_qty, c.b2b_featured, c.b2b_description,
               c.b2b_category_override,
-              p.price AS personal_price
+              p.price AS personal_price${scoreSelect}
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
        WHERE ${where}
-       ORDER BY ${q.sort === 'family' ? 'c.family_desc IS NULL, c.family_desc COLLATE NOCASE ASC, c.partdes COLLATE NOCASE ASC' : 'c.b2b_sort_priority DESC, c.partdes ASC'}
+       ORDER BY ${orderPrefix}${q.sort === 'family' ? 'c.family_desc IS NULL, c.family_desc COLLATE NOCASE ASC, c.partdes COLLATE NOCASE ASC' : 'c.b2b_sort_priority DESC, c.partdes ASC'}
        LIMIT ? OFFSET ?`
     )
-    .all(custname, ...params, pageSize, offset) as Array<{
+    .all(...scoreParams, custname, ...params, pageSize, offset) as Array<{
       partname: string;
       partdes: string | null;
       family: string | null;
