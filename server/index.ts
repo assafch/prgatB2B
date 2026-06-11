@@ -950,7 +950,7 @@ app.post('/api/assistant', requireCustomer, assistantLimiter, assistantDailyLimi
     res.status(400).json({ error: 'no_message' });
     return;
   }
-  const turn = await runAssistant(req.user!.id, req.user!.custname!, history);
+  const turn = await runAssistant(req.user!.id, req.user!.custname!, req.user!.customer_role, history);
   res.json(turn);
 }));
 
