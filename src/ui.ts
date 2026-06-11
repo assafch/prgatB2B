@@ -8,19 +8,31 @@ export interface NavState {
 
 // Thumb-reach bottom navigation for store owners on phones. Five targets, each
 // ≥56px tall, cart badge, honors the iOS home-indicator safe area.
+// Solid navy glyphs per the Stitch design (no emoji).
+const NAV_ICONS: Record<string, string> = {
+  // House with a door notched out of the bottom edge (Stitch glyph).
+  home: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 2.9 10h2.2v11h5v-5.2a1.9 1.9 0 0 1 3.8 0V21h5V10h2.2z"/></svg>`,
+  catalog: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7.4" height="7.4" rx="1.6"/><rect x="13.1" y="3.5" width="7.4" height="7.4" rx="1.6"/><rect x="3.5" y="13.1" width="7.4" height="7.4" rx="1.6"/><rect x="13.1" y="13.1" width="7.4" height="7.4" rx="1.6"/></svg>`,
+  // RTL cart: bold handle on the left, like the Stitch render.
+  cart: `<svg viewBox="0 0 24 24" aria-hidden="true"><g transform="matrix(-1 0 0 1 24 0)"><path d="M2.2 3h2.6a1 1 0 0 1 1 .76L6.3 5.8h14.6l-2.1 8.9a2.2 2.2 0 0 1-2.15 1.7H9a2.2 2.2 0 0 1-2.15-1.74L4.6 5.4l-.5-1.4H2.2z"/><circle cx="9.6" cy="19.7" r="1.8"/><circle cx="16.4" cy="19.7" r="1.8"/></g></svg>`,
+  // Receipt: zigzag bottom edge, two long lines + one short (Stitch glyph).
+  orders: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.2h12A1.6 1.6 0 0 1 19.6 3.8v17.6l-2.17-1.6-2.17 1.6-2.16-1.6-2.16 1.6-2.17-1.6-2.17 1.6V3.8A1.6 1.6 0 0 1 6 2.2zm2.2 5h7.6v1.6H8.2zm0 3.4h7.6v1.6H8.2zm0 3.4h4.4v1.6H8.2z" fill-rule="evenodd"/></svg>`,
+  account: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M4 20.5c0-3.6 3.7-6 8-6s8 2.4 8 6v.5H4z"/></svg>`,
+};
+
 export function bottomNav({ active, cartCount }: NavState): string {
-  const tab = (key: string, href: string, label: string, icon: string, badge = 0) => `
+  const tab = (key: string, href: string, label: string, badge = 0) => `
     <a href="${href}" class="bn-tab${active === key ? ' active' : ''}" aria-label="${escapeHtml(label)}">
-      <span class="bn-icon">${icon}${badge > 0 ? `<span class="bn-badge">${badge > 99 ? '99+' : badge}</span>` : ''}</span>
+      <span class="bn-icon">${NAV_ICONS[key]}${badge > 0 ? `<span class="bn-badge">${badge > 99 ? '99+' : badge}</span>` : ''}</span>
       <span class="bn-label">${escapeHtml(label)}</span>
     </a>`;
   return `
     <nav class="bottom-nav" role="navigation" aria-label="ניווט ראשי">
-      ${tab('home', '#home', 'בית', '🏠')}
-      ${tab('catalog', '#catalog', 'קטלוג', '🔍')}
-      ${tab('cart', '#cart', 'סל', '🛒', cartCount)}
-      ${tab('orders', '#orders', 'הזמנות', '📦')}
-      ${tab('account', '#account', 'חשבון', '👤')}
+      ${tab('home', '#home', 'בית')}
+      ${tab('catalog', '#catalog', 'קטלוג')}
+      ${tab('cart', '#cart', 'עגלה', cartCount)}
+      ${tab('orders', '#orders', 'הזמנות')}
+      ${tab('account', '#account', 'חשבון')}
     </nav>`;
 }
 

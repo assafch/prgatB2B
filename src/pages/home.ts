@@ -73,12 +73,17 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
         <div class="label">נתוני החוב יתעדכנו בקרוב</div>
       </div>`;
   } else if (owing) {
+    // White outline icons inside the navy buttons (check-circle / credit card),
+    // exactly as in the Stitch render — icon leads the text (right side in RTL).
+    const checkIco = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12.4 2.6 2.6L16 9"/></svg>`;
+    const cardIco = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 9.5h19"/><path d="M6 15h4"/></svg>`;
+    const amountHtml = formatMoney(d.balance.openTotal).replace('₪', '<span class="ils">₪</span>');
     debtCard = `
       <div class="debt-coral">
-        <div class="label">יתרת חוב${d.balance.openCount > 0 ? ` · ${d.balance.openCount} חשבוניות` : ''}</div>
-        <div class="amount">${formatMoney(d.balance.openTotal)}</div>
-        ${d.features.checkPayment ? `<a class="pay-navy" href="#pay/check">✓ שלם בצ׳יק</a>` : ''}
-        <a class="pay-navy" href="#pay/card">💳 שלם באשראי</a>
+        <div class="label">יתרת חוב</div>
+        <div class="amount">${amountHtml}</div>
+        ${d.features.checkPayment ? `<a class="pay-navy" href="#pay/check">${checkIco} שלם בצ׳יק</a>` : ''}
+        <a class="pay-navy" href="#pay/card">${cardIco} שלם באשראי</a>
         <a class="inv-link" href="#invoices">צפייה בחשבוניות הפתוחות</a>
       </div>`;
   } else if (d.lastOrder) {
@@ -98,14 +103,16 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
 
   // Side tiles (the two white shortcut cards in the design). Staff 'orderer'
   // doesn't see finance — swap the invoices tile for the catalog.
+  // 3D icons: invoices/account are cropped from the Stitch render itself;
+  // catalog (orderer variant) is a matching Fluent 3D asset.
   const tiles = `
     <div class="home-tiles">
       ${
         isOrderer
-          ? `<a class="home-tile" href="#catalog"><span class="ico">🛍️</span><span class="t">קטלוג</span><span class="s">הזמנה חדשה</span></a>`
-          : `<a class="home-tile" href="#invoices"><span class="ico">🧾</span><span class="t">חשבוניות</span><span class="s">מסמכים ויתרה</span></a>`
+          ? `<a class="home-tile" href="#catalog"><img class="ico3d" src="/icon3d-catalog.png" alt=""/><span class="t">קטלוג</span><span class="s">הזמנה חדשה</span></a>`
+          : `<a class="home-tile" href="#invoices"><img class="ico3d" src="/icon3d-invoices.png" alt=""/><span class="t">חשבוניות</span><span class="s">מסמכים ויתרה</span></a>`
       }
-      <a class="home-tile" href="#account"><span class="ico">👤</span><span class="t">החשבון שלי</span><span class="s">פרטים והגדרות</span></a>
+      <a class="home-tile" href="#account"><img class="ico3d" src="/icon3d-account.png" alt=""/><span class="t">החשבון שלי</span><span class="s">פרטים והגדרות</span></a>
     </div>`;
 
   // Promotions rail — "מבצעים והנחות" cards with a navy "קנה עכשיו" CTA.
@@ -201,8 +208,8 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     ${bannerCard}
     ${promoRail}
     <div class="home-grid">
-      ${debtCard}
       ${tiles}
+      ${debtCard}
     </div>
     ${utilBar}
     ${lastOrderCard}
