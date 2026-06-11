@@ -20,6 +20,13 @@ interface LastOrder {
   created_at: string;
   itemCount: number;
 }
+interface HomePromo {
+  id: number;
+  title: string;
+  subtitle: string;
+  image_url: string | null;
+  href: string;
+}
 interface HomeData {
   custname: string;
   custDesc: string | null;
@@ -28,6 +35,7 @@ interface HomeData {
   balanceOk: boolean;
   lastOrder: LastOrder | null;
   suggestions: Suggestion[];
+  promotions: HomePromo[];
   features: { payments: boolean; checkPayment: boolean };
   banner: { text: string } | null;
   maintenance: { enabled: boolean; message: string };
@@ -49,42 +57,74 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
   // 'orderer' staff don't see finance (debt/pay) — that's the owner's view.
   const isOrderer = state.me?.customer_role === 'orderer';
 
-  // Debt headline. When the balance form is unreachable/not-API-enabled we can't
-  // trust the number, so we show an honest "unavailable" instead of a misleading ₪0.
+  // Debt card (coral, per the Stitch design). When the balance form is unreachable
+  // we can't trust the number, so we show an honest "unavailable" — never ₪0.
   let debtCard: string;
   if (isOrderer) {
     debtCard = `
-      <div class="card debt-card clear">
-        <div class="amount">👋 ${name ? escapeHtml(name) : 'שלום'}</div>
+      <div class="debt-coral neutral">
+        <div class="amount" style="font-size:1.4rem">👋 ${name ? escapeHtml(name) : 'שלום'}</div>
         <div class="label">בחרו מוצרים והוסיפו לסל — ההזמנה תישלח לאישור</div>
       </div>`;
   } else if (!d.balanceOk) {
     debtCard = `
-      <div class="card debt-card">
-        <div class="amount" style="color:var(--muted);font-size:1.4rem">לא זמין כעת</div>
+      <div class="debt-coral neutral">
+        <div class="amount" style="font-size:1.3rem">לא זמין כעת</div>
         <div class="label">נתוני החוב יתעדכנו בקרוב</div>
       </div>`;
   } else if (owing) {
     debtCard = `
-      <div class="card debt-card owing">
-        <div class="label">יתרה לתשלום${d.balance.openCount > 0 ? ` (${d.balance.openCount} חשבוניות פתוחות)` : ''}</div>
+      <div class="debt-coral">
+        <div class="label">יתרת חוב${d.balance.openCount > 0 ? ` · ${d.balance.openCount} חשבוניות` : ''}</div>
         <div class="amount">${formatMoney(d.balance.openTotal)}</div>
-        ${d.features.checkPayment ? `<a class="pay-btn" href="#pay/check" style="display:inline-flex;align-items:center;gap:0.4rem;justify-content:center">📸 תשלום בצ׳ק</a>` : ''}
-        <a class="pay-btn" href="#pay/card" style="display:inline-flex;align-items:center;gap:0.4rem;justify-content:center;margin-top:0.5rem">💳 תשלום בכרטיס אשראי</a>
-        <div style="margin-top:0.6rem"><a href="#invoices">צפייה בחשבוניות הפתוחות</a></div>
+        ${d.features.checkPayment ? `<a class="pay-navy" href="#pay/check">✓ שלם בצ׳יק</a>` : ''}
+        <a class="pay-navy" href="#pay/card">💳 שלם באשראי</a>
+        <a class="inv-link" href="#invoices">צפייה בחשבוניות הפתוחות</a>
       </div>`;
   } else if (d.lastOrder) {
     debtCard = `
-      <div class="card debt-card clear">
-        <div class="amount">✓ אין חוב פתוח</div>
+      <div class="debt-coral clear">
+        <div class="amount" style="font-size:1.5rem">✓ אין חוב פתוח</div>
         <div class="label">כל החשבוניות שולמו — כל הכבוד!</div>
       </div>`;
   } else {
     // First-time customer with no history — welcome, don't congratulate.
     debtCard = `
-      <div class="card debt-card clear">
-        <div class="amount">👋 ברוכים הבאים</div>
-        <div class="label">אין חשבוניות פתוחות — הזמינו עכשיו דרך הקטלוג</div>
+      <div class="debt-coral clear">
+        <div class="amount" style="font-size:1.5rem">👋 ברוכים הבאים</div>
+        <div class="label">אין חשבוניות פתוחות — הזמינו דרך הקטלוג</div>
+      </div>`;
+  }
+
+  // Side tiles (the two white shortcut cards in the design). Staff 'orderer'
+  // doesn't see finance — swap the invoices tile for the catalog.
+  const tiles = `
+    <div class="home-tiles">
+      ${
+        isOrderer
+          ? `<a class="home-tile" href="#catalog"><span class="ico">🛍️</span><span class="t">קטלוג</span><span class="s">הזמנה חדשה</span></a>`
+          : `<a class="home-tile" href="#invoices"><span class="ico">🧾</span><span class="t">חשבוניות</span><span class="s">מסמכים ויתרה</span></a>`
+      }
+      <a class="home-tile" href="#account"><span class="ico">👤</span><span class="t">החשבון שלי</span><span class="s">פרטים והגדרות</span></a>
+    </div>`;
+
+  // Promotions rail — "מבצעים והנחות" cards with a navy "קנה עכשיו" CTA.
+  let promoRail = '';
+  if (d.promotions.length > 0) {
+    promoRail = `
+      <h2 class="home-sec">מבצעים והנחות</h2>
+      <div class="promo-rail">
+        ${d.promotions
+          .map(
+            (p) => `
+          <a class="promo-card" href="${escapeAttr(p.href)}">
+            <div class="promo-img">${p.image_url ? `<img src="${escapeAttr(p.image_url)}" alt="" loading="lazy"/>` : '🎁'}</div>
+            <div class="promo-title">${escapeHtml(p.title)}</div>
+            <div class="promo-sub">${escapeHtml(p.subtitle)}</div>
+            <span class="promo-cta">קנה עכשיו</span>
+          </a>`
+          )
+          .join('')}
       </div>`;
   }
 
@@ -143,14 +183,6 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       </div>`;
   }
 
-  const quickActions = `
-    <div class="dash-actions">
-      <a class="dash-action" href="#catalog"><span class="ico">🛍️</span><span>הזמנה חדשה</span><span class="sub">עיון בקטלוג</span></a>
-      ${isOrderer ? '' : '<a class="dash-action" href="#invoices"><span class="ico">🧾</span><span>חשבוניות</span><span class="sub">מסמכים ויתרה</span></a>'}
-      <a class="dash-action" href="#orders"><span class="ico">📦</span><span>ההזמנות שלי</span><span class="sub">מעקב סטטוס</span></a>
-      <a class="dash-action" href="#account"><span class="ico">👤</span><span>החשבון שלי</span><span class="sub">פרטים והגדרות</span></a>
-    </div>`;
-
   // Admin-controlled customer notices (rendered escaped — plain text only).
   const maintenanceCard = d.maintenance?.enabled
     ? `<div class="card" style="border:1px solid var(--err);background:#fdecec"><div style="font-weight:700;color:var(--err)">🛠️ ${escapeHtml(d.maintenance.message)}</div></div>`
@@ -161,14 +193,20 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       : '';
 
   shell.innerHTML = `
-    <p class="dash-greet">שלום${name ? `, <b>${escapeHtml(name)}</b>` : ''} 👋</p>
+    <div class="home-head">
+      <span class="home-avatar" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.3 3.6-5.5 8-5.5s8 2.2 8 5.5v1H4z"/></svg></span>
+      <span>שלום${name ? `, <b>${escapeHtml(name)}</b>` : ''}</span>
+    </div>
     ${maintenanceCard}
     ${bannerCard}
-    ${debtCard}
+    ${promoRail}
+    <div class="home-grid">
+      ${debtCard}
+      ${tiles}
+    </div>
     ${utilBar}
     ${lastOrderCard}
     ${suggestionCard}
-    ${quickActions}
   `;
 
   shell.querySelector('#reorder-last')?.addEventListener('click', async (e) => {

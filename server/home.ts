@@ -6,6 +6,8 @@
 import { db, getSetting, getSettingBool } from './db.js';
 import { getAccountSummary, type BalanceSummary } from './finance.js';
 import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
+import { activePromotions } from './promotions.js';
+import { getProduct } from './catalog.js';
 
 export interface LastOrderView {
   id: number;
@@ -16,6 +18,15 @@ export interface LastOrderView {
   itemCount: number;
 }
 
+/** Display-ready promo card for the home rail (title/subtitle/image derived server-side). */
+export interface HomePromo {
+  id: number;
+  title: string;
+  subtitle: string;
+  image_url: string | null;
+  href: string;
+}
+
 export interface HomeData {
   custname: string;
   custDesc: string | null;
@@ -24,12 +35,47 @@ export interface HomeData {
   balanceOk: boolean;
   lastOrder: LastOrderView | null;
   suggestions: ReorderSuggestion[];
+  promotions: HomePromo[];
   /** server-owned feature flags so the client never shows dead CTAs */
   features: { payments: boolean; checkPayment: boolean };
   /** admin-controlled customer announcement (plain text, rendered escaped) */
   banner: { text: string } | null;
   /** admin-controlled maintenance mode — client blocks ordering + shows a notice */
   maintenance: { enabled: boolean; message: string };
+}
+
+// One card per active promotion, with a human subtitle derived from the promo
+// params and the target product's image when there is a specific product.
+function promoCards(custname: string): HomePromo[] {
+  const num = (v: unknown, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
+  const cards: HomePromo[] = [];
+  for (const p of activePromotions().slice(0, 8)) {
+    const pr = p.params;
+    let subtitle = '';
+    let part: string | null = null;
+    if (p.type === 'bogo') {
+      part = String(pr.partname || '') || null;
+      subtitle = `קנה ${Math.max(1, num(pr.buy, 1))} קבל ${Math.max(1, num(pr.free, 1))} חינם`;
+    } else if (p.type === 'percent' || p.type === 'fixed') {
+      const scope = String(pr.scope || 'order');
+      if (scope === 'product') part = String(pr.target || '') || null;
+      const what = p.type === 'percent' ? `${num(pr.percent)}% הנחה` : `הנחה של ₪${num(pr.amount)}`;
+      const min = num(pr.minSubtotal);
+      subtitle = scope === 'order' ? `${what} על כל ההזמנה${min ? ` מעל ₪${min}` : ''}` : what;
+    } else if (p.type === 'gift') {
+      part = String(pr.giftPartname || '') || null;
+      subtitle = `מתנה בקנייה מעל ₪${num(pr.minSubtotal)}`;
+    }
+    const prod = part ? getProduct(part, custname) : null;
+    cards.push({
+      id: p.id,
+      title: p.name,
+      subtitle: prod?.partdes && !subtitle.includes(prod.partdes) ? `${subtitle} · ${prod.partdes}` : subtitle,
+      image_url: prod?.image_url ?? null,
+      href: prod ? `#product/${encodeURIComponent(prod.partname)}` : '#catalog',
+    });
+  }
+  return cards;
 }
 
 export async function getHomeData(
@@ -74,6 +120,7 @@ export async function getHomeData(
     balanceOk: summary.balanceOk,
     lastOrder,
     suggestions: getReorderSuggestions(userId, custname),
+    promotions: promoCards(custname),
     features: {
       // Admin-toggleable (settings table), with the original env/default as fallback.
       payments: getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true'),
