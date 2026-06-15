@@ -8,6 +8,7 @@ import {
   getCustomer,
   listOpenInvoices,
   listInvoices,
+  listUnpaidInvoices,
   getObligo,
   getInvoiceWithItems,
   type PriorityCustomerFull,
@@ -253,6 +254,17 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
     priorityOk: customer !== null || obligo !== null || open !== null,
     balanceOk,
   };
+}
+
+/** Unpaid (unreconciled) invoices for a customer — IVNUM + amount, newest first.
+ *  Authoritative source for "which invoices are still owed" (see listUnpaidInvoices). */
+export async function getUnpaidInvoices(custname: string): Promise<{ ivnum: string; amount: number }[]> {
+  const config = getPriorityConfig();
+  if (!config) return [];
+  const rows = await tryGet(`unpaid:${custname}`, () => memo(`unpaid:${custname}`, () => listUnpaidInvoices(config, custname)));
+  return (rows ?? [])
+    .map((iv) => ({ ivnum: String(iv.IVNUM ?? ''), amount: round2(Number(iv.TOTPRICE) || 0) }))
+    .filter((iv) => iv.ivnum);
 }
 
 // ---------- Invoices (open + history) ----------

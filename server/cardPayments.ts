@@ -7,7 +7,7 @@
 
 import crypto from 'node:crypto';
 import { db, getSetting } from './db.js';
-import { getAccountSummary, bustFinanceCache } from './finance.js';
+import { getAccountSummary, getUnpaidInvoices, bustFinanceCache } from './finance.js';
 import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
 import * as tranzila from './tranzila.js';
 import * as payplus from './payplus.js';
@@ -68,10 +68,19 @@ export async function createCardDebtIntent(
     // PayPlus requires a customer email — use the Priority customer record (already
     // loaded above), falling back to a configured office address.
     const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
+    // Line-item label shown on the PayPlus page (replaces its default "General Product").
+    // Name it after the actual unpaid invoice(s) being settled.
+    const unpaid = await getUnpaidInvoices(custname).catch(() => []);
+    const nums = unpaid.map((u) => u.ivnum);
+    let itemName: string;
+    if (nums.length === 1) itemName = `חשבונית מס׳ ${nums[0]}`;
+    else if (nums.length >= 2 && nums.length <= 4) itemName = `חשבוניות מס׳ ${nums.join(', ')}`;
+    else if (nums.length > 4) itemName = `תשלום ${nums.length} חשבוניות`;
+    else itemName = `תשלום חוב — ${custname}`;
     const created = await payplus.createPaymentPage({
       amount,
       ref: id,
-      description: `תשלום חוב — ${custname}`,
+      description: itemName,
       email,
       contact: custname,
       successUrl: `${baseUrl}/api/payments/payplus/return?id=${id}`,

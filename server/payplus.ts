@@ -82,6 +82,9 @@ export async function createPaymentPage(input: {
     refURL_cancel: input.cancelUrl,
     refURL_callback: input.notifyUrl, // server-to-server IPN
     customer: { customer_name: input.contact || input.ref, email: input.email || '' },
+    // Replace PayPlus's default "General Product" line with our own description
+    // (one line; price == amount so the page total is unchanged).
+    items: [{ name: input.description, quantity: 1, price: Number(input.amount.toFixed(2)) }],
   };
   if (c.cashierUid) body.cashier_uid = c.cashierUid;
 

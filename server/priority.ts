@@ -327,6 +327,34 @@ export async function listInvoices(
   return (result.value || []) as PriorityInvoice[];
 }
 
+export interface PriorityUnpaidInvoice {
+  IVNUM?: string;
+  TOTPRICE?: number;
+  IVDATE?: string;
+  STATDES?: string;
+  IVRECONDATE?: string | null; // reconciliation date — null = still unpaid
+}
+
+// AINVOICES that haven't been reconciled (IVRECONDATE empty) are still owed — this
+// is the authoritative "unpaid invoices" signal (OPENINVOICES is unreliable). The
+// OData service can't filter `IVRECONDATE eq null`, so we fetch recent finalized
+// invoices and filter the unreconciled ones client-side.
+export async function listUnpaidInvoices(
+  config: PriorityConfig,
+  custname: string,
+  top = 200
+): Promise<PriorityUnpaidInvoice[]> {
+  const safe = custname.replace(/'/g, "''");
+  const result = await priorityRequest(
+    config,
+    `AINVOICES?$filter=CUSTNAME eq '${safe}'&$orderby=IVDATE desc&$top=${top}` +
+      `&$select=IVNUM,TOTPRICE,IVDATE,STATDES,IVRECONDATE`
+  );
+  return ((result.value || []) as PriorityUnpaidInvoice[]).filter(
+    (iv) => iv.IVRECONDATE == null && (iv.STATDES || '').trim() === 'סופית' && Number(iv.TOTPRICE) > 0
+  );
+}
+
 export interface PriorityInvoiceLine {
   PARTNAME?: string;
   PDES?: string;
