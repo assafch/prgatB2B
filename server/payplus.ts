@@ -66,6 +66,9 @@ export async function createPaymentPage(input: {
   failUrl: string;
   cancelUrl: string;
   notifyUrl: string;
+  // Optional itemized lines (one per selected invoice); their prices sum to `amount`.
+  // When omitted, a single line is built from `description`.
+  items?: { name: string; amount: number }[];
 }): Promise<{ url: string; pageRequestUid: string | null }> {
   const c = cfg();
   const body: Record<string, unknown> = {
@@ -82,9 +85,13 @@ export async function createPaymentPage(input: {
     refURL_cancel: input.cancelUrl,
     refURL_callback: input.notifyUrl, // server-to-server IPN
     customer: { customer_name: input.contact || input.ref, email: input.email || '' },
-    // Replace PayPlus's default "General Product" line with our own description
-    // (one line; price == amount so the page total is unchanged).
-    items: [{ name: input.description, quantity: 1, price: Number(input.amount.toFixed(2)) }],
+    // Replace PayPlus's default "General Product" line with our own line(s) — one
+    // per selected invoice when provided, else a single line from `description`.
+    // Prices sum to `amount`, so the page total is unchanged.
+    items:
+      input.items && input.items.length
+        ? input.items.map((it) => ({ name: it.name, quantity: 1, price: Number(it.amount.toFixed(2)) }))
+        : [{ name: input.description, quantity: 1, price: Number(input.amount.toFixed(2)) }],
   };
   if (c.cashierUid) body.cashier_uid = c.cashierUid;
 

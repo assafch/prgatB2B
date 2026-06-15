@@ -66,7 +66,7 @@ import {
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
-import { getAccountSummary, getInvoices, getInvoiceDetail, warmFinance } from './finance.js';
+import { getAccountSummary, getInvoices, getInvoiceDetail, getUnpaidInvoices, warmFinance } from './finance.js';
 import {
   bulkUpdate,
   deleteImage,
@@ -974,20 +974,25 @@ function appBaseUrl(req: Request): string {
   return process.env.APP_BASE_URL || process.env.WEB_ORIGIN || `${req.protocol}://${req.get('host')}`;
 }
 
+// Open (unpaid) invoices the customer can choose to settle by card.
+app.get('/api/payments/card/open-invoices', requireOwner, financeLimiter, ah(async (req: AuthedRequest, res) => {
+  const custname = req.user!.custname!;
+  const [items, summary] = await Promise.all([
+    getUnpaidInvoices(custname).catch(() => []),
+    getAccountSummary(custname).catch(() => null),
+  ]);
+  res.json({ items, debt: summary && summary.balanceOk ? summary.balance.openTotal : 0 });
+}));
+
 app.post('/api/payments/card/create', requireOwner, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
   if (!paymentsLive()) {
     res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
     return;
   }
-  const amount = Number((req.body as { amount?: unknown })?.amount);
+  const rawInvoices = (req.body as { invoices?: unknown })?.invoices;
+  const invoices = Array.isArray(rawInvoices) ? rawInvoices.filter((x): x is string => typeof x === 'string') : [];
   try {
-    const out = await createCardDebtIntent(
-      req.user!.id,
-      req.user!.custname!,
-      isFinite(amount) && amount > 0 ? amount : undefined,
-      undefined,
-      appBaseUrl(req)
-    );
+    const out = await createCardDebtIntent(req.user!.id, req.user!.custname!, { invoices }, undefined, appBaseUrl(req));
     res.json(out);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה ביצירת התשלום' });
@@ -1081,11 +1086,21 @@ app.delete('/api/admin/promotions/:id', requireAdmin, (req, res) => {
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });
 
+function parsePaidItems(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as string[]) : null;
+  } catch {
+    return null;
+  }
+}
 app.get('/api/admin/card-payments', requireAdmin, (_req, res) => {
   res.json({
     payments: listAllCardPayments().map((c) => ({
       id: c.id, custname: c.custname, amount: c.amount, status: c.status,
       confirmationCode: c.confirmation_code, fourDigits: c.four_digits, provider: c.provider,
+      paidItems: parsePaidItems(c.paid_items),
       createdAt: c.created_at, paidAt: c.paid_at,
     })),
   });

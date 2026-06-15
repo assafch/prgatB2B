@@ -256,14 +256,20 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
   };
 }
 
-/** Unpaid (unreconciled) invoices for a customer — IVNUM + amount, newest first.
+export interface UnpaidInvoice {
+  ivnum: string;
+  amount: number;
+  date: string | null;
+}
+
+/** Unpaid (unreconciled) invoices for a customer — IVNUM + amount + date, newest first.
  *  Authoritative source for "which invoices are still owed" (see listUnpaidInvoices). */
-export async function getUnpaidInvoices(custname: string): Promise<{ ivnum: string; amount: number }[]> {
+export async function getUnpaidInvoices(custname: string): Promise<UnpaidInvoice[]> {
   const config = getPriorityConfig();
   if (!config) return [];
   const rows = await tryGet(`unpaid:${custname}`, () => memo(`unpaid:${custname}`, () => listUnpaidInvoices(config, custname)));
   return (rows ?? [])
-    .map((iv) => ({ ivnum: String(iv.IVNUM ?? ''), amount: round2(Number(iv.TOTPRICE) || 0) }))
+    .map((iv) => ({ ivnum: String(iv.IVNUM ?? ''), amount: round2(Number(iv.TOTPRICE) || 0), date: iv.IVDATE ?? null }))
     .filter((iv) => iv.ivnum);
 }
 
