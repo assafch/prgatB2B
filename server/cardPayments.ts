@@ -7,7 +7,7 @@
 
 import crypto from 'node:crypto';
 import { db, getSetting } from './db.js';
-import { getAccountSummary, bustFinanceCache } from './finance.js';
+import { getAccountSummary, getUnpaidInvoices, bustFinanceCache } from './finance.js';
 import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
 import * as tranzila from './tranzila.js';
 import * as payplus from './payplus.js';
@@ -22,6 +22,7 @@ export interface CardRow {
   upay_cashier_id: string | null;
   tranzila_index: string | null;
   payplus_ref: string | null;
+  paid_items: string | null; // JSON array of selected invoice IVNUMs (null = whole balance)
   psp: string;
   confirmation_code: string | null;
   four_digits: string | null;
@@ -45,11 +46,13 @@ export function activeCardProvider(): 'upay' | 'tranzila' | 'payplus' | null {
   return null;
 }
 
-/** Create a hosted-page intent to pay the open balance. Returns the UPay URL. */
+/** Create a hosted-page intent to pay the open debt — either a chosen set of invoices
+ *  (selection.invoices) or, when none are given, the whole open balance. The amount is
+ *  always re-derived SERVER-SIDE; the client never supplies amounts. */
 export async function createCardDebtIntent(
   userId: number,
   custname: string,
-  requestedAmount: number | undefined,
+  selection: { invoices?: string[] },
   phone: string | undefined,
   baseUrl: string
 ): Promise<{ id: string; url: string; amount: number }> {
@@ -57,12 +60,33 @@ export async function createCardDebtIntent(
   if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
   const debt = round2(summary.balance.openTotal);
   if (debt <= 0) throw new Error('אין חוב פתוח לתשלום');
-  let amount = typeof requestedAmount === 'number' && isFinite(requestedAmount) && requestedAmount > 0 ? round2(requestedAmount) : debt;
-  if (amount > debt) amount = debt; // never charge more than owed
+
+  // Resolve the selection server-side: the client sends only invoice numbers; we look up
+  // each invoice's authoritative amount and sum them. No selection → whole open balance.
+  const selectedNums = Array.isArray(selection.invoices) ? selection.invoices.filter((s) => typeof s === 'string') : [];
+  let amount: number;
+  let label: string;
+  let paidItems: string[] = [];
+  let payplusItems: { name: string; amount: number }[] | undefined;
+
+  if (selectedNums.length) {
+    const unpaid = await getUnpaidInvoices(custname).catch(() => []);
+    const chosen = unpaid.filter((u) => selectedNums.includes(u.ivnum));
+    if (!chosen.length) throw new Error('לא נבחרו חשבוניות לתשלום');
+    amount = round2(chosen.reduce((sum, u) => sum + u.amount, 0));
+    paidItems = chosen.map((u) => u.ivnum);
+    payplusItems = chosen.map((u) => ({ name: `חשבונית מס׳ ${u.ivnum}`, amount: u.amount }));
+    label = chosen.length === 1 ? `חשבונית מס׳ ${chosen[0].ivnum}` : `תשלום ${chosen.length} חשבוניות`;
+  } else {
+    amount = debt; // whole-balance fallback (e.g. customer with no itemized invoices)
+    label = `תשלום חוב — ${custname}`;
+  }
+  if (amount <= 0) throw new Error('הסכום לתשלום אינו תקין');
 
   const id = crypto.randomBytes(12).toString('hex');
   const psp = activeCardProvider();
   if (!psp) throw new Error('תשלום בכרטיס אינו זמין כרגע');
+  const paidItemsJson = paidItems.length ? JSON.stringify(paidItems) : null;
 
   if (psp === 'payplus') {
     // PayPlus requires a customer email — use the Priority customer record (already
@@ -71,7 +95,8 @@ export async function createCardDebtIntent(
     const created = await payplus.createPaymentPage({
       amount,
       ref: id,
-      description: `תשלום חוב — ${custname}`,
+      description: label,
+      items: payplusItems,
       email,
       contact: custname,
       successUrl: `${baseUrl}/api/payments/payplus/return?id=${id}`,
@@ -80,9 +105,9 @@ export async function createCardDebtIntent(
       notifyUrl: `${baseUrl}/api/payments/payplus/ipn?id=${id}`,
     });
     db.prepare(
-      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref)
-       VALUES (?, ?, ?, 'debt', ?, 'pending', 'payplus', ?)`
-    ).run(id, userId, custname, amount, created.pageRequestUid);
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref, paid_items)
+       VALUES (?, ?, ?, 'debt', ?, 'pending', 'payplus', ?, ?)`
+    ).run(id, userId, custname, amount, created.pageRequestUid, paidItemsJson);
     return { id, url: created.url, amount };
   }
 
@@ -90,7 +115,7 @@ export async function createCardDebtIntent(
     const created = await tranzila.createPaymentPage({
       amount,
       ref: id,
-      description: `תשלום חוב — ${custname}`,
+      description: label,
       successUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}`,
       failUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}&fail=1`,
       notifyUrl: `${baseUrl}/api/payments/tranzila/ipn?id=${id}`,
@@ -98,24 +123,24 @@ export async function createCardDebtIntent(
       phone,
     });
     db.prepare(
-      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp)
-       VALUES (?, ?, ?, 'debt', ?, 'pending', 'tranzila')`
-    ).run(id, userId, custname, amount);
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, paid_items)
+       VALUES (?, ?, ?, 'debt', ?, 'pending', 'tranzila', ?)`
+    ).run(id, userId, custname, amount, paidItemsJson);
     return { id, url: created.url, amount };
   }
 
   const created = await createPaymentPage({
     amount,
     ref: id,
-    description: `תשלום חוב — ${custname}`,
+    description: label,
     returnUrl: `${baseUrl}/#pay/card/return?id=${id}`,
     ipnUrl: `${baseUrl}/api/payments/upay/ipn?id=${id}`,
     phone,
   });
   db.prepare(
-    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, upay_cashier_id, psp)
-     VALUES (?, ?, ?, 'debt', ?, 'pending', ?, 'upay')`
-  ).run(id, userId, custname, amount, created.cashierId);
+    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, upay_cashier_id, psp, paid_items)
+     VALUES (?, ?, ?, 'debt', ?, 'pending', ?, 'upay', ?)`
+  ).run(id, userId, custname, amount, created.cashierId, paidItemsJson);
   return { id, url: created.url, amount };
 }
 

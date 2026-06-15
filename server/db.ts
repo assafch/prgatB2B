@@ -345,6 +345,8 @@ ensureColumn('card_payments', 'tranzila_index', 'TEXT');
 // Third card PSP (PayPlus). payplus_ref holds the page_request_uid at intent time,
 // then the transaction_uid once confirmed (parallel to tranzila_index).
 ensureColumn('card_payments', 'payplus_ref', 'TEXT');
+// Which invoices a card payment settles (JSON array of IVNUMs) — null = whole balance.
+ensureColumn('card_payments', 'paid_items', 'TEXT');
 ensureColumn('promotions', 'priority', 'INTEGER NOT NULL DEFAULT 0');
 // Per-store roles: existing customers default to 'owner'; staff logins are 'orderer'.
 ensureColumn('users', 'customer_role', "TEXT NOT NULL DEFAULT 'owner'");
