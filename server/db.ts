@@ -342,6 +342,9 @@ ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");
 // tranzila_index is the provider transaction id (notify hint, verified on confirm).
 ensureColumn('card_payments', 'psp', "TEXT NOT NULL DEFAULT 'upay'");
 ensureColumn('card_payments', 'tranzila_index', 'TEXT');
+// Third card PSP (PayPlus). payplus_ref holds the page_request_uid at intent time,
+// then the transaction_uid once confirmed (parallel to tranzila_index).
+ensureColumn('card_payments', 'payplus_ref', 'TEXT');
 ensureColumn('promotions', 'priority', 'INTEGER NOT NULL DEFAULT 0');
 // Per-store roles: existing customers default to 'owner'; staff logins are 'orderer'.
 ensureColumn('users', 'customer_role', "TEXT NOT NULL DEFAULT 'owner'");
