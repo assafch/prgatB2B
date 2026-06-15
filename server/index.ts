@@ -12,6 +12,7 @@ import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } f
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
 import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
+import * as payplus from './payplus.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
 import { listStaff, createStaff, setStaffStatus, resetStaffPassword } from './staff.js';
@@ -208,7 +209,18 @@ app.use('/api', (req, res, next) => {
 
 // Body parsing AFTER the origin check — rejected cross-site requests shouldn't
 // cost JSON parsing.
-app.use(express.json({ limit: '2mb' }));
+app.use(
+  express.json({
+    limit: '2mb',
+    // Stash the raw bytes ONLY for the PayPlus IPN — its HMAC 'hash' must be verified
+    // against the exact body PayPlus signed (re-serializing would change the digest).
+    verify: (req, _res, buf) => {
+      if (req.url?.startsWith('/api/payments/payplus/ipn')) {
+        (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+      }
+    },
+  })
+);
 app.use(loadUser);
 
 // Public uploads (product images). Cached aggressively since filenames are content-hashed.
@@ -1020,6 +1032,30 @@ app.all('/api/payments/tranzila/ipn', tranzilaBody, ah(async (req, res) => {
 app.all('/api/payments/tranzila/return', tranzilaBody, ah(async (req, res) => {
   const { id, index } = tranzilaCallbackParams(req);
   if (id && index) recordTranzilaIndex(id, index);
+  if (id) confirmCard(id).catch(() => null); // fire-and-forget; the SPA polls anyway
+  res.redirect(`/#pay/card/return?id=${encodeURIComponent(id)}`);
+}));
+
+// PayPlus server-to-server IPN (JSON). Authenticated by User-Agent: PayPlus + an
+// HMAC-SHA256 'hash' over the raw body; even then the body is only a HINT — the
+// charge is confirmed by re-querying /Transactions/View (caller never trusted).
+app.all('/api/payments/payplus/ipn', ah(async (req, res) => {
+  const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
+  if (!payplus.verifyWebhook(raw, req.get('hash'), req.get('user-agent'))) {
+    res.status(401).send('unauthorized');
+    return;
+  }
+  const body = (req.body || {}) as { more_info?: unknown };
+  const id =
+    (typeof req.query.id === 'string' && req.query.id) ||
+    (typeof body.more_info === 'string' ? body.more_info : '');
+  if (id) await confirmCard(id).catch(() => null);
+  res.status(200).send('ok');
+}));
+// browser redirect target (success/fail/cancel) — confirm, then bounce to the SPA
+// result page, which polls the authenticated status endpoint.
+app.all('/api/payments/payplus/return', ah(async (req, res) => {
+  const id = typeof req.query.id === 'string' ? req.query.id : '';
   if (id) confirmCard(id).catch(() => null); // fire-and-forget; the SPA polls anyway
   res.redirect(`/#pay/card/return?id=${encodeURIComponent(id)}`);
 }));

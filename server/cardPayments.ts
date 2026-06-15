@@ -10,6 +10,7 @@ import { db, getSetting } from './db.js';
 import { getAccountSummary, bustFinanceCache } from './finance.js';
 import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
 import * as tranzila from './tranzila.js';
+import * as payplus from './payplus.js';
 
 export interface CardRow {
   id: string;
@@ -20,6 +21,7 @@ export interface CardRow {
   status: string;
   upay_cashier_id: string | null;
   tranzila_index: string | null;
+  payplus_ref: string | null;
   psp: string;
   confirmation_code: string | null;
   four_digits: string | null;
@@ -32,12 +34,14 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Which PSP handles new intents. Admin setting wins, then env, then whichever
  *  provider is configured (Tranzila preferred when both are). */
-export function activeCardProvider(): 'upay' | 'tranzila' | null {
+export function activeCardProvider(): 'upay' | 'tranzila' | 'payplus' | null {
   const pref = (getSetting('card_provider') || process.env.CARD_PROVIDER || '').toLowerCase();
+  if (pref === 'payplus' && payplus.payPlusEnabled()) return 'payplus';
   if (pref === 'tranzila' && tranzila.tranzilaEnabled()) return 'tranzila';
   if (pref === 'upay' && upayEnabled()) return 'upay';
   if (tranzila.tranzilaEnabled()) return 'tranzila';
   if (upayEnabled()) return 'upay';
+  if (payplus.payPlusEnabled()) return 'payplus';
   return null;
 }
 
@@ -59,6 +63,28 @@ export async function createCardDebtIntent(
   const id = crypto.randomBytes(12).toString('hex');
   const psp = activeCardProvider();
   if (!psp) throw new Error('תשלום בכרטיס אינו זמין כרגע');
+
+  if (psp === 'payplus') {
+    // PayPlus requires a customer email — use the Priority customer record (already
+    // loaded above), falling back to a configured office address.
+    const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
+    const created = await payplus.createPaymentPage({
+      amount,
+      ref: id,
+      description: `תשלום חוב — ${custname}`,
+      email,
+      contact: custname,
+      successUrl: `${baseUrl}/api/payments/payplus/return?id=${id}`,
+      failUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&fail=1`,
+      cancelUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&cancel=1`,
+      notifyUrl: `${baseUrl}/api/payments/payplus/ipn?id=${id}`,
+    });
+    db.prepare(
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref)
+       VALUES (?, ?, ?, 'debt', ?, 'pending', 'payplus', ?)`
+    ).run(id, userId, custname, amount, created.pageRequestUid);
+    return { id, url: created.url, amount };
+  }
 
   if (psp === 'tranzila') {
     const created = await tranzila.createPaymentPage({
@@ -131,6 +157,30 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
            tranzila_index = COALESCE(tranzila_index, ?), paid_at = datetime('now')
          WHERE id = ? AND status = 'pending'`
       ).run(tx.confirmationCode, tx.fourDigits, tx.index, id);
+      bustFinanceCache(row.custname);
+      return getCardAny(id);
+    }
+    return row;
+  }
+
+  if (row.psp === 'payplus') {
+    let tx;
+    try {
+      // Query by more_info (our intent id) — the callback is never trusted; this
+      // re-query against Transactions/View is the authoritative confirmation.
+      tx = await payplus.findTransaction({ ref: id });
+    } catch (err) {
+      console.warn('[card] payplus confirm query failed:', err instanceof Error ? err.message : err);
+      return row;
+    }
+    if (!tx) return row;
+    const amountOk = tx.amount == null || Math.abs(tx.amount - row.amount) <= 0.01;
+    if (tx.paid && tx.refFound && amountOk) {
+      db.prepare(
+        `UPDATE card_payments SET status = 'paid', confirmation_code = ?, four_digits = ?, provider = 'payplus',
+           payplus_ref = COALESCE(?, payplus_ref), paid_at = datetime('now')
+         WHERE id = ? AND status = 'pending'`
+      ).run(tx.confirmationCode, tx.fourDigits, tx.transactionUid, id);
       bustFinanceCache(row.custname);
       return getCardAny(id);
     }
