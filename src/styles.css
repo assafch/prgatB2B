@@ -434,6 +434,9 @@ input:focus, select:focus, textarea:focus {
 .scan-bar { position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 30px); left: 0; right: 0; display: flex; justify-content: center; }
 .scan-shutter { width: 74px; height: 74px; border-radius: 50%; background: #fff; border: 4px solid rgba(255,255,255,0.45); box-shadow: 0 0 0 3px #fff inset; cursor: pointer; }
 .scan-shutter:active { transform: scale(0.94); }
+/* Auto-shutter lock: green corners + a steadiness ring while the frame is held. */
+.scan-frame.locking .c { border-color: var(--ok); transition: border-color 0.15s; }
+.scan-shutter.auto { box-shadow: 0 0 0 3px var(--ok) inset, 0 0 0 6px rgba(22,163,74,0.45); }
 .scan-err { position: absolute; bottom: 120px; left: 1rem; right: 1rem; text-align: center; color: #fff; background: rgba(20,20,20,0.92); padding: 0.9rem; border-radius: 12px; display: none; }
 .scan-fallback { background: #fff; color: #111; border: none; border-radius: 8px; padding: 0.6rem 0.8rem; font-weight: 700; cursor: pointer; }
 

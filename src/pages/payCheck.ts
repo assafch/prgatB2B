@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml } from '../format.js';
-import { toast } from '../ui.js';
+import { toast, buzz } from '../ui.js';
 
 interface ParseAi {
   isCheck: boolean;
@@ -92,16 +92,22 @@ export function renderPayCheck(shell: HTMLElement): void {
     ov.innerHTML = `
       <video class="scan-video" autoplay playsinline muted></video>
       <div class="scan-mask"><div class="scan-frame"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i></div></div>
-      <div class="scan-hint">הצמידו את הצ׳ק לאורך המסגרת<br/><span>מואר, חד, וממלא את כל המסגרת</span></div>
+      <div class="scan-hint">מכוונים את הצ׳ק למסגרת — התמונה תילקח אוטומטית<br/><span>מואר, חד, וממלא את כל המסגרת</span></div>
       <button class="scan-close" type="button" aria-label="סגירה">✕</button>
       <div class="scan-bar"><button class="scan-shutter" type="button" aria-label="צלם"></button></div>
     `;
     document.body.appendChild(ov);
     const video = ov.querySelector('.scan-video') as HTMLVideoElement;
+    const frame = ov.querySelector('.scan-frame') as HTMLElement;
+    const shutter = ov.querySelector('.scan-shutter') as HTMLButtonElement;
+    const hint = ov.querySelector('.scan-hint') as HTMLElement;
     video.srcObject = stream;
     let live = true;
+    let captured = false;
+    let autoTimer: ReturnType<typeof setInterval> | undefined;
     const close = () => {
       live = false;
+      if (autoTimer) clearInterval(autoTimer);
       stream.getTracks().forEach((t) => t.stop());
       ov.remove();
       window.removeEventListener('hashchange', close);
@@ -109,13 +115,18 @@ export function renderPayCheck(shell: HTMLElement): void {
     window.addEventListener('hashchange', close);
     (ov.querySelector('.scan-close') as HTMLButtonElement).onclick = close;
 
-    (ov.querySelector('.scan-shutter') as HTMLButtonElement).onclick = () => {
-      if (!live || !video.videoWidth) return;
+    // One capture path for both the manual shutter and the auto-shutter.
+    const capture = () => {
+      if (captured || !live || !video.videoWidth) return;
+      captured = true;
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      if (!ctx) {
+        captured = false;
+        return;
+      }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(
         async (blob) => {
@@ -129,6 +140,74 @@ export function renderPayCheck(shell: HTMLElement): void {
         0.92
       );
     };
+    shutter.onclick = capture;
+
+    // Auto-shutter: sample a downscaled frame and fire once the cheque is well-lit,
+    // in focus (edge energy), and held steady (low frame-to-frame change) for a few
+    // consecutive samples. The manual shutter above is always available as a fallback.
+    const SW = 160;
+    const SH = 100;
+    const work = document.createElement('canvas');
+    work.width = SW;
+    work.height = SH;
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+    let prevGray: Float32Array | null = null;
+    let steady = 0;
+    const SHARP_MIN = 9; // mean |horizontal gradient| — below = blurry/empty
+    const STABLE_MAX = 7; // mean |Δ| vs previous frame — above = still moving
+    const NEED = 3; // consecutive good samples (~1s at 320ms)
+
+    if (wctx) {
+      autoTimer = setInterval(() => {
+        if (captured || !live || video.readyState < 2 || !video.videoWidth) return;
+        wctx.drawImage(video, 0, 0, SW, SH);
+        let data: Uint8ClampedArray;
+        try {
+          data = wctx.getImageData(0, 0, SW, SH).data;
+        } catch {
+          return; // tainted/unavailable — leave it to the manual shutter
+        }
+        const gray = new Float32Array(SW * SH);
+        let sum = 0;
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+          const g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          gray[p] = g;
+          sum += g;
+        }
+        const brightness = sum / gray.length;
+        // Sharpness: average absolute horizontal gradient.
+        let grad = 0;
+        for (let y = 0; y < SH; y++) {
+          for (let x = 1; x < SW; x++) {
+            grad += Math.abs(gray[y * SW + x] - gray[y * SW + x - 1]);
+          }
+        }
+        const sharpness = grad / (SW * SH);
+        // Stability: mean absolute difference from the previous sampled frame.
+        let diff = Infinity;
+        if (prevGray) {
+          let d = 0;
+          for (let i = 0; i < gray.length; i++) d += Math.abs(gray[i] - prevGray[i]);
+          diff = d / gray.length;
+        }
+        prevGray = gray;
+
+        const litOk = brightness > 40 && brightness < 235;
+        const good = litOk && sharpness >= SHARP_MIN && diff <= STABLE_MAX;
+        steady = good ? steady + 1 : 0;
+        frame.classList.toggle('locking', steady >= 1);
+        shutter.classList.toggle('auto', steady >= 1);
+        if (!litOk) setHint('מעט אור — קרבו את הצ׳ק לאזור מואר');
+        else if (sharpness < SHARP_MIN) setHint('מכוונים את הצ׳ק למסגרת…');
+        else if (diff > STABLE_MAX) setHint('אחזו יציב…');
+        else setHint('מצלם!');
+        if (steady >= NEED) capture();
+      }, 320);
+    }
+
+    function setHint(main: string): void {
+      hint.innerHTML = `${main}<br/><span>או הקישו על הכפתור לצילום ידני</span>`;
+    }
   }
 
   async function addCheck(blob: Blob): Promise<void> {
@@ -218,12 +297,15 @@ export function renderPayCheck(shell: HTMLElement): void {
     }
     const amounts = Array.from(list.querySelectorAll<HTMLInputElement>('.pc-amount')).map((el) => Number(el.value) || 0);
     const total = amounts.reduce((a, b) => a + b, 0);
+    const single = ready.length === 1;
+    const summary = single ? `צ׳ק אחד · ₪${total.toFixed(2)}` : `${ready.length} צ׳קים · סה״כ ₪${total.toFixed(2)}`;
+    const cta = single ? `שלח תשלום · ₪${total.toFixed(2)}` : `שלח ${ready.length} צ׳קים · ₪${total.toFixed(2)}`;
     footer.innerHTML = `
       <div class="card" style="margin-top:0.6rem;position:sticky;bottom:0.5rem">
         <div style="display:flex;justify-content:space-between;font-weight:700">
-          <span>${ready.length} צ׳קים</span><span>סה״כ ₪${total.toFixed(2)}</span>
+          <span>${summary}</span>
         </div>
-        <button id="pc-submit-all" style="width:100%;margin-top:0.6rem;padding:0.8rem;font-weight:700">שליחת כל הצ׳קים</button>
+        <button id="pc-submit-all" style="width:100%;margin-top:0.6rem;padding:0.9rem;font-weight:800;background:var(--ok);border:none;border-radius:12px;min-height:var(--tap)">${escapeHtml(cta)}</button>
         <div id="pc-msg" style="margin-top:0.4rem;text-align:center"></div>
         <p class="muted" style="font-size:0.78rem;margin-top:0.4rem">הצ׳קים שצולמו יופקדו לפירעון. אין צורך למסור צ׳ק פיזי.</p>
       </div>`;
@@ -274,6 +356,7 @@ export function renderPayCheck(shell: HTMLElement): void {
       return;
     }
     items.forEach((it) => URL.revokeObjectURL(it.previewUrl));
+    buzz();
     shell.innerHTML = `
       <div class="empty-state">
         <div class="es-icon">✅</div>
