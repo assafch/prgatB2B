@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
-import { toast } from '../ui.js';
+import { toast, openSheet, closeSheet, buzz } from '../ui.js';
 import { refreshCartCount, state as app } from '../main.js';
 import { showUpsell } from './upsell.js';
 
@@ -42,6 +42,10 @@ let loadGen = 0;
 // safety cap on eager auto-pulls (collapsed groups are short → guard stays true)
 let autoPulls = 0;
 const MAX_AUTO_PULLS = 20;
+// A2: a real swipe must not also register as a tap (which would open the keypad).
+let suppressClick = false;
+// A2: boxes added per part via swipe this session — drives the "✓ N ארגזים" label.
+const swipeBoxes = new Map<string, number>();
 
 // Browse (no text query) → group products under collapsible family bars. A text
 // search → flat, relevance-ranked results (best matches first, no headers).
@@ -130,6 +134,7 @@ export async function renderCatalog(shell: HTMLElement): Promise<void> {
   (shell.querySelector('#btn-search') as HTMLButtonElement).addEventListener('click', doSearch);
 
   bindDelegation(shell);
+  bindSwipe(shell);
   setupObserver(shell);
   syncCartFab(shell);
   await resetAndLoad(shell);
@@ -204,8 +209,195 @@ function bindDelegation(shell: HTMLElement): void {
         add.textContent = 'הוסף';
         add.disabled = false;
       }
+      return;
+    }
+
+    // A1: a plain tap on the card chrome (not a link/button/input/stepper) opens
+    // the quantity keypad. Power users can opt out via localStorage('add_mode').
+    if (suppressClick) return; // a swipe just happened — don't treat it as a tap
+    if (localStorage.getItem('add_mode') === 'stepper') return;
+    if (t.closest('a, button, input, .stepper, .cat-stepper')) return;
+    const card = t.closest('.cat-card, .cat-row') as HTMLElement | null;
+    if (card?.dataset.part) openQtyKeypad(card, shell);
+  });
+}
+
+// A1 — Quantity keypad sheet. Pure front-end on top of the existing add flow:
+// PUT /api/cart/lines/:part {quantity, mode:'add'} → refreshCartCount → showUpsell.
+function openQtyKeypad(card: HTMLElement, shell: HTMLElement): void {
+  const part = card.dataset.part!;
+  const box = Math.max(1, Number(card.dataset.box) || 1);
+  const price = card.dataset.price ? Number(card.dataset.price) : null;
+  const name = card.dataset.name || part;
+  let qty = box; // start at one box — the common wholesale unit
+
+  const body = document.createElement('div');
+  body.innerHTML = `
+    <div class="qsheet-head">
+      <div class="qsheet-name">${escapeHtml(name)}</div>
+      <div class="qsheet-box">${box > 1 ? `ארגז = ${box} יח׳` : 'ליחידה'}</div>
+    </div>
+    <div class="qsheet-row">
+      <button class="qsheet-step minus" type="button" aria-label="הפחת">−</button>
+      <div class="qsheet-qtywrap">
+        <div class="qsheet-qty" data-qty>0</div>
+        <div class="qsheet-sub" data-sub></div>
+      </div>
+      <button class="qsheet-step plus" type="button" aria-label="הוסף">+</button>
+    </div>
+    <div class="qsheet-chips">
+      <button class="qsheet-chip" type="button" data-add="1">+1</button>
+      <button class="qsheet-chip" type="button" data-add="5">+5</button>
+      <button class="qsheet-chip" type="button" data-add="10">+10</button>
+      ${box > 1 ? '<button class="qsheet-chip box" type="button" data-box-snap>×ארגז</button>' : ''}
+    </div>
+    <button class="qsheet-cta" type="button" data-confirm>הוסף לעגלה</button>`;
+
+  const qtyEl = body.querySelector('[data-qty]') as HTMLElement;
+  const subEl = body.querySelector('[data-sub]') as HTMLElement;
+  const cta = body.querySelector('[data-confirm]') as HTMLButtonElement;
+  const render = () => {
+    qtyEl.textContent = String(qty);
+    const boxes = qty / box;
+    subEl.textContent =
+      box > 1 && Number.isInteger(boxes)
+        ? `${qty} יח׳ · ${boxes} ${boxes === 1 ? 'ארגז' : 'ארגזים'}`
+        : `${qty} יח׳`;
+    cta.textContent = price != null ? `הוסף לעגלה · ₪${(qty * price).toFixed(2)}` : 'הוסף לעגלה';
+  };
+  render();
+
+  body.querySelector('.minus')!.addEventListener('click', () => {
+    qty = Math.max(1, qty - box);
+    render();
+  });
+  body.querySelector('.plus')!.addEventListener('click', () => {
+    qty += box;
+    render();
+  });
+  body.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((b) => {
+    b.addEventListener('click', () => {
+      qty += Number(b.dataset.add) || 1;
+      render();
+    });
+  });
+  body.querySelector('[data-box-snap]')?.addEventListener('click', () => {
+    const r = qty % box;
+    qty = r === 0 ? qty + box : qty + (box - r); // round up to the next whole box
+    render();
+  });
+
+  cta.addEventListener('click', async () => {
+    if (cta.disabled) return;
+    cta.disabled = true;
+    try {
+      await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: qty, mode: 'add' });
+      buzz();
+      await refreshCartCount();
+      syncCartFab(shell);
+      closeSheet();
+      void showUpsell(part);
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      cta.disabled = false;
     }
   });
+
+  openSheet(body, { label: 'בחירת כמות' });
+}
+
+// A2 — Swipe a list row leftward (RTL) to add one box. Axis-locked on the first
+// 10px so it never fights vertical scroll. The inline stepper stays for exact qty.
+function bindSwipe(shell: HTMLElement): void {
+  const grid = shell.querySelector('#catalog-grid') as HTMLElement;
+  let active: HTMLElement | null = null;
+  let startX = 0;
+  let startY = 0;
+  let dx = 0;
+  let axis: '' | 'x' | 'y' = '';
+  let pid = -1;
+  const THRESH = -80; // leftward px past which the box is added
+
+  const endSwipe = (commit: boolean) => {
+    if (!active) return;
+    const card = active;
+    active = null;
+    axis = '';
+    card.classList.remove('swiping');
+    card.classList.add('snapping');
+    card.style.transform = '';
+    if (commit) void addBoxFromSwipe(card, shell);
+    setTimeout(() => card.classList.remove('snapping'), 240);
+  };
+
+  grid.addEventListener('pointerdown', (e) => {
+    const card = (e.target as HTMLElement).closest('.swipe-card') as HTMLElement | null;
+    if (!card) return;
+    if ((e.target as HTMLElement).closest('a, button, input')) return; // let controls work
+    active = card;
+    startX = e.clientX;
+    startY = e.clientY;
+    dx = 0;
+    axis = '';
+    pid = e.pointerId;
+    card.classList.remove('snapping');
+  });
+
+  grid.addEventListener('pointermove', (e) => {
+    if (!active || e.pointerId !== pid) return;
+    const mx = e.clientX - startX;
+    const my = e.clientY - startY;
+    if (!axis) {
+      if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+      axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if (axis === 'x') {
+        active.classList.add('swiping');
+        try {
+          active.setPointerCapture(pid);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        endSwipe(false); // vertical → release to native scroll
+        return;
+      }
+    }
+    if (axis !== 'x') return;
+    e.preventDefault();
+    dx = Math.max(-160, Math.min(0, mx)); // RTL: only leftward reveals the green layer
+    active.style.transform = `translateX(${dx}px)`;
+  });
+
+  grid.addEventListener('pointerup', (e) => {
+    if (!active || e.pointerId !== pid) return;
+    const commit = axis === 'x' && dx <= THRESH;
+    if (axis === 'x') {
+      suppressClick = true; // the trailing click after a swipe must not open the keypad
+      setTimeout(() => {
+        suppressClick = false;
+      }, 350);
+    }
+    endSwipe(commit);
+  });
+  grid.addEventListener('pointercancel', () => endSwipe(false));
+}
+
+async function addBoxFromSwipe(card: HTMLElement, shell: HTMLElement): Promise<void> {
+  const part = card.dataset.part!;
+  const box = Math.max(1, Number(card.dataset.box) || 1);
+  try {
+    await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: box, mode: 'add' });
+    buzz();
+    await refreshCartCount();
+    syncCartFab(shell);
+    const n = (swipeBoxes.get(part) || 0) + 1;
+    swipeBoxes.set(part, n);
+    card.classList.add('swipe-added');
+    const sku = card.querySelector('.sku') as HTMLElement | null;
+    if (sku) sku.textContent = `✓ ${n} ${n === 1 ? 'ארגז' : 'ארגזים'} בעגלה`;
+  } catch (ex) {
+    toast(ex instanceof Error ? ex.message : String(ex), 'error');
+  }
 }
 
 function setupObserver(shell: HTMLElement): void {
@@ -346,7 +538,7 @@ function gridCard(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
   const enc = encodeURIComponent(it.partname);
   return `
-    <div class="card cat-card">
+    <div class="card cat-card" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}">
       <button class="fav fav-card ${favSet.has(it.partname) ? 'on' : ''}" data-part="${p}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       <div class="cat-card-top">
         <a class="cat-card-info" href="#product/${enc}">
@@ -369,8 +561,11 @@ function gridCard(it: CatalogItem): string {
 
 // Roomy two-row mobile list row: [thumb · name/SKU · ♥] then [price ... stepper + add].
 function listRow(it: CatalogItem): string {
+  const p = escapeAttr(it.partname);
   return `
-    <div class="card cat-row">
+    <div class="swipe-wrap">
+      <div class="swipe-bg" aria-hidden="true">＋ ארגז</div>
+      <div class="card cat-row swipe-card" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}">
       <div class="cat-row-top">
         <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
         <a class="cat-row-name" href="#product/${encodeURIComponent(it.partname)}">
@@ -382,6 +577,7 @@ function listRow(it: CatalogItem): string {
       <div class="cat-row-bottom">
         <div class="cat-row-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
         ${stepperHtml(it)}
+      </div>
       </div>
     </div>`;
 }

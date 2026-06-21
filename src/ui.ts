@@ -91,6 +91,61 @@ export function confirmDialog(message: string, okLabel = 'אישור', cancelLab
   });
 }
 
+// ---- Bottom-sheet primitive (Phase 0) ----
+// Generic version of confirmDialog: hosts arbitrary content in the existing
+// `.sheet-backdrop`/`.sheet` chrome. A1's quantity keypad and other ad-hoc
+// sheets sit in it. Dismisses on backdrop tap, Escape, or route change.
+let currentSheet: { back: HTMLElement; onClose?: () => void } | null = null;
+
+export function openSheet(content: HTMLElement | string, opts: { onClose?: () => void; label?: string } = {}): { close: () => void } {
+  closeSheet(); // only one sheet at a time
+  const back = document.createElement('div');
+  back.className = 'sheet-backdrop';
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  if (opts.label) sheet.setAttribute('aria-label', opts.label);
+  if (typeof content === 'string') sheet.innerHTML = content;
+  else sheet.appendChild(content);
+  back.appendChild(sheet);
+
+  const close = () => closeSheet();
+  back.addEventListener('click', (e) => {
+    if (e.target === back) close();
+  });
+  document.addEventListener('keydown', onSheetKey);
+  window.addEventListener('hashchange', close);
+  document.body.appendChild(back);
+  currentSheet = { back, onClose: opts.onClose };
+  requestAnimationFrame(() => back.classList.add('show'));
+  return { close };
+}
+
+export function closeSheet(): void {
+  if (!currentSheet) return;
+  const { back, onClose } = currentSheet;
+  currentSheet = null;
+  document.removeEventListener('keydown', onSheetKey);
+  window.removeEventListener('hashchange', closeSheet);
+  back.classList.remove('show');
+  setTimeout(() => back.remove(), 200);
+  onClose?.();
+}
+
+function onSheetKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closeSheet();
+}
+
+// Tiny haptic tick so one-hand add/pay actions feel real. No-op where unsupported.
+export function buzz(ms = 10): void {
+  try {
+    navigator.vibrate?.(ms);
+  } catch {
+    /* unsupported */
+  }
+}
+
 // A 44×44px quantity stepper. `part` is escaped for the data-attribute.
 export function qtyStepper(part: string, value: number, step: number): string {
   const p = escapeHtml(part);

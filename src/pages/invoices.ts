@@ -1,6 +1,11 @@
 import { api } from '../api.js';
 import { formatMoney, formatDate, escapeHtml } from '../format.js';
-import { emptyState, skeleton } from '../ui.js';
+import { emptyState, skeleton, buzz } from '../ui.js';
+
+interface PayFeatures {
+  payments: boolean;
+  checkPayment: boolean;
+}
 
 interface OpenInvoiceView {
   date: string | null;
@@ -51,6 +56,17 @@ export async function renderInvoices(shell: HTMLElement): Promise<void> {
     return;
   }
 
+  // Payment-method gates live on /api/home (same source the home/checkout screens
+  // use). A failure here just hides the bar — it never blocks the invoice list.
+  let features: PayFeatures = { payments: false, checkPayment: false };
+  try {
+    const h = await api.get<{ features: PayFeatures }>('/api/home');
+    if (h.features) features = h.features;
+  } catch {
+    /* leave the pay bar hidden */
+  }
+
+  const bar = payBar(data, features);
   shell.innerHTML = `
     ${balanceCard(data)}
     ${
@@ -60,7 +76,25 @@ export async function renderInvoices(shell: HTMLElement): Promise<void> {
     }
     ${openSection(data)}
     ${historySection(data)}
+    ${bar ? '<div class="thumb-bar-spacer" style="height:88px"></div>' : ''}
+    ${bar}
   `;
+  // Haptic tick when a pay action is launched (one-hand feedback).
+  shell.querySelectorAll('.thumb-bar a').forEach((a) => a.addEventListener('click', () => buzz()));
+}
+
+// B1 — sticky thumb-zone pay bar. Shown only when there's an open balance and at
+// least one payment method is enabled; each button respects its own feature gate.
+function payBar(d: InvoicesResult, f: PayFeatures): string {
+  if (d.openUnavailable || d.summary.openTotal <= 0.005) return '';
+  if (!f.payments && !f.checkPayment) return '';
+  return `
+    <div class="thumb-bar">
+      <div class="thumb-bar-row">
+        ${f.checkPayment ? '<a class="thumb-check" href="#pay/check">📷 צ׳ק</a>' : ''}
+        ${f.payments ? `<a class="thumb-pay" href="#pay/card">💳 שלם ${formatMoney(d.summary.openTotal)}</a>` : ''}
+      </div>
+    </div>`;
 }
 
 function balanceCard(d: InvoicesResult): string {
