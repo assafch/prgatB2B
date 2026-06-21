@@ -34,7 +34,11 @@ interface InvoicesResult {
   openUnavailable?: boolean;
   historyUnavailable?: boolean;
   openListIncomplete?: boolean;
+  /** recent card payments not yet reconciled into Priority's debt (₪) */
+  paymentInProcess?: number;
 }
+
+const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export async function renderInvoices(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `<div class="card">${skeleton(3)}</div>`;
@@ -74,13 +78,62 @@ export async function renderInvoices(shell: HTMLElement): Promise<void> {
         ? `<div class="card" style="border-color:var(--warn);background:rgba(217,119,6,0.06)"><b class="badge warn">לתשומת לבך</b> קיימת יתרה לתשלום. לפירוט החשבוניות הפתוחות פנו למשרד אורגת.</div>`
         : ''
     }
-    ${openSection(data)}
+    ${openAndPaySection(data, features)}
     ${historySection(data)}
     ${bar ? '<div class="thumb-bar-spacer" style="height:88px"></div>' : ''}
     ${bar}
   `;
   // Haptic tick when a pay action is launched (one-hand feedback).
   shell.querySelectorAll('.thumb-bar a').forEach((a) => a.addEventListener('click', () => buzz()));
+  wirePayPanel(shell, data);
+}
+
+// B2 — wire the inline select/partial pay panel: checkboxes set the amount, the
+// "סכום אחר" field overrides it, and the button posts to /api/payments/card/intent.
+function wirePayPanel(shell: HTMLElement, d: InvoicesResult): void {
+  const panel = shell.querySelector('.pay2-panel') as HTMLElement | null;
+  if (!panel) return;
+  const amountEl = panel.querySelector('#pay2-amount') as HTMLInputElement;
+  const btn = panel.querySelector('#pay2-go') as HTMLButtonElement;
+  const msg = panel.querySelector('#pay2-msg') as HTMLElement;
+  const payable = round2(Number(panel.dataset.payable) || 0);
+  const cbs = Array.from(shell.querySelectorAll<HTMLInputElement>('.pay2-cb'));
+
+  const refresh = () => {
+    const amt = round2(Number(amountEl.value) || 0);
+    const ok = amt > 0 && amt <= payable + 0.001;
+    btn.disabled = !ok;
+    btn.textContent = amt > 0 ? `💳 לתשלום ${formatMoney(amt)}` : '💳 לתשלום מאובטח';
+  };
+  cbs.forEach((cb) =>
+    cb.addEventListener('change', () => {
+      if (cbs.some((c) => c.checked)) {
+        const sum = cbs.filter((c) => c.checked).reduce((s, c) => s + Number(c.dataset.amount || 0), 0);
+        amountEl.value = round2(sum).toFixed(2);
+      }
+      refresh();
+    })
+  );
+  amountEl.addEventListener('input', refresh);
+  refresh();
+
+  btn.addEventListener('click', async () => {
+    const amount = round2(Number(amountEl.value) || 0);
+    if (!(amount > 0)) return;
+    const invoiceRefs = cbs.filter((c) => c.checked).map((c) => c.dataset.ref || '').filter(Boolean);
+    btn.disabled = true;
+    msg.textContent = 'מעביר לעמוד התשלום…';
+    msg.className = 'muted';
+    try {
+      const r = await api.post<{ id: string; url: string }>('/api/payments/card/intent', { amount, invoiceRefs });
+      buzz();
+      window.location.href = r.url; // PSP hosted page
+    } catch (ex) {
+      msg.textContent = ex instanceof Error ? ex.message : String(ex);
+      msg.className = 'error';
+      btn.disabled = false;
+    }
+  });
 }
 
 // B1 — sticky thumb-zone pay bar. Shown only when there's an open balance and at
@@ -113,22 +166,50 @@ function balanceCard(d: InvoicesResult): string {
        </div>`;
 }
 
-function openSection(d: InvoicesResult): string {
-  if (d.openUnavailable || d.open.length === 0) return '';
-  return `
-    <div class="sec-head"><h2>חשבוניות פתוחות</h2><span class="muted">${d.open.length}</span></div>
-    ${d.open
-      .map(
-        (iv) => `
-      <div class="card dash-row" style="margin-bottom:0.5rem">
+// B2 — open invoices + inline pay panel. When card payments are enabled the rows
+// become tickable and a "סכום אחר" panel lets the owner pay a partial/custom amount.
+function openAndPaySection(d: InvoicesResult, f: PayFeatures): string {
+  const payEnabled = f.payments && !d.openUnavailable && d.summary.openTotal > 0.005;
+  const hasList = !d.openUnavailable && d.open.length > 0;
+  if (!hasList && !payEnabled) return '';
+
+  const rows = hasList
+    ? d.open
+        .map((iv) => {
+          const ref = iv.docNo || iv.reference || iv.ordname || '';
+          return `
+      <label class="card dash-row${payEnabled && ref ? ' pay2-row' : ''}" style="margin-bottom:0.5rem">
+        ${payEnabled && ref ? `<input type="checkbox" class="pay2-cb" data-ref="${escapeHtml(ref)}" data-amount="${iv.amount}" style="width:1.2rem;height:1.2rem;flex:none">` : ''}
         <div class="grow">
           <div style="font-weight:700">${escapeHtml(iv.docNo || iv.reference || iv.ordname || 'חשבונית')}</div>
           <div class="muted" style="font-size:0.83rem">${formatDate(iv.date)}${iv.ordname ? ' · הזמנה ' + escapeHtml(iv.ordname) : ''}</div>
         </div>
         <div style="font-weight:800;color:var(--err)">${formatMoney(iv.amount)}</div>
-      </div>`
-      )
-      .join('')}`;
+      </label>`;
+        })
+        .join('')
+    : '';
+
+  const header = hasList ? `<div class="sec-head"><h2>חשבוניות פתוחות</h2><span class="muted">${d.open.length}</span></div>` : '';
+  return header + rows + (payEnabled ? payPanel(d, hasList) : '');
+}
+
+function payPanel(d: InvoicesResult, hasList: boolean): string {
+  const inProcess = round2(d.paymentInProcess || 0);
+  const payable = round2(Math.max(0, d.summary.openTotal - inProcess));
+  return `
+    <div class="card pay2-panel" data-payable="${payable}">
+      <div style="font-weight:800;margin-bottom:0.3rem">תשלום בכרטיס אשראי</div>
+      <div class="muted" style="font-size:0.83rem;margin-bottom:0.6rem">${hasList ? 'סמנו חשבוניות לתשלום, או הזינו סכום אחר.' : 'הזינו סכום לתשלום (אפשר תשלום חלקי).'}</div>
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <label for="pay2-amount" style="flex:none;font-weight:600">סכום (₪)</label>
+        <input id="pay2-amount" type="number" inputmode="decimal" min="0" step="0.01" value="${payable.toFixed(2)}" style="flex:1"/>
+      </div>
+      ${inProcess > 0.005 ? `<div class="muted" style="font-size:0.8rem;margin-top:0.45rem">⏳ ₪${inProcess.toFixed(2)} בתהליך עיבוד — היתרה תתעדכן לאחר אישור במשרד.</div>` : ''}
+      <button id="pay2-go" class="pay2-cta">💳 לתשלום מאובטח</button>
+      <div id="pay2-msg" style="margin-top:0.4rem;text-align:center"></div>
+      <p class="muted" style="font-size:0.78rem;margin-top:0.3rem">התשלום בעמוד מאובטח (PCI-DSS). פרטי הכרטיס אינם נשמרים אצלנו.</p>
+    </div>`;
 }
 
 function historySection(d: InvoicesResult): string {

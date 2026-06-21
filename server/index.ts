@@ -11,7 +11,7 @@ import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSetti
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
-import { createCardDebtIntent, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
+import { createCardDebtIntent, createCardPartialIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
 import * as payplus from './payplus.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
@@ -829,9 +829,12 @@ app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => 
   });
 }));
 
-app.get('/api/invoices', requireOwner, financeLimiter, ah(async (req, res) => {
-  const result = await getInvoices(req.user!.custname!);
-  res.json(result);
+app.get('/api/invoices', requireOwner, financeLimiter, ah(async (req: AuthedRequest, res) => {
+  const custname = req.user!.custname!;
+  const result = await getInvoices(custname);
+  // paymentInProcess = recent card payments not yet reconciled into Priority's debt;
+  // the UI shows an "in process" note and the partial-pay cap derives from it.
+  res.json({ ...result, paymentInProcess: unreconciledCardTotal(custname) });
 }));
 
 // Single invoice detail (line items) — scoped to the session custname (IDOR-safe).
@@ -1007,6 +1010,27 @@ app.post('/api/payments/card/create', requireOwner, blockIfMaintenance, cardPayL
   }
 }));
 
+// Partial / custom-amount card payment ("תשלום על חשבון"). Unlike /create, the client
+// supplies the amount — validated server-side (0 < amount <= openTotal − pending). Ticked
+// invoices are an office hint only; the office allocates the receipt in Priority.
+app.post('/api/payments/card/intent', requireOwner, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+  if (!paymentsLive()) {
+    res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
+    return;
+  }
+  const body = (req.body || {}) as { amount?: unknown; invoiceRefs?: unknown };
+  const amount = typeof body.amount === 'number' ? body.amount : Number(body.amount);
+  const invoiceRefs = Array.isArray(body.invoiceRefs)
+    ? body.invoiceRefs.filter((x): x is string => typeof x === 'string')
+    : undefined;
+  try {
+    const out = await createCardPartialIntent(req.user!.id, req.user!.custname!, amount, invoiceRefs, undefined, appBaseUrl(req));
+    res.json(out);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה ביצירת התשלום' });
+  }
+}));
+
 // Owner-scoped status poll — re-queries UPay to confirm.
 app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, res) => {
   let row = getCardForUser(req.user!.id, req.params.id);
@@ -1106,7 +1130,7 @@ function parsePaidItems(raw: string | null): string[] | null {
 app.get('/api/admin/card-payments', requireAdmin, (_req, res) => {
   res.json({
     payments: listAllCardPayments().map((c) => ({
-      id: c.id, custname: c.custname, amount: c.amount, status: c.status,
+      id: c.id, custname: c.custname, amount: c.amount, status: c.status, kind: c.kind,
       confirmationCode: c.confirmation_code, fourDigits: c.four_digits, provider: c.provider,
       paidItems: parsePaidItems(c.paid_items),
       createdAt: c.created_at, paidAt: c.paid_at,

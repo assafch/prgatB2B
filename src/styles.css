@@ -549,6 +549,13 @@ input:focus, select:focus, textarea:focus {
 .thumb-check { flex: 1; border: 1.5px solid var(--brand); background: #fff; color: var(--brand); }
 .thumb-check:hover { background: rgba(35,77,143,0.06); text-decoration: none; }
 
+/* ---- B2 · Inline select / partial-amount pay panel ---- */
+.pay2-row { cursor: pointer; }
+.pay2-panel #pay2-amount { font-weight: 800; font-size: 1.05rem; }
+.pay2-cta { width: 100%; margin-top: 0.7rem; border: none; background: var(--navy); color: #fff; font-weight: 800; font-size: 1rem; padding: 0.95rem 0; border-radius: 14px; min-height: var(--tap); }
+.pay2-cta:hover { background: var(--navy); filter: brightness(1.2); }
+.pay2-cta:disabled { background: var(--border); color: var(--muted); filter: none; cursor: default; }
+
 /* ---- A1 · Quantity-keypad sheet ---- */
 .qsheet-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; }
 .qsheet-name { font-weight: 800; font-size: 1.02rem; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

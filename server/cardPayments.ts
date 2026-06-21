@@ -46,6 +46,96 @@ export function activeCardProvider(): 'upay' | 'tranzila' | 'payplus' | null {
   return null;
 }
 
+/** Shared: open the active PSP's hosted page for an intent and persist the row. The
+ *  caller has already derived the authoritative amount + label (+ optional itemized
+ *  lines). `kind` distinguishes a whole-invoice/balance pay ('debt') from a partial
+ *  on-account pay ('debt_partial'). */
+async function createPspIntent(opts: {
+  id: string;
+  userId: number;
+  custname: string;
+  kind: string;
+  amount: number;
+  label: string;
+  items?: { name: string; amount: number }[];
+  paidItemsJson: string | null;
+  email: string;
+  contact: string;
+  phone: string | undefined;
+  baseUrl: string;
+}): Promise<{ id: string; url: string }> {
+  const { id, baseUrl } = opts;
+  const psp = activeCardProvider();
+  if (!psp) throw new Error('תשלום בכרטיס אינו זמין כרגע');
+
+  if (psp === 'payplus') {
+    const created = await payplus.createPaymentPage({
+      amount: opts.amount,
+      ref: id,
+      description: opts.label,
+      items: opts.items,
+      email: opts.email,
+      contact: opts.contact,
+      successUrl: `${baseUrl}/api/payments/payplus/return?id=${id}`,
+      failUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&fail=1`,
+      cancelUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&cancel=1`,
+      notifyUrl: `${baseUrl}/api/payments/payplus/ipn?id=${id}`,
+    });
+    db.prepare(
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref, paid_items)
+       VALUES (?, ?, ?, ?, ?, 'pending', 'payplus', ?, ?)`
+    ).run(id, opts.userId, opts.custname, opts.kind, opts.amount, created.pageRequestUid, opts.paidItemsJson);
+    return { id, url: created.url };
+  }
+
+  if (psp === 'tranzila') {
+    const created = await tranzila.createPaymentPage({
+      amount: opts.amount,
+      ref: id,
+      description: opts.label,
+      successUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}`,
+      failUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}&fail=1`,
+      notifyUrl: `${baseUrl}/api/payments/tranzila/ipn?id=${id}`,
+      contact: opts.contact,
+      phone: opts.phone,
+    });
+    db.prepare(
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, paid_items)
+       VALUES (?, ?, ?, ?, ?, 'pending', 'tranzila', ?)`
+    ).run(id, opts.userId, opts.custname, opts.kind, opts.amount, opts.paidItemsJson);
+    return { id, url: created.url };
+  }
+
+  const created = await createPaymentPage({
+    amount: opts.amount,
+    ref: id,
+    description: opts.label,
+    returnUrl: `${baseUrl}/#pay/card/return?id=${id}`,
+    ipnUrl: `${baseUrl}/api/payments/upay/ipn?id=${id}`,
+    phone: opts.phone,
+  });
+  db.prepare(
+    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, upay_cashier_id, psp, paid_items)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, 'upay', ?)`
+  ).run(id, opts.userId, opts.custname, opts.kind, opts.amount, created.cashierId, opts.paidItemsJson);
+  return { id, url: created.url };
+}
+
+/** Sum of recent card payments not yet known to be reconciled into Priority's
+ *  ACC_DEBIT (pending, or paid within a short window). Subtracted from openTotal so a
+ *  customer can't pay the same debt twice before the office posts the receipt. Bounded
+ *  to RECON_WINDOW so an already-reconciled payment stops deflating the payable cap. */
+const RECON_WINDOW = '-1 day';
+export function unreconciledCardTotal(custname: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS s FROM card_payments
+       WHERE custname = ? AND status IN ('pending', 'paid') AND created_at >= datetime('now', ?)`
+    )
+    .get(custname, RECON_WINDOW) as { s: number };
+  return round2(row.s || 0);
+}
+
 /** Create a hosted-page intent to pay the open debt — either a chosen set of invoices
  *  (selection.invoices) or, when none are given, the whole open balance. The amount is
  *  always re-derived SERVER-SIDE; the client never supplies amounts. */
@@ -84,64 +174,68 @@ export async function createCardDebtIntent(
   if (amount <= 0) throw new Error('הסכום לתשלום אינו תקין');
 
   const id = crypto.randomBytes(12).toString('hex');
-  const psp = activeCardProvider();
-  if (!psp) throw new Error('תשלום בכרטיס אינו זמין כרגע');
-  const paidItemsJson = paidItems.length ? JSON.stringify(paidItems) : null;
-
-  if (psp === 'payplus') {
-    // PayPlus requires a customer email — use the Priority customer record (already
-    // loaded above), falling back to a configured office address.
-    const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
-    const created = await payplus.createPaymentPage({
-      amount,
-      ref: id,
-      description: label,
-      items: payplusItems,
-      email,
-      contact: custname,
-      successUrl: `${baseUrl}/api/payments/payplus/return?id=${id}`,
-      failUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&fail=1`,
-      cancelUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&cancel=1`,
-      notifyUrl: `${baseUrl}/api/payments/payplus/ipn?id=${id}`,
-    });
-    db.prepare(
-      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref, paid_items)
-       VALUES (?, ?, ?, 'debt', ?, 'pending', 'payplus', ?, ?)`
-    ).run(id, userId, custname, amount, created.pageRequestUid, paidItemsJson);
-    return { id, url: created.url, amount };
-  }
-
-  if (psp === 'tranzila') {
-    const created = await tranzila.createPaymentPage({
-      amount,
-      ref: id,
-      description: label,
-      successUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}`,
-      failUrl: `${baseUrl}/api/payments/tranzila/return?id=${id}&fail=1`,
-      notifyUrl: `${baseUrl}/api/payments/tranzila/ipn?id=${id}`,
-      contact: custname,
-      phone,
-    });
-    db.prepare(
-      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, paid_items)
-       VALUES (?, ?, ?, 'debt', ?, 'pending', 'tranzila', ?)`
-    ).run(id, userId, custname, amount, paidItemsJson);
-    return { id, url: created.url, amount };
-  }
-
-  const created = await createPaymentPage({
+  const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
+  const { url } = await createPspIntent({
+    id,
+    userId,
+    custname,
+    kind: 'debt',
     amount,
-    ref: id,
-    description: label,
-    returnUrl: `${baseUrl}/#pay/card/return?id=${id}`,
-    ipnUrl: `${baseUrl}/api/payments/upay/ipn?id=${id}`,
+    label,
+    items: payplusItems,
+    paidItemsJson: paidItems.length ? JSON.stringify(paidItems) : null,
+    email,
+    contact: custname,
     phone,
+    baseUrl,
   });
-  db.prepare(
-    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, upay_cashier_id, psp, paid_items)
-     VALUES (?, ?, ?, 'debt', ?, 'pending', ?, 'upay', ?)`
-  ).run(id, userId, custname, amount, created.cashierId, paidItemsJson);
-  return { id, url: created.url, amount };
+  return { id, url, amount };
+}
+
+/** Partial / custom-amount card payment ("תשלום על חשבון"). This is the ONE place a
+ *  client-supplied amount is accepted — validated SERVER-SIDE to 0 < amount <= payable,
+ *  where payable = authoritative openTotal minus recent unreconciled card payments.
+ *  Ticked invoices are persisted as an OFFICE HINT only: a partial sum can't settle
+ *  whole invoices, so the office allocates the receipt in Priority. */
+export async function createCardPartialIntent(
+  userId: number,
+  custname: string,
+  requestedAmount: number,
+  invoiceRefs: string[] | undefined,
+  phone: string | undefined,
+  baseUrl: string
+): Promise<{ id: string; url: string; amount: number }> {
+  const summary = await getAccountSummary(custname);
+  if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
+  const openTotal = round2(summary.balance.openTotal);
+  if (openTotal <= 0) throw new Error('אין חוב פתוח לתשלום');
+
+  const payable = round2(Math.max(0, openTotal - unreconciledCardTotal(custname)));
+  const amount = round2(Number(requestedAmount));
+  if (!isFinite(amount) || amount <= 0) throw new Error('יש להזין סכום תקין');
+  if (amount > payable + 0.001) {
+    throw new Error(
+      payable > 0 ? `הסכום חורג מהיתרה לתשלום (₪${payable.toFixed(2)})` : 'קיים תשלום בעיבוד — נסו שוב מאוחר יותר'
+    );
+  }
+
+  const hint = Array.isArray(invoiceRefs) ? invoiceRefs.filter((s) => typeof s === 'string').slice(0, 200) : [];
+  const id = crypto.randomBytes(12).toString('hex');
+  const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
+  const { url } = await createPspIntent({
+    id,
+    userId,
+    custname,
+    kind: 'debt_partial',
+    amount,
+    label: 'תשלום על חשבון',
+    paidItemsJson: hint.length ? JSON.stringify(hint) : null,
+    email,
+    contact: custname,
+    phone,
+    baseUrl,
+  });
+  return { id, url, amount };
 }
 
 /** Store the transaction index hinted by Tranzila's notify/return callback.
