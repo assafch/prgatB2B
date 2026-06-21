@@ -42,13 +42,19 @@ const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 1
 
 export async function renderInvoices(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `<div class="card">${skeleton(3)}</div>`;
-  let data: InvoicesResult;
-  try {
-    data = await api.get<InvoicesResult>('/api/invoices');
-  } catch (ex) {
+  // The invoice list and the payment-method gates (/api/home) are independent —
+  // fetch both at once. A /api/home failure only hides the pay bar; it never
+  // blocks the list.
+  const [invRes, homeRes] = await Promise.allSettled([
+    api.get<InvoicesResult>('/api/invoices'),
+    api.get<{ features: PayFeatures }>('/api/home'),
+  ]);
+  if (invRes.status === 'rejected') {
+    const ex = invRes.reason;
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
     return;
   }
+  const data = invRes.value;
 
   // Both forms blocked / Priority unreachable.
   if (!data.priorityOk) {
@@ -60,15 +66,8 @@ export async function renderInvoices(shell: HTMLElement): Promise<void> {
     return;
   }
 
-  // Payment-method gates live on /api/home (same source the home/checkout screens
-  // use). A failure here just hides the bar — it never blocks the invoice list.
-  let features: PayFeatures = { payments: false, checkPayment: false };
-  try {
-    const h = await api.get<{ features: PayFeatures }>('/api/home');
-    if (h.features) features = h.features;
-  } catch {
-    /* leave the pay bar hidden */
-  }
+  const features: PayFeatures =
+    homeRes.status === 'fulfilled' && homeRes.value?.features ? homeRes.value.features : { payments: false, checkPayment: false };
 
   const bar = payBar(data, features);
   shell.innerHTML = `

@@ -151,7 +151,10 @@ export function renderPayCheck(shell: HTMLElement): void {
     work.width = SW;
     work.height = SH;
     const wctx = work.getContext('2d', { willReadFrequently: true });
-    let prevGray: Float32Array | null = null;
+    // Two reused luminance buffers, ping-ponged each tick (no per-frame allocation).
+    const grayBufs = [new Float32Array(SW * SH), new Float32Array(SW * SH)];
+    let cur = 0;
+    let havePrev = false;
     let steady = 0;
     const SHARP_MIN = 9; // mean |horizontal gradient| — below = blurry/empty
     const STABLE_MAX = 7; // mean |Δ| vs previous frame — above = still moving
@@ -167,7 +170,7 @@ export function renderPayCheck(shell: HTMLElement): void {
         } catch {
           return; // tainted/unavailable — leave it to the manual shutter
         }
-        const gray = new Float32Array(SW * SH);
+        const gray = grayBufs[cur];
         let sum = 0;
         for (let i = 0, p = 0; i < data.length; i += 4, p++) {
           const g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
@@ -185,12 +188,14 @@ export function renderPayCheck(shell: HTMLElement): void {
         const sharpness = grad / (SW * SH);
         // Stability: mean absolute difference from the previous sampled frame.
         let diff = Infinity;
-        if (prevGray) {
+        if (havePrev) {
+          const prevGray = grayBufs[1 - cur];
           let d = 0;
           for (let i = 0; i < gray.length; i++) d += Math.abs(gray[i] - prevGray[i]);
           diff = d / gray.length;
         }
-        prevGray = gray;
+        havePrev = true;
+        cur = 1 - cur; // this frame becomes next tick's "previous"
 
         const litOk = brightness > 40 && brightness < 235;
         const good = litOk && sharpness >= SHARP_MIN && diff <= STABLE_MAX;
@@ -205,7 +210,10 @@ export function renderPayCheck(shell: HTMLElement): void {
       }, 320);
     }
 
+    let lastHint = '';
     function setHint(main: string): void {
+      if (main === lastHint) return; // the loop runs ~3×/s; only touch the DOM on change
+      lastHint = main;
       hint.innerHTML = `${main}<br/><span>או הקישו על הכפתור לצילום ידני</span>`;
     }
   }

@@ -33,6 +33,10 @@ export interface CardRow {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// PayPlus requires a customer email — Priority record first, then the office fallback.
+const payerEmail = (summary: { profile: { email: string | null } | null }): string =>
+  summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
+
 /** Which PSP handles new intents. Admin setting wins, then env, then whichever
  *  provider is configured (Tranzila preferred when both are). */
 export function activeCardProvider(): 'upay' | 'tranzila' | 'payplus' | null {
@@ -174,7 +178,6 @@ export async function createCardDebtIntent(
   if (amount <= 0) throw new Error('הסכום לתשלום אינו תקין');
 
   const id = crypto.randomBytes(12).toString('hex');
-  const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
   const { url } = await createPspIntent({
     id,
     userId,
@@ -184,7 +187,7 @@ export async function createCardDebtIntent(
     label,
     items: payplusItems,
     paidItemsJson: paidItems.length ? JSON.stringify(paidItems) : null,
-    email,
+    email: payerEmail(summary),
     contact: custname,
     phone,
     baseUrl,
@@ -221,7 +224,6 @@ export async function createCardPartialIntent(
 
   const hint = Array.isArray(invoiceRefs) ? invoiceRefs.filter((s) => typeof s === 'string').slice(0, 200) : [];
   const id = crypto.randomBytes(12).toString('hex');
-  const email = summary.profile?.email || process.env.PAYPLUS_FALLBACK_EMAIL || '';
   const { url } = await createPspIntent({
     id,
     userId,
@@ -230,7 +232,7 @@ export async function createCardPartialIntent(
     amount,
     label: 'תשלום על חשבון',
     paidItemsJson: hint.length ? JSON.stringify(hint) : null,
-    email,
+    email: payerEmail(summary),
     contact: custname,
     phone,
     baseUrl,

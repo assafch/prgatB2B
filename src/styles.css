@@ -486,9 +486,11 @@ input:focus, select:focus, textarea:focus {
 .usual-item.skipped { opacity: 0.5; }
 .usual-item.skipped .usual-check { background: #fff; border-color: #cdd3db; color: transparent; }
 .usual-item.skipped .usual-qty { color: var(--muted); }
-.usual-cta { width: 100%; margin-top: 0.85rem; border: none; background: var(--navy); color: #fff; font-weight: 800; font-size: 1rem; padding: 0.95rem 0; border-radius: 14px; min-height: var(--tap); }
-.usual-cta:hover { background: var(--navy); filter: brightness(1.2); }
-.usual-cta:disabled { background: var(--border); color: var(--muted); filter: none; cursor: default; }
+/* Shared full-width navy CTA (usual-basket / partial-pay / quantity keypad). */
+.usual-cta, .pay2-cta, .qsheet-cta { width: 100%; border: none; background: var(--navy); color: #fff; font-weight: 800; font-size: 1rem; padding: 0.95rem 0; border-radius: 14px; min-height: var(--tap); }
+.usual-cta:hover, .pay2-cta:hover, .qsheet-cta:hover { background: var(--navy); filter: brightness(1.2); }
+.usual-cta:disabled, .pay2-cta:disabled, .qsheet-cta:disabled { background: var(--border); color: var(--muted); filter: none; cursor: default; }
+.usual-cta { margin-top: 0.85rem; }
 
 /* ---- Floating action button ---- */
 .fab {
@@ -552,9 +554,7 @@ input:focus, select:focus, textarea:focus {
 /* ---- B2 · Inline select / partial-amount pay panel ---- */
 .pay2-row { cursor: pointer; }
 .pay2-panel #pay2-amount { font-weight: 800; font-size: 1.05rem; }
-.pay2-cta { width: 100%; margin-top: 0.7rem; border: none; background: var(--navy); color: #fff; font-weight: 800; font-size: 1rem; padding: 0.95rem 0; border-radius: 14px; min-height: var(--tap); }
-.pay2-cta:hover { background: var(--navy); filter: brightness(1.2); }
-.pay2-cta:disabled { background: var(--border); color: var(--muted); filter: none; cursor: default; }
+.pay2-cta { margin-top: 0.7rem; }
 
 /* ---- A1 · Quantity-keypad sheet ---- */
 .qsheet-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; }
@@ -574,8 +574,6 @@ input:focus, select:focus, textarea:focus {
 .qsheet-chip:hover { background: #e2e9f4; }
 .qsheet-chip.box { background: #234d8f; color: #fff; }
 .qsheet-chip.box:hover { background: var(--brand-dark); }
-.qsheet-cta { width: 100%; border: none; background: var(--navy); color: #fff; font-weight: 800; font-size: 1rem; padding: 0.95rem 0; border-radius: 14px; min-height: var(--tap); }
-.qsheet-cta:hover { background: var(--navy); filter: brightness(1.2); }
 
 /* ---- A2 · Swipe-a-row-to-add-a-box (list view) ---- */
 /* Spacing comes from the .cat-list / .cat-fam-items flex gap, like ungrouped rows. */
