@@ -584,9 +584,17 @@ app.get('/api/home', requireCustomer, homeLimiter, ah(async (req, res) => {
 // Add the heuristic "usual basket" to the cart in one tap. Validation lives in
 // setCartLine, so hidden/unpriced items are silently skipped here.
 app.post('/api/reorder/add-all', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  // Optional client-side "skip this week" selection — partnames to leave out.
+  // Quantities still come from the server's own suggestion computation.
+  const exclude = new Set(
+    Array.isArray(req.body?.exclude)
+      ? (req.body.exclude as unknown[]).filter((x): x is string => typeof x === 'string')
+      : []
+  );
   const suggestions = getReorderSuggestions(req.user!.id, req.user!.custname!);
   let added = 0;
   for (const s of suggestions) {
+    if (exclude.has(s.partname)) continue;
     try {
       setCartLine(req.user!.id, req.user!.custname!, s.partname, s.quantity);
       added++;

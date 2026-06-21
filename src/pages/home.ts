@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { formatMoney, formatDateTime, escapeHtml, escapeAttr } from '../format.js';
-import { toast, statusChip, skeleton, errorState } from '../ui.js';
+import { toast, statusChip, skeleton, errorState, buzz } from '../ui.js';
 import { state, refreshCartCount } from '../main.js';
 
 interface Suggestion {
@@ -167,26 +167,18 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       </div>`;
   }
 
-  // "Usual basket" rail.
+  // "Usual basket" checklist (A3): the routine order, pre-ticked at the usual
+  // quantity. Tap a row to skip it this week; one button adds the rest at ₪total.
   let suggestionCard = '';
   if (d.suggestions.length > 0) {
     suggestionCard = `
       <div class="sec-head"><h2>הסל הרגיל שלך</h2></div>
-      <div class="card">
-        <div class="muted" style="font-size:0.88rem;margin-bottom:0.5rem">המוצרים שאתה מזמין הכי הרבה — בכמות הרגילה</div>
-        <div class="rail">
-          ${d.suggestions
-            .map(
-              (s) => `
-            <div class="rail-item">
-              <div class="thumb">${s.image_url ? `<img src="${escapeAttr(s.image_url)}" alt=""/>` : 'אין תמונה'}</div>
-              <div class="nm">${escapeHtml(s.partdes || s.partname)}</div>
-              <div class="pr">${formatMoney(s.price)}</div>
-            </div>`
-            )
-            .join('')}
+      <div class="card usual-card">
+        <div class="muted" style="font-size:0.88rem;margin-bottom:0.6rem">מה שאתה מזמין כל שבוע — בכמות הרגילה. הקש לדילוג על פריט.</div>
+        <div class="usual-list">
+          ${d.suggestions.map(usualRow).join('')}
         </div>
-        <button id="add-usual" style="width:100%;margin-top:0.75rem">הוסף את הסל הרגיל לעגלה</button>
+        <button id="add-usual" class="usual-cta"></button>
       </div>`;
   }
 
@@ -235,24 +227,95 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     }
   });
 
-  shell.querySelector('#add-usual')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget as HTMLButtonElement;
+  wireUsualBasket(shell);
+}
+
+// A3 — usual-basket checklist interactivity. Skips are client-side; the add posts
+// the exclude set to /api/reorder/add-all (server keeps the authoritative qtys).
+function wireUsualBasket(shell: HTMLElement): void {
+  const card = shell.querySelector('.usual-card');
+  if (!card) return;
+  const items = Array.from(card.querySelectorAll<HTMLElement>('.usual-item'));
+  const btn = card.querySelector('#add-usual') as HTMLButtonElement;
+  const excluded = new Set<string>();
+
+  const updateTotal = () => {
+    let total = 0;
+    let count = 0;
+    for (const el of items) {
+      if (excluded.has(el.dataset.part!)) continue;
+      total += Number(el.dataset.price) * Number(el.dataset.qty);
+      count++;
+    }
+    btn.disabled = count === 0;
+    btn.textContent = count === 0 ? 'בחר פריט אחד לפחות' : `הוסף את כל הסל · ${formatMoney(total)}`;
+  };
+
+  for (const el of items) {
+    const toggle = () => {
+      const part = el.dataset.part!;
+      const skip = !excluded.has(part);
+      if (skip) excluded.add(part);
+      else excluded.delete(part);
+      el.classList.toggle('skipped', skip);
+      el.setAttribute('aria-pressed', String(!skip));
+      const sub = el.querySelector('.sub') as HTMLElement;
+      const qty = el.querySelector('.usual-qty') as HTMLElement;
+      sub.textContent = skip ? 'דילגת השבוע' : sub.dataset.label!;
+      qty.textContent = skip ? '×0' : `×${el.dataset.qty}`;
+      updateTotal();
+    };
+    el.addEventListener('click', toggle);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+  updateTotal();
+
+  btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
-      const r = await api.post<{ added: number }>('/api/reorder/add-all');
+      const r = await api.post<{ added: number }>('/api/reorder/add-all', { exclude: [...excluded] });
       await refreshCartCount();
       if (!r.added) {
         toast('אף מוצר מהסל הרגיל אינו זמין כעת', 'error');
-        btn.disabled = false;
+        updateTotal();
         return;
       }
+      buzz();
       toast(`${r.added} מוצרים נוספו לעגלה`, 'ok');
       location.hash = '#cart';
     } catch (ex) {
       toast(ex instanceof Error ? ex.message : String(ex), 'error');
-      btn.disabled = false;
+      updateTotal();
     }
   });
+}
+
+// One usual-basket row, pre-ticked. data-* carry what the total/add logic needs.
+function usualRow(s: Suggestion): string {
+  const label = unitsLabel(s);
+  return `
+    <div class="usual-item" role="button" tabindex="0" aria-pressed="true" data-part="${escapeAttr(s.partname)}" data-price="${s.price}" data-qty="${s.quantity}">
+      <span class="usual-check" aria-hidden="true">✓</span>
+      <div class="usual-info">
+        <div class="nm">${escapeHtml(s.partdes || s.partname)}</div>
+        <div class="sub" data-label="${escapeAttr(label)}">${escapeHtml(label)}</div>
+      </div>
+      <span class="usual-qty">×${s.quantity}</span>
+    </div>`;
+}
+
+// "N ארגזים" when the usual qty is whole boxes; otherwise plain units.
+function unitsLabel(s: { quantity: number; box_size: number }): string {
+  if (s.box_size > 1 && s.quantity % s.box_size === 0) {
+    const b = s.quantity / s.box_size;
+    return `${b} ${b === 1 ? 'ארגז' : 'ארגזים'}`;
+  }
+  return `${s.quantity} יח׳`;
 }
 
 function statusLabel(s: string): string {
