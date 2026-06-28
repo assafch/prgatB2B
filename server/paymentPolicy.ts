@@ -1,6 +1,8 @@
 // Payment-policy engine. PURE decision helpers here have NO DB/IO so they are unit-
 // testable; the DB-backed resolve/evaluate live in later tasks. Spec: 2026-06-28-payment-policy.
 import { db, getSetting, getSettingBool } from './db.js';
+import { getAccountSummary } from './finance.js';
+import { unreconciledCardTotal } from './cardPayments.js';
 
 export type PolicyKind = 'cash' | 'net';
 export interface Policy {
@@ -72,4 +74,25 @@ export function resolvePolicy(custname: string, paymentTerms: string | null): Po
     openDebtThreshold: row && row.open_debt_threshold != null ? row.open_debt_threshold : globalThreshold(),
     allowOrderWithOpenDebt: !!(row && row.allow_order_with_open_debt),
   };
+}
+
+const RECON_WINDOW = '-1 day';
+/** Money "in flight" that should offset open debt so a fresh payment lifts the
+ *  block: unreconciled card payments + cheques the customer has submitted recently. */
+export function pendingSettlement(custname: string): number {
+  const card = unreconciledCardTotal(custname);
+  const chq = db.prepare(
+    `SELECT COALESCE(SUM(amount),0) AS s FROM payment_checks
+     WHERE custname = ? AND status = 'submitted' AND submitted_at >= datetime('now', ?)`
+  ).get(custname, RECON_WINDOW) as { s: number };
+  return Math.round(((card + (chq.s || 0)) + Number.EPSILON) * 100) / 100;
+}
+
+/** Async order-time evaluation: resolve policy, compute net debt, decide. */
+export async function evaluate(custname: string, cartTotal: number): Promise<PolicyDecision & { kind: PolicyKind }> {
+  const summary = await getAccountSummary(custname);
+  const policy = resolvePolicy(custname, summary.profile?.paymentTerms ?? null);
+  const openTotal = summary.balanceOk ? summary.balance.openTotal : 0;
+  const netDebt = Math.max(0, openTotal - pendingSettlement(custname));
+  return { ...decide(policy, netDebt, cartTotal), kind: policy.kind };
 }
