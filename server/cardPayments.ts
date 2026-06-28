@@ -23,6 +23,7 @@ export interface CardRow {
   tranzila_index: string | null;
   payplus_ref: string | null;
   paid_items: string | null; // JSON array of selected invoice IVNUMs (null = whole balance)
+  order_id: string | null;
   psp: string;
   confirmation_code: string | null;
   four_digits: string | null;
@@ -240,6 +241,52 @@ export async function createCardPartialIntent(
   return { id, url, amount };
 }
 
+/** Create a hosted-page intent to pay for a specific order. Amount comes from the
+ *  order row (server-trusted); the client never supplies amounts. Only valid when
+ *  the order is in `pending_payment` status. */
+export async function createCardOrderIntent(
+  userId: number,
+  custname: string,
+  orderId: number,
+  phone: string | undefined,
+  baseUrl: string
+): Promise<{ id: string; url: string; amount: number }> {
+  const order = db
+    .prepare(
+      `SELECT payment_required_amount, status, user_id FROM orders_local WHERE id = ? AND custname = ?`
+    )
+    .get(orderId, custname) as
+    | { payment_required_amount: number | null; status: string; user_id: number }
+    | undefined;
+  if (!order || order.user_id !== userId) throw new Error('order not found');
+  if (order.status !== 'pending_payment') throw new Error('order not awaiting payment');
+  const amount = Number(order.payment_required_amount);
+  if (!(amount > 0)) throw new Error('order amount unavailable');
+
+  let email = '';
+  try {
+    const summary = await getAccountSummary(custname);
+    email = payerEmail(summary);
+  } catch {}
+
+  const id = crypto.randomBytes(12).toString('hex');
+  const { url } = await createPspIntent({
+    id,
+    userId,
+    custname,
+    kind: 'order_payment',
+    amount,
+    label: `תשלום הזמנה #${orderId}`,
+    paidItemsJson: null,
+    email,
+    contact: custname,
+    phone,
+    baseUrl,
+  });
+  db.prepare('UPDATE card_payments SET order_id = ? WHERE id = ?').run(String(orderId), id);
+  return { id, url, amount };
+}
+
 /** Store the transaction index hinted by Tranzila's notify/return callback.
  *  The hint is untrusted — it only tells confirmCard where to look. */
 export function recordTranzilaIndex(id: string, index: string): void {
@@ -252,6 +299,18 @@ export function getCardForUser(userId: number, id: string): CardRow | null {
 }
 function getCardAny(id: string): CardRow | null {
   return (db.prepare(`SELECT * FROM card_payments WHERE id = ?`).get(id) as CardRow) ?? null;
+}
+
+/** Shared success-path helper: if the paid card is linked to an order, approve it. */
+async function returnPaidCard(id: string): Promise<CardRow | null> {
+  const fresh = db
+    .prepare('SELECT order_id, kind FROM card_payments WHERE id = ?')
+    .get(id) as { order_id: string | null; kind: string } | undefined;
+  if (fresh?.kind === 'order_payment' && fresh.order_id) {
+    const { approveOrder } = await import('./orders.js'); // dynamic import avoids load-time circular dependency
+    await approveOrder(Number(fresh.order_id), 'card', id);
+  }
+  return getCardAny(id);
 }
 
 /** Authoritative confirm via provider re-query (callback never trusted). Cross-
@@ -279,7 +338,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
          WHERE id = ? AND status = 'pending'`
       ).run(tx.confirmationCode, tx.fourDigits, tx.index, id);
       bustFinanceCache(row.custname);
-      return getCardAny(id);
+      return returnPaidCard(id);
     }
     return row;
   }
@@ -303,7 +362,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
          WHERE id = ? AND status = 'pending'`
       ).run(tx.confirmationCode, tx.fourDigits, tx.transactionUid, id);
       bustFinanceCache(row.custname);
-      return getCardAny(id);
+      return returnPaidCard(id);
     }
     return row;
   }
@@ -325,7 +384,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
        WHERE id = ? AND status = 'pending'`
     ).run(tx.confirmationCode, tx.fourDigits, tx.provider, id);
     bustFinanceCache(row.custname);
-    return getCardAny(id);
+    return returnPaidCard(id);
   }
   return row;
 }
