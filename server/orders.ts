@@ -4,6 +4,7 @@ import { db } from './db.js';
 import { createOrder, getPriorityConfig, listOrdersForCustomer } from './priority.js';
 import { getProduct } from './catalog.js';
 import { applyPromotions, type PromoResult } from './promotions.js';
+import { policyEnabled, evaluate } from './paymentPolicy.js';
 
 export interface CartLine {
   partname: string;
@@ -180,6 +181,19 @@ export async function submitOrder(
     if (typeof prod.price !== 'number' || prod.price <= 0) {
       throw new OrderError(
         `למוצר "${prod.partdes ?? ln.partname}" אין מחיר זמין — פנו אלינו ונשלים את המחיר`
+      );
+    }
+  }
+
+  // Payment-policy gate (Phase 2: net-terms open-debt block). Inert unless the
+  // admin flag is on. Cash customers are not gated here. The block uses net debt =
+  // openTotal − pendingSettlement (post-dated cheques already excluded), so a fresh
+  // card payment / submitted cheque lifts it without office reconciliation.
+  if (policyEnabled()) {
+    const decision = await evaluate(custname, promotions.total);
+    if (!decision.allowOrder && decision.reason === 'open_debt') {
+      throw new OrderError(
+        `לא ניתן לבצע הזמנה — קיים חוב פתוח בסך ₪${(decision.amount ?? 0).toFixed(2)}. נא לסגור אותו (צ׳ק או אשראי) במסך "חשבוניות" ולנסות שוב.`
       );
     }
   }
