@@ -6,6 +6,7 @@ import { renderUsersAdmin } from './adminUsers.js';
 import { renderAnalyticsAdmin } from './adminAnalytics.js';
 import { renderPromotionsAdmin } from './adminPromotions.js';
 import { renderAdminCustomers } from './adminCustomers.js';
+import { renderCustomerCard } from './adminCustomerCard.js';
 
 interface Stats {
   users: number;
@@ -52,7 +53,7 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
         <a href="#admin/products" class="${tab === '#admin/products' ? 'active' : ''}">ניהול מוצרים</a>
         <a href="#admin/catalog" class="${tab === '#admin/catalog' ? 'active' : ''}">סנכרון Priority</a>
         <a href="#admin/users" class="${tab === '#admin/users' ? 'active' : ''}">משתמשים</a>
-        <a href="#admin/customers" class="${tab === '#admin/customers' ? 'active' : ''}">לקוחות</a>
+        <a href="#admin/customers" class="${tab === '#admin/customers' || tab.startsWith('#admin/customers/') ? 'active' : ''}">לקוחות</a>
         <a href="#admin/promotions" class="${tab === '#admin/promotions' ? 'active' : ''}">מבצעים</a>
         <a href="#admin/invites" class="${tab === '#admin/invites' ? 'active' : ''}">הזמנות-לקוח</a>
         <a href="#admin/payments" class="${tab === '#admin/payments' ? 'active' : ''}">תשלומים</a>
@@ -69,6 +70,7 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
   else if (tab === '#admin/products') await renderAdminProducts(c);
   else if (tab === '#admin/catalog') await renderCatalogAdmin(c);
   else if (tab === '#admin/users') await renderUsersAdmin(c);
+  else if (tab.startsWith('#admin/customers/')) { await renderCustomerCard(c, decodeURIComponent(tab.slice('#admin/customers/'.length))); }
   else if (tab === '#admin/customers') await renderAdminCustomers(c);
   else if (tab === '#admin/promotions') await renderPromotionsAdmin(c);
   else if (tab === '#admin/invites') await renderInvitesAdmin(c);
