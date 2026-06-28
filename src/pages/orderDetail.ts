@@ -62,14 +62,14 @@ export async function renderOrderDetail(shell: HTMLElement, id: number): Promise
                 <td style="padding:0.75rem;font-weight:700;color:var(--brand)">₪${(o.total ?? 0).toFixed(2)}</td></tr>
           </tfoot>
         </table>
-        <div style="margin-top:1rem;display:flex;gap:0.5rem">
-          <button id="reorder">הזמן שוב</button>
+        <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap">
+          ${o.status === 'pending_payment' ? `<a class="es-cta" href="#order-pay/${o.id}">שלם להזמנה</a>` : '<button id="reorder">הזמן שוב</button>'}
           <a href="#orders" style="margin-inline-start:auto;align-self:center">← חזרה</a>
         </div>
       </div>
     `;
-    const reorder = shell.querySelector('#reorder') as HTMLButtonElement;
-    reorder.addEventListener('click', async () => {
+    const reorder = shell.querySelector('#reorder') as HTMLButtonElement | null;
+    reorder?.addEventListener('click', async () => {
       try {
         const r = await api.post<{ lines: number }>(`/api/orders/${id}/reorder`);
         if (!r.lines) {

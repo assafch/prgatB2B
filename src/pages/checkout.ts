@@ -158,8 +158,9 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     msg.className = 'muted';
     const details = [`אספקה: ${selectedLabel}`, note.value.trim()].filter(Boolean).join(' · ');
     try {
-      const result = await api.post<{ ordname: string; orderId: number }>('/api/orders', { details });
+      const result = await api.post<{ ordname: string; orderId: number; needsPayment?: boolean; amount?: number }>('/api/orders', { details });
       await refreshCartCount();
+      if (result.needsPayment) { location.hash = '#order-pay/' + result.orderId; return; }
       shell.innerHTML = `
         <div class="empty-state">
           <div class="es-icon">✅</div>

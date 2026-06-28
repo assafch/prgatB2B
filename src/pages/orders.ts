@@ -25,6 +25,7 @@ const LOCAL_STATUS: Record<string, string> = {
   submitted: 'נשלחה',
   failed: 'נכשלה',
   draft: 'טיוטה',
+  pending_payment: 'ממתין לתשלום',
 };
 
 export async function renderOrders(shell: HTMLElement): Promise<void> {
@@ -72,12 +73,14 @@ export async function renderOrders(shell: HTMLElement): Promise<void> {
 }
 
 function portalCard(o: OrderRow): string {
+  const isPendingPayment = o.status === 'pending_payment';
   return `
     <div class="card dash-row" style="margin-bottom:0.6rem">
       <div class="grow">
         <div style="font-weight:700">${escapeHtml(o.priority_ordname || 'הזמנה #' + o.id)}</div>
         <div class="muted" style="font-size:0.83rem">${formatDateTime(o.created_at)} · ${o.total != null ? formatMoney(o.total) : '-'}</div>
         <div style="margin-top:0.35rem">${statusChip(LOCAL_STATUS[o.status] || o.status)}</div>
+        ${isPendingPayment ? `<div style="margin-top:0.35rem"><a href="#order-pay/${o.id}" style="color:var(--warn);font-weight:700">שלם ←</a></div>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;gap:0.4rem">
         <a href="#orders/${o.id}" class="es-cta" style="padding:0.4rem 0.8rem;font-size:0.85rem;text-align:center">פרטים</a>

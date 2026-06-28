@@ -25,6 +25,7 @@ import { renderTemplates } from './pages/templates.js';
 import { renderFavorites } from './pages/favorites.js';
 import { renderScan } from './pages/scan.js';
 import { renderAdmin } from './pages/admin.js';
+import { renderOrderPay } from './pages/orderPay.js';
 
 const root = document.getElementById('app')!;
 
@@ -40,7 +41,7 @@ function navKeyFor(hash: string): string {
   if (hash.startsWith('#home')) return 'home';
   if (hash.startsWith('#catalog') || hash.startsWith('#product/') || hash === '#favorites' || hash === '#scan') return 'catalog';
   if (hash.startsWith('#cart') || hash.startsWith('#checkout') || hash === '#templates') return 'cart';
-  if (hash.startsWith('#orders')) return 'orders';
+  if (hash.startsWith('#orders') || hash.startsWith('#order-pay/')) return 'orders';
   if (hash.startsWith('#account') || hash.startsWith('#invoice') || hash.startsWith('#pay')) return 'account';
   return '';
 }
@@ -180,6 +181,10 @@ async function route(): Promise<void> {
   if (hash.startsWith('#orders/')) {
     const id = Number(hash.slice('#orders/'.length));
     return renderOrderDetail(mount(''), id);
+  }
+  if (hash.startsWith('#order-pay/')) {
+    const id = hash.slice('#order-pay/'.length);
+    return renderOrderPay(mount(''), id);
   }
   if (hash === '#account') return renderAccount(mount(''));
   if (hash === '#invoices') return renderInvoices(mount(''));
