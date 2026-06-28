@@ -217,6 +217,14 @@ CREATE TABLE IF NOT EXISTS customer_pricing (
   PRIMARY KEY (custname, partname)
 );
 
+CREATE TABLE IF NOT EXISTS customer_policies (
+  custname TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'auto',
+  open_debt_threshold REAL,
+  allow_order_with_open_debt INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS promotions (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -337,6 +345,14 @@ ensureColumn('catalog_cache', 'b2b_category_override', 'TEXT');
 // Manual admin "out of stock" override (אזל מהמלאי). 1 = out of stock (grayed,
 // un-orderable); 0 = in stock. Independent of the unused Priority `stock` column.
 ensureColumn('catalog_cache', 'b2b_out_of_stock', 'INTEGER NOT NULL DEFAULT 0');
+// Payment policy / order approval (Phase 1 foundation — inert until the engine ships).
+ensureColumn('orders_local', 'payment_status', "TEXT NOT NULL DEFAULT 'not_required'");
+ensureColumn('orders_local', 'payment_required_amount', 'REAL');
+ensureColumn('orders_local', 'linked_payment_kind', 'TEXT');
+ensureColumn('orders_local', 'linked_payment_id', 'TEXT');
+ensureColumn('orders_local', 'approved_at', 'TEXT');
+ensureColumn('card_payments', 'order_id', 'TEXT');
+ensureColumn('payment_checks', 'order_id', 'TEXT');
 // Promotions table predates the current engine; add the columns it needs (the old
 // x_/y_ columns stay, unused). params holds the per-type rule JSON.
 ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");
