@@ -6,6 +6,7 @@ import { getProduct } from './catalog.js';
 import { applyPromotions, type PromoResult } from './promotions.js';
 import { policyEnabled, evaluate } from './paymentPolicy.js';
 import { notifyUser } from './push.js';
+import { getCheckForUser } from './payments.js';
 
 export interface CartLine {
   partname: string;
@@ -393,4 +394,18 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
   } catch (err) {
     console.warn('[orders] notifyUser failed:', err);
   }
+}
+
+/** Link an already-submitted cheque to a held order and approve it (cheque = approve
+ *  at submit, decision #2). */
+export async function payHeldOrderByCheck(userId: number, custname: string, orderId: number, checkId: string): Promise<boolean> {
+  const order = db.prepare(`SELECT id, status, custname, user_id FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; status: string; custname: string; user_id: number } | undefined;
+  if (!order || order.user_id !== userId || order.custname !== custname) throw new OrderError('ההזמנה לא נמצאה');
+  if (order.status !== 'pending_payment') throw new OrderError('ההזמנה אינה ממתינה לתשלום');
+  const chk = getCheckForUser(userId, checkId) as { status?: string } | null;
+  if (!chk || chk.status !== 'submitted') throw new OrderError('הצ׳ק לא נמצא או טרם אושר');
+  db.prepare('UPDATE payment_checks SET order_id = ? WHERE id = ? AND user_id = ?').run(String(orderId), checkId, userId);
+  await approveOrder(orderId, 'check', checkId);
+  return true;
 }

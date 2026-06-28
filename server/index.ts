@@ -59,6 +59,7 @@ import {
   listLocalOrders,
   listPriorityOrders,
   OrderError,
+  payHeldOrderByCheck,
   reorderToCart,
   setCartLine,
   submitOrder,
@@ -1041,6 +1042,19 @@ app.post('/api/orders/:id/pay/card', requireOwner, blockIfMaintenance, cardPayLi
     const msg = err instanceof Error ? err.message : String(err);
     const safe = (msg === 'order not found' || msg === 'order not awaiting payment') ? 'ההזמנה אינה ממתינה לתשלום' : 'יצירת תשלום נכשלה';
     res.status(400).json({ error: safe });
+  }
+}));
+
+app.post('/api/orders/:id/pay/check', requireOwner, blockIfMaintenance, cartLimiter, ah(async (req: AuthedRequest, res) => {
+  const checkId = typeof (req.body || {}).checkId === 'string' ? (req.body as { checkId: string }).checkId : '';
+  if (!checkId) { res.status(400).json({ error: 'חסר מזהה צ׳ק' }); return; }
+  try {
+    await payHeldOrderByCheck(req.user!.id, req.user!.custname!, Number(req.params.id), checkId);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof OrderError) { res.status(400).json({ error: err.message }); return; }
+    console.error('[orders] pay-by-check failed:', err);
+    res.status(500).json({ error: 'אישור התשלום נכשל' });
   }
 }));
 
