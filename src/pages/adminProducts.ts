@@ -38,6 +38,54 @@ const qs = {
 };
 
 const selection = new Set<string>();
+// Inline-edit pending changes: partname → { field: value }. Saved in one batch.
+const edits = new Map<string, Record<string, unknown>>();
+
+// Pill colors for a status toggle, per field + on/off. Inline so a toggle can
+// restyle itself without a stylesheet round-trip.
+function chipStyle(field: string, on: boolean): string {
+  if (!on) return 'background:#f3f4f6;color:#9aa0a6;border-color:#e5e7eb';
+  if (field === 'b2b_out_of_stock') return 'background:#ffe3e3;color:#c0341e;border-color:#f3b0a8';
+  if (field === 'b2b_featured') return 'background:#ffeed1;color:#9c5500;border-color:#e8c98f';
+  return 'background:#e7e9f5;color:#3a3f7a;border-color:#c4c8ec'; // מוסתר (b2b_visible inverted)
+}
+function statusToggle(part: string, label: string, on: boolean, field: string, invert = false): string {
+  return `<button type="button" class="status-toggle" data-part="${escapeAttr(part)}" data-field="${field}"${invert ? ' data-invert="1"' : ''} data-on="${on ? '1' : ''}" style="${chipStyle(field, on)}">${label}</button>`;
+}
+
+function setEdit(part: string, field: string, value: unknown): void {
+  const patch = edits.get(part) || {};
+  patch[field] = value;
+  edits.set(part, patch);
+  refreshSaveBar();
+}
+function refreshSaveBar(): void {
+  const bar = document.getElementById('inline-save-bar');
+  if (!bar) return;
+  bar.style.display = edits.size > 0 ? 'flex' : 'none';
+  const count = document.getElementById('inline-save-count');
+  if (count) count.textContent = String(edits.size);
+}
+async function saveEdits(shell: HTMLElement): Promise<void> {
+  if (edits.size === 0) return;
+  const items = [...edits.entries()].map(([partname, patch]) => ({ partname, ...patch }));
+  const btn = shell.querySelector('#inline-save') as HTMLButtonElement | null;
+  const msg = shell.querySelector('#bulk-msg') as HTMLDivElement;
+  if (btn) btn.disabled = true;
+  msg.textContent = 'שומר…';
+  msg.className = 'muted';
+  try {
+    const { changes } = await api.post<{ changes: number }>('/api/admin/products/batch', { items });
+    edits.clear();
+    await loadList(shell); // re-render from server (clears dirty highlights + bar)
+    msg.textContent = `✓ נשמרו ${changes} שינויים`;
+    msg.className = 'ok';
+  } catch (ex) {
+    msg.textContent = `שגיאה: ${ex instanceof Error ? ex.message : ex}`;
+    msg.className = 'error';
+    if (btn) btn.disabled = false;
+  }
+}
 
 export async function renderAdminProducts(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `
@@ -82,6 +130,12 @@ export async function renderAdminProducts(shell: HTMLElement): Promise<void> {
 
     <div id="prod-drawer" style="position:fixed;top:0;left:0;height:100vh;width:min(520px,95vw);background:var(--surface);border-inline-end:1px solid var(--border);box-shadow:2px 0 8px rgba(0,0,0,0.12);transform:translateX(-100%);transition:transform 0.18s;z-index:50;overflow-y:auto;padding:1rem"></div>
     <div id="prod-drawer-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.3);display:none;z-index:40"></div>
+
+    <div id="inline-save-bar">
+      <span><b id="inline-save-count">0</b> שינויים בטבלה</span>
+      <button id="inline-save" style="background:#fff;color:var(--navy);font-weight:800">שמור שינויים</button>
+      <button id="inline-cancel" class="ghost" style="color:#fff;border-color:#fff;background:transparent">בטל</button>
+    </div>
   `;
 
   bindControls(shell);
@@ -134,6 +188,13 @@ function bindControls(shell: HTMLElement): void {
   (shell.querySelector('#prod-drawer-backdrop') as HTMLDivElement).addEventListener('click', () =>
     closeDrawer(shell)
   );
+
+  // Inline-edit batch save / cancel
+  shell.querySelector('#inline-save')?.addEventListener('click', () => saveEdits(shell));
+  shell.querySelector('#inline-cancel')?.addEventListener('click', () => {
+    edits.clear();
+    loadList(shell); // re-render discards pending edits
+  });
 }
 
 async function loadFamilies(shell: HTMLElement): Promise<void> {
@@ -157,6 +218,8 @@ async function loadFamilies(shell: HTMLElement): Promise<void> {
 async function loadList(shell: HTMLElement): Promise<void> {
   const wrap = shell.querySelector('#prod-table-wrap') as HTMLDivElement;
   wrap.innerHTML = `<div class="muted" style="padding:1rem">טוען…</div>`;
+  edits.clear(); // a (re)load discards any pending inline edits
+  refreshSaveBar();
   try {
     const params = new URLSearchParams();
     if (qs.q) params.set('q', qs.q);
@@ -222,6 +285,37 @@ async function loadList(shell: HTMLElement): Promise<void> {
     });
     updateSelectionInfo(shell);
 
+    // Inline editing — number cells (ארגז / מינ׳)
+    wrap.querySelectorAll<HTMLInputElement>('input.cell-edit').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        const field = inp.dataset.field!;
+        let value: unknown;
+        if (field === 'b2b_min_qty') {
+          value = inp.value.trim() === '' ? null : Number(inp.value); // empty → clear override
+        } else {
+          const n = Number(inp.value); // box_size — ignore invalid
+          if (!isFinite(n) || n < 1) return;
+          value = n;
+        }
+        inp.closest('tr')?.classList.add('row-dirty');
+        setEdit(inp.dataset.part!, field, value);
+      });
+    });
+
+    // Inline editing — status toggle chips (מוסתר / אזל / מומלץ)
+    wrap.querySelectorAll<HTMLButtonElement>('button.status-toggle').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't open the drawer
+        const field = chip.dataset.field!;
+        const invert = chip.dataset.invert === '1';
+        const on = !(chip.dataset.on === '1');
+        chip.dataset.on = on ? '1' : '';
+        chip.setAttribute('style', chipStyle(field, on));
+        chip.closest('tr')?.classList.add('row-dirty');
+        setEdit(chip.dataset.part!, field, invert ? !on : on); // מוסתר on → b2b_visible false
+      });
+    });
+
     // Pager
     const totalPages = Math.max(1, Math.ceil(total / qs.pageSize));
     const pager = shell.querySelector('#prod-pager') as HTMLDivElement;
@@ -248,23 +342,19 @@ function renderRow(p: AdminProduct): string {
   const imageThumb = p.b2b_image_path
     ? `<img src="${p.b2b_image_path}" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:4px"/>`
     : `<div style="width:42px;height:42px;background:#f3f4f6;border-radius:4px;display:grid;place-items:center;color:#9ca3af;font-size:0.7rem">—</div>`;
-  const statusChips = [
-    p.active ? '' : '<span style="background:#fee;color:#c33;padding:1px 6px;border-radius:4px;font-size:0.75rem">לא פעיל</span>',
-    p.b2b_visible
-      ? ''
-      : '<span style="background:#eef;color:#557;padding:1px 6px;border-radius:4px;font-size:0.75rem">מוסתר</span>',
-    p.b2b_featured
-      ? '<span style="background:#ffeed1;color:#9c5500;padding:1px 6px;border-radius:4px;font-size:0.75rem">⭐</span>'
-      : '',
-    p.b2b_out_of_stock
-      ? '<span style="background:#ffe3e3;color:#c0341e;padding:1px 6px;border-radius:4px;font-size:0.75rem">אזל מהמלאי</span>'
-      : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const part = escapeAttr(p.partname);
+  // "לא פעיל" is Priority-sourced → read-only badge. The other three are editable
+  // toggle chips. "מוסתר" is the inverse of b2b_visible.
+  const inactive = p.active ? '' : '<span style="background:#fee;color:#c33;padding:1px 6px;border-radius:4px;font-size:0.75rem">לא פעיל</span> ';
+  const toggles =
+    statusToggle(p.partname, 'מוסתר', !p.b2b_visible, 'b2b_visible', true) +
+    ' ' +
+    statusToggle(p.partname, 'אזל', !!p.b2b_out_of_stock, 'b2b_out_of_stock') +
+    ' ' +
+    statusToggle(p.partname, '⭐', !!p.b2b_featured, 'b2b_featured');
   return `
-    <tr data-part="${escapeAttr(p.partname)}" style="border-bottom:1px solid var(--border);cursor:pointer">
-      <td style="padding:0.5rem"><input type="checkbox" class="row-check" data-part="${escapeAttr(p.partname)}"/></td>
+    <tr data-part="${part}" style="border-bottom:1px solid var(--border);cursor:pointer">
+      <td style="padding:0.5rem"><input type="checkbox" class="row-check" data-part="${part}"/></td>
       <td style="padding:0.25rem 0.5rem">${imageThumb}</td>
       <td style="padding:0.5rem">
         <div>${escapeHtml(displayName)}</div>
@@ -272,9 +362,9 @@ function renderRow(p: AdminProduct): string {
       </td>
       <td style="padding:0.5rem">${escapeHtml(p.family_desc || p.family || '-')}</td>
       <td style="padding:0.5rem">${p.list_price != null ? `₪${p.list_price.toFixed(2)}` : '-'}</td>
-      <td style="padding:0.5rem">${p.box_size}</td>
-      <td style="padding:0.5rem">${p.b2b_min_qty ?? '—'}</td>
-      <td style="padding:0.5rem">${statusChips || '<span style="color:var(--ok)">✓</span>'}</td>
+      <td style="padding:0.5rem"><input class="cell-edit" type="number" min="1" step="1" value="${p.box_size}" data-part="${part}" data-field="box_size" aria-label="ארגז"/></td>
+      <td style="padding:0.5rem"><input class="cell-edit" type="number" min="0" step="1" value="${p.b2b_min_qty ?? ''}" placeholder="${p.box_size}" data-part="${part}" data-field="b2b_min_qty" aria-label="מינ׳ הזמנה"/></td>
+      <td style="padding:0.5rem;white-space:nowrap">${inactive}${toggles}</td>
     </tr>
   `;
 }

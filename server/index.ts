@@ -69,6 +69,7 @@ import { getPriorityConfig, listCustomers } from './priority.js';
 import { getAccountSummary, getInvoices, getInvoiceDetail, getUnpaidInvoices, warmFinance } from './finance.js';
 import {
   bulkUpdate,
+  batchUpdate,
   deleteImage,
   exportCsv,
   getProductAdmin,
@@ -1389,6 +1390,19 @@ app.post('/api/admin/products/import.csv', requireAdmin, csvImportLimiter, uploa
 app.post('/api/admin/products/bulk', requireAdmin, (req, res) => {
   try {
     const changes = bulkUpdate(req.body || {});
+    res.json({ changes });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Inline-edit batch save: per-row different values, one transaction.
+app.post('/api/admin/products/batch', requireAdmin, (req, res) => {
+  try {
+    const items = Array.isArray((req.body as { items?: unknown })?.items)
+      ? ((req.body as { items: Array<Record<string, unknown>> }).items)
+      : [];
+    const changes = batchUpdate(items);
     res.json({ changes });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

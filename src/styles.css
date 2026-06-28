@@ -549,6 +549,13 @@ input:focus, select:focus, textarea:focus {
    controls are disabled (via the disabled attribute in each render function). */
 .is-oos .fav, .is-oos .fav-card { opacity: 1; filter: none; }
 
+/* ---- Admin products: inline (multi-row) editing ---- */
+.cell-edit { width: 62px; padding: 0.25rem; text-align: center; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
+.status-toggle { border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700; line-height: 1.6; cursor: pointer; margin: 1px; }
+tr.row-dirty { background: #fffbe6; }
+#inline-save-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 60; display: none; align-items: center; justify-content: center; gap: 1rem; background: var(--navy); color: #fff; padding: 0.7rem 1rem calc(0.7rem + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -4px 16px rgba(0,0,0,0.2); }
+#inline-save-bar button { min-height: 40px; }
+
 /* ---- Thumb-zone sticky bar (Phase 0 utility) ---- */
 /* Sits above the 72px bottom-nav; honors the iOS home-indicator safe area. */
 .thumb-bar { position: fixed; inset-inline: 0; bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 40; background: #fff; border-top: 1px solid var(--border); box-shadow: 0 -8px 22px rgba(16,24,40,0.08); padding: 0.7rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom, 0px)); }

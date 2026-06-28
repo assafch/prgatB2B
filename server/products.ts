@@ -150,6 +150,27 @@ export function patchProduct(partname: string, patch: Record<string, unknown>): 
   return getProductAdmin(partname);
 }
 
+/** Apply per-row edits to many products in ONE transaction. Each item is
+ *  { partname, ...patch } where patch is filtered by the same PATCHABLE_COLUMNS
+ *  whitelist + normalization as patchProduct. Used by the inline-edit table's
+ *  batch save. Returns how many rows carried a whitelisted change. */
+export function batchUpdate(items: Array<Record<string, unknown>>): number {
+  if (!Array.isArray(items)) return 0;
+  let changed = 0;
+  const tx = db.transaction((rows: Array<Record<string, unknown>>) => {
+    for (const row of rows) {
+      const partname = typeof row?.partname === 'string' ? row.partname.trim() : '';
+      if (!partname) continue;
+      const { partname: _ignore, ...patch } = row;
+      if (!Object.keys(patch).some((k) => PATCHABLE_COLUMNS.has(k))) continue;
+      patchProduct(partname, patch);
+      changed++;
+    }
+  });
+  tx(items.slice(0, 2000)); // backstop cap
+  return changed;
+}
+
 export async function saveImage(
   partname: string,
   buffer: Buffer
