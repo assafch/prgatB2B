@@ -405,7 +405,12 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
   if (order.status !== 'pending_payment') throw new OrderError('ההזמנה אינה ממתינה לתשלום');
   const chk = getCheckForUser(userId, checkId) as { status?: string } | null;
   if (!chk || chk.status !== 'submitted') throw new OrderError('הצ׳ק לא נמצא או טרם אושר');
-  db.prepare('UPDATE payment_checks SET order_id = ? WHERE id = ? AND user_id = ?').run(String(orderId), checkId, userId);
+  // Atomically CLAIM the cheque for THIS order (order_id IS NULL) so a single cheque
+  // can't approve multiple held orders — one cheque settles one order.
+  const linked = db
+    .prepare('UPDATE payment_checks SET order_id = ? WHERE id = ? AND user_id = ? AND order_id IS NULL')
+    .run(String(orderId), checkId, userId);
+  if (linked.changes !== 1) throw new OrderError('הצ׳ק כבר משויך להזמנה');
   await approveOrder(orderId, 'check', checkId);
   return true;
 }
