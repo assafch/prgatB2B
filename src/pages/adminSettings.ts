@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml } from '../format.js';
+import { toast } from '../ui.js';
 
 // App settings panel: toggle payment modes, post a customer banner, and put the
 // app into maintenance mode (which blocks ordering + cheque payments server-side).
@@ -51,6 +52,11 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       <textarea id="pb-body" rows="2" placeholder="תוכן ההודעה" maxlength="200" style="margin-top:0.4rem"></textarea>
       <button id="pb-send" style="margin-top:0.5rem;width:100%">שליחה</button>
       <div id="pb-msg" style="margin-top:0.5rem;text-align:center"></div>
+    </div>
+    <div class="card" style="margin-top:0.75rem">
+      <h2 style="margin-top:0">הזמנות ששולמו וטרם נשלחו</h2>
+      <p class="muted" style="margin-top:-0.3rem">הזמנות שהלקוח שילם אך לא נשלחו ל-Priority (למשל בשל תקלת תקשורת).</p>
+      <div id="stuck-orders-body"><span class="muted">טוען…</span></div>
     </div>`;
 
   const msg = c.querySelector('#s-msg') as HTMLDivElement;
@@ -97,4 +103,50 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       pbmsg.className = 'error';
     }
   };
+
+  // Stuck orders: fetch lazily after shell renders, re-fetch after resend
+  const renderStuckOrders = async () => {
+    const body = c.querySelector('#stuck-orders-body') as HTMLDivElement;
+    if (!body) return;
+    body.innerHTML = '<span class="muted">טוען…</span>';
+    try {
+      const { orders } = await api.get<{ orders: Array<{ id: number; custname: string; total: number; status: string; error?: string }> }>('/api/admin/orders/stuck');
+      if (orders.length === 0) {
+        body.innerHTML = '<span class="muted">אין</span>';
+        return;
+      }
+      body.innerHTML = orders.map(o => `
+        <div id="stuck-row-${o.id}" style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:0.75rem">
+            <span>#${o.id} · ${escapeHtml(o.custname)} · ₪${o.total}</span>
+            <button data-id="${o.id}" class="stuck-resend" style="margin-inline-start:auto">שלח מחדש</button>
+          </div>
+          ${o.error ? `<div class="muted" style="font-size:0.8rem;margin-top:0.25rem">${escapeHtml(o.error)}</div>` : ''}
+        </div>
+      `).join('');
+
+      body.querySelectorAll<HTMLButtonElement>('.stuck-resend').forEach(btn => {
+        btn.onclick = async () => {
+          const id = Number(btn.dataset.id);
+          btn.disabled = true;
+          try {
+            const resp = await api.post<{ ok: boolean; ordname?: string; error?: string }>(`/api/admin/orders/${id}/resend`);
+            if (resp.ok) {
+              toast('נשלח מחדש ✓', 'ok');
+              await renderStuckOrders();
+            } else {
+              toast(resp.error || 'השליחה נכשלה', 'error');
+              btn.disabled = false;
+            }
+          } catch (ex) {
+            toast(ex instanceof Error ? ex.message : 'השליחה נכשלה', 'error');
+            btn.disabled = false;
+          }
+        };
+      });
+    } catch (ex) {
+      body.innerHTML = `<div class="error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
+    }
+  };
+  void renderStuckOrders();
 }
