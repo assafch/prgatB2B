@@ -70,7 +70,7 @@ import {
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
-import { listCustomersAdmin } from './customers.js';
+import { listCustomersAdmin, getCustomerAdmin, patchCustomer, batchUpdateCustomers } from './customers.js';
 import { getAccountSummary, getInvoices, getInvoiceDetail, getUnpaidInvoices, warmFinance } from './finance.js';
 import {
   bulkUpdate,
@@ -1375,7 +1375,16 @@ app.get('/api/admin/customers', requireAdmin, (req, res) => {
   res.json(listCustomersAdmin(q, page, pageSize));
 });
 
-// ---------- Admin: per-customer payment policy ----------
+// ---------- Admin: per-customer detail / policy upsert / batch ----------
+// NOTE: POST /batch must be declared before GET /:custname (different method, no conflict,
+// but keeping literal paths first is the safest pattern).
+app.post('/api/admin/customers/batch', requireAdmin, (req: AuthedRequest, res) => {
+  const items = Array.isArray((req.body || {}).items) ? (req.body as { items: Array<Record<string, unknown>> }).items : [];
+  res.json({ changes: batchUpdateCustomers(items) });
+});
+app.get('/api/admin/customers/:custname', requireAdmin, ah(async (req: AuthedRequest, res) => { res.json(await getCustomerAdmin(req.params.custname)); }));
+app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, res) => { patchCustomer(req.params.custname, (req.body || {}) as Record<string, unknown>); res.json({ ok: true }); });
+
 app.get('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
   const row = db.prepare('SELECT custname, kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(req.params.custname) || { custname: req.params.custname, kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0 };
   res.json(row);

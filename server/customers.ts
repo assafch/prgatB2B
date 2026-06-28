@@ -2,6 +2,7 @@
 
 import { db } from './db.js';
 import { resolvePolicy } from './paymentPolicy.js';
+import { getAccountSummary } from './finance.js';
 
 export interface AdminCustomerRow {
   custname: string;
@@ -57,4 +58,59 @@ export function listCustomersAdmin(q: string, page: number, pageSize: number): {
     };
   });
   return { items, total };
+}
+
+const PATCHABLE = new Set(['kind', 'open_debt_threshold', 'allow_order_with_open_debt']);
+
+/** Upsert a company's policy. Read-merge-write so a field absent from `patch` is
+ *  preserved and an explicit null threshold is honored. */
+export function patchCustomer(custname: string, patch: Record<string, unknown>): void {
+  const cur = (db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(custname)
+    || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0 }) as { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number };
+  let kind = cur.kind;
+  if (patch.kind != null && ['auto', 'cash', 'net'].includes(String(patch.kind))) kind = String(patch.kind);
+  let thr = cur.open_debt_threshold;
+  if ('open_debt_threshold' in patch) thr = (patch.open_debt_threshold === '' || patch.open_debt_threshold == null) ? null : Number(patch.open_debt_threshold);
+  let allow = cur.allow_order_with_open_debt;
+  if ('allow_order_with_open_debt' in patch) allow = patch.allow_order_with_open_debt ? 1 : 0;
+  db.prepare(
+    `INSERT INTO customer_policies (custname, kind, open_debt_threshold, allow_order_with_open_debt, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(custname) DO UPDATE SET kind = excluded.kind, open_debt_threshold = excluded.open_debt_threshold, allow_order_with_open_debt = excluded.allow_order_with_open_debt, updated_at = datetime('now')`
+  ).run(custname, kind, thr, allow);
+}
+
+export function batchUpdateCustomers(items: Array<Record<string, unknown>>): number {
+  let n = 0;
+  const tx = db.transaction((rows: Array<Record<string, unknown>>) => {
+    for (const row of rows) {
+      const custname = String(row.custname || '');
+      if (!custname) continue;
+      const patch: Record<string, unknown> = {};
+      for (const k of Object.keys(row)) if (PATCHABLE.has(k)) patch[k] = row[k];
+      if (Object.keys(patch).length) { patchCustomer(custname, patch); n++; }
+    }
+  });
+  tx(items);
+  return n;
+}
+
+export async function getCustomerAdmin(custname: string): Promise<Record<string, unknown>> {
+  const policy = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(custname)
+    || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0 };
+  const users = db.prepare('SELECT id, username, customer_role, status, last_login_at FROM users WHERE custname = ? ORDER BY username').all(custname);
+  const cust_desc = (db.prepare('SELECT cust_desc FROM users WHERE custname = ? AND cust_desc IS NOT NULL LIMIT 1').get(custname) as { cust_desc?: string } | undefined)?.cust_desc ?? null;
+  let finance: Record<string, unknown> = { priorityOk: false };
+  try {
+    const s = await getAccountSummary(custname);
+    finance = {
+      priorityOk: s.priorityOk !== false,
+      paymentTerms: s.profile?.paymentTerms ?? null,
+      openTotal: s.balance?.openTotal ?? null,
+      creditLimit: s.balance?.creditLimit ?? null,
+      obligo: s.balance?.obligo ?? null,
+    };
+  } catch { /* leave priorityOk:false */ }
+  const resolvedKind = resolvePolicy(custname, (finance.paymentTerms as string) ?? null).kind;
+  return { custname, cust_desc, policy, resolvedKind, users, finance };
 }
