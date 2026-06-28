@@ -21,7 +21,7 @@ interface CustomerCardFinance {
 interface CustomerCardPolicy {
   kind: string; // 'auto' | 'cash' | 'net'
   open_debt_threshold: number | null;
-  allow_order_with_open_debt: boolean | number;
+  allow_order_with_open_debt: number;
 }
 
 interface CustomerCard {
@@ -58,7 +58,7 @@ export async function renderCustomerCard(shell: HTMLElement, custname: string): 
 function renderCard(shell: HTMLElement, d: CustomerCard): void {
   const resolvedHint =
     d.policy.kind === 'auto'
-      ? `<div class="muted" style="font-size:0.85rem;margin-top:0.5rem">נגזר מ-Priority: ${escapeHtml(d.finance.paymentTerms ?? '—')} → ${d.resolvedKind === 'cash' ? 'מזומן' : 'שוטף'}</div>`
+      ? `<div class="muted auto-hint" style="font-size:0.85rem;margin-top:0.5rem">נגזר מ-Priority: ${escapeHtml(d.finance.paymentTerms ?? '—')} → ${d.resolvedKind === 'cash' ? 'מזומן' : 'שוטף'}</div>`
       : '';
 
   const financeSection = d.finance.priorityOk
