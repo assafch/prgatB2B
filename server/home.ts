@@ -89,7 +89,7 @@ export async function getHomeData(
   // Finance can be slow / unavailable; the rest is instant local SQLite.
   const summary = await getAccountSummary(custname);
   const pol = policyEnabled() ? resolvePolicy(custname, summary.profile?.paymentTerms ?? null) : null;
-  const netDebt = summary.balanceOk ? Math.max(0, summary.balance.openTotal - pendingSettlement(custname)) : 0;
+  const netDebt = pol && summary.balanceOk ? Math.max(0, summary.balance.openTotal - pendingSettlement(custname)) : 0;
 
   const lastRow = db
     .prepare(

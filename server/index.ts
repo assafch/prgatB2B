@@ -1344,7 +1344,7 @@ app.get('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
 });
 app.patch('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
   const b = (req.body || {}) as { kind?: string; open_debt_threshold?: number | null; allow_order_with_open_debt?: boolean };
-  const kind = ['auto', 'cash', 'net', 'custom'].includes(String(b.kind)) ? b.kind : 'auto';
+  const kind = ['auto', 'cash', 'net'].includes(String(b.kind)) ? b.kind : 'auto';
   const thr = b.open_debt_threshold == null ? null : Number(b.open_debt_threshold);
   const allow = b.allow_order_with_open_debt ? 1 : 0;
   db.prepare(`INSERT INTO customer_policies (custname, kind, open_debt_threshold, allow_order_with_open_debt, updated_at)
