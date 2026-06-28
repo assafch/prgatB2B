@@ -8,6 +8,7 @@ import { getAccountSummary, type BalanceSummary } from './finance.js';
 import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
 import { activePromotions } from './promotions.js';
 import { getProduct } from './catalog.js';
+import { resolvePolicy, policyEnabled, pendingSettlement } from './paymentPolicy.js';
 
 export interface LastOrderView {
   id: number;
@@ -42,6 +43,8 @@ export interface HomeData {
   banner: { text: string } | null;
   /** admin-controlled maintenance mode — client blocks ordering + shows a notice */
   maintenance: { enabled: boolean; message: string };
+  /** resolved payment policy for this customer (informational only; null when feature flag is off) */
+  paymentPolicy: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
 }
 
 // One card per active promotion, with a human subtitle derived from the promo
@@ -85,6 +88,8 @@ export async function getHomeData(
 ): Promise<HomeData> {
   // Finance can be slow / unavailable; the rest is instant local SQLite.
   const summary = await getAccountSummary(custname);
+  const pol = policyEnabled() ? resolvePolicy(custname, summary.profile?.paymentTerms ?? null) : null;
+  const netDebt = summary.balanceOk ? Math.max(0, summary.balance.openTotal - pendingSettlement(custname)) : 0;
 
   const lastRow = db
     .prepare(
@@ -133,5 +138,8 @@ export async function getHomeData(
       enabled: getSettingBool('maintenance_enabled', false),
       message: getSetting('maintenance_message') || 'המערכת בתחזוקה זמנית. נחזור בקרוב.',
     },
+    paymentPolicy: pol
+      ? { kind: pol.kind, netDebt, blocksOnDebt: pol.blockOnOpenDebt && !pol.allowOrderWithOpenDebt && netDebt > pol.openDebtThreshold + 0.001 }
+      : null,
   };
 }

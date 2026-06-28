@@ -39,6 +39,7 @@ interface HomeData {
   features: { payments: boolean; checkPayment: boolean };
   banner: { text: string } | null;
   maintenance: { enabled: boolean; message: string };
+  paymentPolicy?: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
 }
 
 export async function renderHome(shell: HTMLElement): Promise<void> {
