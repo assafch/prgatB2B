@@ -11,7 +11,7 @@ import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSetti
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
-import { createCardDebtIntent, createCardPartialIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
+import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
 import * as payplus from './payplus.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
@@ -1029,6 +1029,18 @@ app.post('/api/payments/card/intent', requireOwner, blockIfMaintenance, cardPayL
     res.json(out);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה ביצירת התשלום' });
+  }
+}));
+
+// Pay a held (pending_payment) order by card — returns the PSP hosted-page URL.
+app.post('/api/orders/:id/pay/card', requireOwner, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+  try {
+    const intent = await createCardOrderIntent(req.user!.id, req.user!.custname!, Number(req.params.id), undefined, appBaseUrl(req));
+    res.json(intent);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const safe = (msg === 'order not found' || msg === 'order not awaiting payment') ? 'ההזמנה אינה ממתינה לתשלום' : 'יצירת תשלום נכשלה';
+    res.status(400).json({ error: safe });
   }
 }));
 
