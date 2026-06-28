@@ -1337,6 +1337,22 @@ app.post('/api/admin/users/:id/status', requireAdmin, (req: AuthedRequest, res) 
   res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true } : { error: result.error });
 });
 
+// ---------- Admin: per-customer payment policy ----------
+app.get('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
+  const row = db.prepare('SELECT custname, kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(req.params.custname) || { custname: req.params.custname, kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0 };
+  res.json(row);
+});
+app.patch('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
+  const b = (req.body || {}) as { kind?: string; open_debt_threshold?: number | null; allow_order_with_open_debt?: boolean };
+  const kind = ['auto', 'cash', 'net', 'custom'].includes(String(b.kind)) ? b.kind : 'auto';
+  const thr = b.open_debt_threshold == null ? null : Number(b.open_debt_threshold);
+  const allow = b.allow_order_with_open_debt ? 1 : 0;
+  db.prepare(`INSERT INTO customer_policies (custname, kind, open_debt_threshold, allow_order_with_open_debt, updated_at)
+              VALUES (?, ?, ?, ?, datetime('now'))
+              ON CONFLICT(custname) DO UPDATE SET kind=excluded.kind, open_debt_threshold=excluded.open_debt_threshold, allow_order_with_open_debt=excluded.allow_order_with_open_debt, updated_at=datetime('now')`).run(req.params.custname, kind, thr, allow);
+  res.json({ ok: true });
+});
+
 // ---------- Admin: business analytics (from Priority; cached) ----------
 app.get('/api/admin/analytics/revenue', requireAdmin, adminAnalyticsLimiter, ah(async (_req, res) => {
   const config = getPriorityConfig();
