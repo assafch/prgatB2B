@@ -197,6 +197,10 @@ async function route(): Promise<void> {
   }
   if (hash === '#pay/card') return renderPayCard(mount(''));
   if (hash === '#pay/check') return renderPayCheck(mount(''));
+  if (hash.startsWith('#pay-check/')) {
+    const id = hash.slice('#pay-check/'.length);
+    return renderPayCheck(mount(''), id);
+  }
   if (hash === '#payments') return renderPayments(mount(''));
   if (hash === '#assistant') return renderAssistant(mount(''));
   if (hash === '#templates') return renderTemplates(mount(''));

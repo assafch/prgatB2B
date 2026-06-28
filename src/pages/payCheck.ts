@@ -31,10 +31,11 @@ interface CheckItem {
 // Local (Israel) date as yyyy-mm-dd — avoids UTC flipping the post-dated flag near midnight.
 const today = () => new Date().toLocaleDateString('en-CA');
 
-export function renderPayCheck(shell: HTMLElement): void {
+export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
   shell.innerHTML = `
     <div class="card">
       <h1 style="margin-top:0">תשלום בצ׳ק</h1>
+      ${orderId ? `<p style="font-weight:600;color:var(--ok);margin-top:0">תשלום צ׳ק להזמנה</p>` : ''}
       <p class="muted" style="margin-top:-0.3rem">צלמו כל צ׳ק — נזהה אוטומטית את הסכום והתאריך. אפשר להוסיף כמה צ׳קים יחד.</p>
       <div class="muted" style="font-size:0.82rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.7rem;margin-bottom:0.75rem">
         💡 צלמו את כל הצ׳ק במסגרת, ממוקד ומואר היטב — התמונה משמשת לפירעון הצ׳ק.
@@ -353,6 +354,13 @@ export function renderPayCheck(shell: HTMLElement): void {
         });
         ok++;
         total += j.amount;
+        if (orderId && ok === 1) {
+          try {
+            await api.post(`/api/orders/${orderId}/pay/check`, { checkId: j.item.draftId });
+            location.hash = '#order-pay/' + orderId;
+            return;
+          } catch (e) { toast('אישור התשלום להזמנה נכשל', 'error'); }
+        }
       } catch {
         /* continue; report partial below */
       }
