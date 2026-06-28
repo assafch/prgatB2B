@@ -31,6 +31,16 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       <div class="set-row"><span>מצב תחזוקה <span class="badge warn">חוסם הזמנות ותשלומים</span></span><input type="checkbox" id="s-maint" ${on('maintenance_enabled') ? 'checked' : ''}/></div>
       <textarea id="s-maint-text" rows="2" placeholder="הודעת תחזוקה שתוצג ללקוח">${escapeHtml(txt('maintenance_message'))}</textarea>
 
+      <hr style="margin:1rem 0;border:none;border-top:1px solid var(--border)"/>
+      <fieldset style="border:1px solid var(--border);border-radius:6px;padding:0.75rem 1rem;margin:0">
+        <legend style="font-weight:600;padding:0 0.4rem">מדיניות תשלום ואישור הזמנה</legend>
+        <div class="set-row"><span>הפעל מדיניות תשלום (כבוי = שום שינוי ללקוחות)</span><input type="checkbox" id="s-policy" ${on('payment_policy_enabled') ? 'checked' : ''}/></div>
+        <div class="set-row" style="margin-top:0.6rem"><span>מילים ש"מזומן" (מופרד בפסיק, מ-PAYDES)</span></div>
+        <input id="s-policy-cash" type="text" placeholder="מזומן" value="${escapeHtml(txt('policy_cash_paydes_match') || 'מזומן')}" style="width:100%;box-sizing:border-box"/>
+        <div class="set-row" style="margin-top:0.6rem"><span>סף חוב פתוח לחסימת שוטף (₪, 0 = כל חוב לא-מכוסה חוסם)</span></div>
+        <input id="s-policy-debt" type="number" min="0" placeholder="0" value="${escapeHtml(txt('policy_net_debt_threshold') || '0')}" style="width:100%;box-sizing:border-box"/>
+      </fieldset>
+
       <button id="s-save" style="margin-top:1rem;width:100%">שמירת הגדרות</button>
       <div id="s-msg" style="margin-top:0.5rem;text-align:center"></div>
     </div>
@@ -55,6 +65,9 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         announcement_text: (c.querySelector('#s-ann-text') as HTMLTextAreaElement).value,
         maintenance_enabled: (c.querySelector('#s-maint') as HTMLInputElement).checked,
         maintenance_message: (c.querySelector('#s-maint-text') as HTMLTextAreaElement).value,
+        payment_policy_enabled: (c.querySelector('#s-policy') as HTMLInputElement).checked,
+        policy_cash_paydes_match: (c.querySelector('#s-policy-cash') as HTMLInputElement).value,
+        policy_net_debt_threshold: (c.querySelector('#s-policy-debt') as HTMLInputElement).value,
       });
       msg.textContent = '✓ ההגדרות נשמרו';
       msg.className = 'ok';

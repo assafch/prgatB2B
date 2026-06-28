@@ -1277,8 +1277,11 @@ const SETTABLE = new Set([
   'maintenance_message',
   'announcement_enabled',
   'announcement_text',
+  'payment_policy_enabled',
+  'policy_cash_paydes_match',
+  'policy_net_debt_threshold',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled']);
 
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
   res.json({ settings: getAllSettings() });
