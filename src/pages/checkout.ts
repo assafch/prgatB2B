@@ -16,6 +16,7 @@ interface HomeData {
   features: { payments: boolean };
   balance: { obligo: number | null; creditLimit: number | null };
   priorityOk: boolean;
+  paymentPolicy?: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
 }
 
 const HE_DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
@@ -70,6 +71,15 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
 
   const dates = deliveryOptions();
 
+  // Hard debt block — disables order submission when customer has open debt and policy blocks it.
+  const debtBlock = home?.paymentPolicy?.blocksOnDebt
+    ? `<div class="card" style="border:1px solid var(--err);background:#fdecec;margin-bottom:0.75rem">
+         <div style="font-weight:700;color:var(--err)">לא ניתן לבצע הזמנה — קיים חוב פתוח</div>
+         <div class="muted" style="font-size:0.9rem;margin-top:0.25rem">יש לסגור חוב פתוח של ₪${home.paymentPolicy!.netDebt.toFixed(2)} לפני ביצוע הזמנה.</div>
+         <a class="es-cta" href="#invoices" style="display:inline-block;margin-top:0.6rem">סגור חוב ←</a>
+       </div>`
+    : '';
+
   // Soft credit-limit warning (never blocks — the ERP is the real gate).
   let creditWarn = '';
   if (home?.priorityOk && home.balance.obligo != null && home.balance.creditLimit) {
@@ -100,6 +110,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
       </div>
     </div>
 
+    ${debtBlock}
     ${creditWarn}
 
     <div class="card">
@@ -135,6 +146,11 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
   const submitBtn = shell.querySelector('#submit') as HTMLButtonElement;
   const note = shell.querySelector('#order-note') as HTMLTextAreaElement;
   const msg = shell.querySelector('#msg') as HTMLDivElement;
+
+  if (home?.paymentPolicy?.blocksOnDebt) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'סגור חוב כדי להזמין';
+  }
 
   submitBtn.addEventListener('click', async () => {
     submitBtn.disabled = true;
