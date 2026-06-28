@@ -29,10 +29,12 @@ Tie **order approval** to the customer's **payment policy**:
 3. **Customer-type source:** **auto-derived from Priority `PAYDES`** (e.g. "מזומן"
    → cash, "שוטף"/"ש+30" → net-terms), with an **admin per-customer override**.
 4. **Net-terms with open debt:** **hard block** — cannot order until settled.
-   *Refined to be usable (see §6): block on **net debt** (openTotal minus pending
-   settlements) **above an admin-set threshold**, so a customer isn't trapped after
-   paying but before the office reconciles, and so within-terms balances can be
-   allowed if the owner sets a non-zero threshold.*
+   Block on **uncovered net debt** = `openTotal − pendingSettlement`. Key fact:
+   `openTotal` (Priority `ACC_DEBIT`) **already excludes post-dated cheques**
+   (`finance.ts:231` — "the customer already handed over the cheques"), so debt the
+   customer deferred via a delayed cheque does **not** block. Threshold default **0**
+   (block any *uncovered* debt). A **per-customer exemption flag**
+   (`allow_order_with_open_debt`) lets trusted customers order despite open debt.
 
 ## 3. Today's system (relevant facts)
 
@@ -93,7 +95,9 @@ function evaluate(custname: string, cartTotal: number): Promise<PolicyDecision>
 ## 5. Data model
 
 - **`customer_policies`** (new): `custname TEXT PRIMARY KEY, kind TEXT /*auto|cash|net|custom*/,
-  open_debt_threshold REAL, updated_at`. Absent row → `auto` (derive from PAYDES).
+  open_debt_threshold REAL, allow_order_with_open_debt INTEGER DEFAULT 0, updated_at`.
+  Absent row → `auto` (derive from PAYDES). `allow_order_with_open_debt=1` exempts the
+  customer from the net-debt block (§6a).
 - **`settings`** keys (global config, via existing `SETTABLE`/`BOOL_SETTINGS`):
   `payment_policy_enabled` (bool, default **false** — staged rollout),
   `policy_cash_paydes_match` (CSV of PAYDES substrings → cash, default "מזומן"),
@@ -110,9 +114,10 @@ function evaluate(custname: string, cartTotal: number): Promise<PolicyDecision>
 ## 6. Behavior
 
 ### 6a. Net-terms open-debt block (hard, server-enforced)
-At `submitOrder()`: if policy.blockOnOpenDebt and
-`openTotal − pendingSettlement(custname) > openDebtThreshold` → throw
-`OrderError(policy.messages.openDebt + " (₪<netDebt>)")`. The customer settles via
+At `submitOrder()`: if policy.blockOnOpenDebt **and not** `allow_order_with_open_debt`
+**and** `openTotal − pendingSettlement(custname) > openDebtThreshold` (default 0) →
+throw `OrderError(policy.messages.openDebt + " (₪<netDebt>)")`. `openTotal` already
+excludes post-dated cheques, so cheque-deferred debt never blocks. The customer settles via
 the **existing** B1/B2 pay surfaces (`#invoices`), then re-orders; the block lifts
 as soon as a card payment is confirmed or a cheque is submitted (pending settlement
 offsets the debt), without waiting for office reconciliation. Checkout shows the
