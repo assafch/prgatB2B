@@ -290,7 +290,8 @@ export async function submitOrder(
 export function listLocalOrders(userId: number): Array<Record<string, unknown>> {
   return db
     .prepare(
-      `SELECT id, custname, priority_ordname, status, total, details, created_at, submitted_at
+      `SELECT id, custname, priority_ordname, status, total, details, created_at, submitted_at,
+              payment_status, payment_required_amount, approved_at
        FROM orders_local
        WHERE user_id = ?
        ORDER BY created_at DESC
