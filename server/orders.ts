@@ -409,3 +409,42 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
   await approveOrder(orderId, 'check', checkId);
   return true;
 }
+
+const PENDING_TTL = '-48 hours';
+/** Delete abandoned held orders (pending_payment, no payment ever linked, older than
+ *  the TTL). Local-only — nothing was sent to Priority. Returns the count removed. */
+export function sweepPendingOrders(): number {
+  const stale = db.prepare(
+    `SELECT id FROM orders_local WHERE status = 'pending_payment' AND linked_payment_id IS NULL AND created_at < datetime('now', ?)`
+  ).all(PENDING_TTL) as { id: number }[];
+  const delLines = db.prepare('DELETE FROM order_lines WHERE order_id = ?');
+  const delOrder = db.prepare('DELETE FROM orders_local WHERE id = ?');
+  const tx = db.transaction(() => { for (const o of stale) { delLines.run(o.id); delOrder.run(o.id); } });
+  tx();
+  return stale.length;
+}
+
+/** Re-send a paid-but-unsent order to Priority (recovery for a Priority outage after
+ *  payment: payment_status='approved' while priority_ordname is still null). */
+export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolean; ordname?: string; error?: string }> {
+  const order = db.prepare(`SELECT id, payment_status, priority_ordname FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; payment_status: string; priority_ordname: string | null } | undefined;
+  if (!order) return { ok: false, error: 'not found' };
+  if (order.priority_ordname) return { ok: true, ordname: order.priority_ordname };
+  if (order.payment_status !== 'approved') return { ok: false, error: 'not paid' };
+  try {
+    const ordname = await sendHeldOrderToPriority(orderId);
+    db.prepare(`UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now'), error = NULL WHERE id = ?`).run(ordname, orderId);
+    return { ok: true, ordname };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Paid orders that never reached Priority (admin recovery queue). */
+export function listStuckOrders(): Array<Record<string, unknown>> {
+  return db.prepare(
+    `SELECT id, custname, status, total, payment_status, created_at, error FROM orders_local
+     WHERE payment_status = 'approved' AND priority_ordname IS NULL ORDER BY created_at DESC LIMIT 100`
+  ).all() as Array<Record<string, unknown>>;
+}

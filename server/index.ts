@@ -58,11 +58,14 @@ import {
   getLocalOrder,
   listLocalOrders,
   listPriorityOrders,
+  listStuckOrders,
   OrderError,
   payHeldOrderByCheck,
   reorderToCart,
+  resendApprovedOrder,
   setCartLine,
   submitOrder,
+  sweepPendingOrders,
 } from './orders.js';
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
@@ -1496,6 +1499,12 @@ app.delete('/api/admin/products/:partname/image', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/admin/orders/stuck', requireAdmin, (req, res) => { res.json({ orders: listStuckOrders() }); });
+app.post('/api/admin/orders/:id/resend', requireAdmin, ah(async (req, res) => {
+  const r = await resendApprovedOrder(Number(req.params.id));
+  res.status(r.ok ? 200 : 400).json(r);
+}));
+
 app.get('/api/admin/dashboard', requireAdmin, (_req, res) => {
   const stats = {
     users: (db.prepare(`SELECT COUNT(*) as c FROM users WHERE role='customer'`).get() as any).c,
@@ -1563,6 +1572,9 @@ async function startup() {
   // Abandoned cheque drafts (+ their encrypted images): sweep at boot and hourly.
   sweepDraftChecks();
   setInterval(() => sweepDraftChecks(), 3600_000).unref();
+  // Abandoned held orders (pending_payment, never linked): sweep at boot and hourly.
+  sweepPendingOrders();
+  setInterval(() => sweepPendingOrders(), 3600_000).unref();
   // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
   scheduleSnapshots();
   app.listen(PORT, () => {
