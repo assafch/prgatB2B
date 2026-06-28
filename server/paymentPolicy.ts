@@ -1,5 +1,7 @@
 // Payment-policy engine. PURE decision helpers here have NO DB/IO so they are unit-
 // testable; the DB-backed resolve/evaluate live in later tasks. Spec: 2026-06-28-payment-policy.
+import { db, getSetting, getSettingBool } from './db.js';
+
 export type PolicyKind = 'cash' | 'net';
 export interface Policy {
   kind: PolicyKind;
@@ -37,3 +39,37 @@ export function decide(policy: Policy, netDebt: number, cartTotal: number): Poli
 }
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+const SETTING_KEYS = {
+  enabled: 'payment_policy_enabled',
+  cashMatch: 'policy_cash_paydes_match', // CSV of PAYDES substrings → cash
+  netThreshold: 'policy_net_debt_threshold',
+} as const;
+
+export function policyEnabled(): boolean {
+  return getSettingBool(SETTING_KEYS.enabled, false);
+}
+function cashMatchList(): string[] {
+  return (getSetting(SETTING_KEYS.cashMatch) || 'מזומן').split(',').map((s) => s.trim()).filter(Boolean);
+}
+function globalThreshold(): number {
+  const v = Number(getSetting(SETTING_KEYS.netThreshold));
+  return isFinite(v) && v >= 0 ? v : 0;
+}
+
+interface PolicyRow { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number }
+
+/** Resolve a customer's effective policy: auto-derive from PAYDES, then apply the
+ *  per-customer customer_policies override (kind + threshold + exemption). */
+export function resolvePolicy(custname: string, paymentTerms: string | null): Policy {
+  const row = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(custname) as PolicyRow | undefined;
+  const overrideKind = row && row.kind !== 'auto' && (row.kind === 'cash' || row.kind === 'net') ? (row.kind as PolicyKind) : null;
+  const kind = overrideKind ?? derivePolicyKind(paymentTerms, cashMatchList());
+  return {
+    kind,
+    requirePaymentBeforeApproval: kind === 'cash',
+    blockOnOpenDebt: kind === 'net',
+    openDebtThreshold: row && row.open_debt_threshold != null ? row.open_debt_threshold : globalThreshold(),
+    allowOrderWithOpenDebt: !!(row && row.allow_order_with_open_debt),
+  };
+}
