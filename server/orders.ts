@@ -368,19 +368,29 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
   const order = db.prepare(`SELECT id, user_id, status FROM orders_local WHERE id = ?`).get(orderId) as
     | { id: number; user_id: number; status: string } | undefined;
   if (!order || order.status !== 'pending_payment') return;
-  db.prepare(
-    `UPDATE orders_local SET payment_status = 'approved', linked_payment_kind = ?, linked_payment_id = ?, approved_at = datetime('now') WHERE id = ?`
+  // Atomically CLAIM the order (pending_payment → submitting) so a concurrent/duplicate
+  // confirm cannot double-send the same order to Priority — only the caller whose UPDATE
+  // actually flips the row proceeds.
+  const claimed = db.prepare(
+    `UPDATE orders_local SET status = 'submitting', payment_status = 'approved', linked_payment_kind = ?, linked_payment_id = ?, approved_at = datetime('now')
+     WHERE id = ? AND status = 'pending_payment'`
   ).run(kind, paymentId, orderId);
+  if (claimed.changes !== 1) return; // another confirm already claimed it
   let ordname: string;
   try {
     ordname = await sendHeldOrderToPriority(orderId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Payment IS taken — keep payment_status='approved' so it's recoverable (admin resend, Phase 3b).
     db.prepare(`UPDATE orders_local SET status = 'failed', error = ? WHERE id = ?`).run(msg, orderId);
     return;
   }
   db.prepare(
     `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now') WHERE id = ?`
   ).run(ordname, orderId);
-  notifyUser(order.user_id, { title: 'ההזמנה אושרה ✓', body: `התשלום התקבל — הזמנה ${ordname} נשלחה`, url: '#orders' });
+  try {
+    notifyUser(order.user_id, { title: 'ההזמנה אושרה ✓', body: `התשלום התקבל — הזמנה ${ordname} נשלחה`, url: '#orders' });
+  } catch (err) {
+    console.warn('[orders] notifyUser failed:', err);
+  }
 }
