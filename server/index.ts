@@ -70,6 +70,7 @@ import {
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
+import { listCustomersAdmin } from './customers.js';
 import { getAccountSummary, getInvoices, getInvoiceDetail, getUnpaidInvoices, warmFinance } from './finance.js';
 import {
   bulkUpdate,
@@ -1364,6 +1365,14 @@ app.post('/api/admin/users/:id/status', requireAdmin, (req: AuthedRequest, res) 
   }
   const result = setUserStatus(Number(req.params.id), status);
   res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true } : { error: result.error });
+});
+
+// ---------- Admin: company list (group-by custname, cached finance, resolved policy) ----------
+app.get('/api/admin/customers', requireAdmin, (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  const page = Math.max(0, Number(req.query.page) || 0);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+  res.json(listCustomersAdmin(q, page, pageSize));
 });
 
 // ---------- Admin: per-customer payment policy ----------
