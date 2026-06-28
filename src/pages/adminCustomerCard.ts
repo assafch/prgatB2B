@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { escapeHtml } from '../format.js';
+import { escapeHtml, escapeAttr } from '../format.js';
 import { toast } from '../ui.js';
 
 interface CustomerCardUser {
@@ -41,7 +41,7 @@ function roleLabel(role: string): string {
 
 function statusLabel(status: string): string {
   if (status === 'active') return '<span class="ok">פעיל</span>';
-  if (status === 'inactive') return '<span class="muted">לא פעיל</span>';
+  if (status === 'inactive' || status === 'disabled') return '<span class="chip error">מושבת</span>';
   return escapeHtml(status);
 }
 
@@ -70,7 +70,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
       </div>`
     : `<div class="muted">נתוני Priority לא זמינים</div>`;
 
-  const usersHtml =
+  const usersTableHtml =
     d.users.length === 0
       ? `<div class="muted">אין משתמשים רשומים</div>`
       : `<table style="width:100%;border-collapse:collapse;font-size:0.9rem">
@@ -80,6 +80,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
               <th style="padding:0.4rem 0.5rem">תפקיד</th>
               <th style="padding:0.4rem 0.5rem">סטטוס</th>
               <th style="padding:0.4rem 0.5rem">כניסה אחרונה</th>
+              <th style="padding:0.4rem 0.5rem">פעולות</th>
             </tr>
           </thead>
           <tbody>
@@ -91,12 +92,36 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
                 <td style="padding:0.4rem 0.5rem">${roleLabel(u.customer_role)}</td>
                 <td style="padding:0.4rem 0.5rem">${statusLabel(u.status)}</td>
                 <td style="padding:0.4rem 0.5rem">${u.last_login_at ? new Date(u.last_login_at + 'Z').toLocaleString('he-IL') : '—'}</td>
+                <td style="padding:0.4rem 0.5rem;white-space:nowrap">
+                  ${
+                    u.customer_role !== 'admin'
+                      ? `<button class="ghost cc-u-reset" data-id="${u.id}" data-name="${escapeAttr(u.username)}" style="font-size:0.8rem">איפוס סיסמה</button>
+                         <button class="ghost cc-u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}" style="font-size:0.8rem">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>`
+                      : '<span class="badge warn">מנהל</span>'
+                  }
+                </td>
               </tr>`
               )
               .join('')}
           </tbody>
-        </table>
-        <!-- TODO Task 5: user management actions here -->`;
+        </table>`;
+
+  const usersHtml = `
+    ${usersTableHtml}
+    <div id="cc-umsg" style="margin-top:0.5rem;text-align:center"></div>
+    <details style="margin-top:1rem">
+      <summary style="cursor:pointer;font-weight:600;color:var(--primary,#1a5eb8)">+ משתמש חדש</summary>
+      <div style="margin-top:0.6rem;display:flex;flex-direction:column;gap:0.5rem">
+        <div class="form-grid">
+          <input id="cc-nu-username" placeholder="שם משתמש"/>
+          <input id="cc-nu-password" type="password" placeholder="סיסמה (10+ תווים)"/>
+          <input id="cc-nu-email" type="email" placeholder="אימייל (אופציונלי)"/>
+          <input id="cc-nu-phone" placeholder="טלפון (אופציונלי)"/>
+        </div>
+        <button id="cc-nu-create">צור משתמש</button>
+        <div id="cc-nu-msg" style="text-align:center"></div>
+      </div>
+    </details>`;
 
   shell.innerHTML = `
     <div style="margin-bottom:1rem">
@@ -192,4 +217,65 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
       saveBtn.disabled = false;
     }
   });
+
+  // --- User management ---
+  const umsg = shell.querySelector('#cc-umsg') as HTMLDivElement;
+
+  shell.querySelectorAll<HTMLButtonElement>('.cc-u-reset').forEach((b) => {
+    b.onclick = async () => {
+      const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (10+ תווים):`);
+      if (!np) return;
+      umsg.textContent = 'מאפס…';
+      umsg.className = 'muted';
+      try {
+        await api.post(`/api/admin/users/${b.dataset.id}/reset-password`, { new_password: np });
+        toast('הסיסמה אופסה ✓ (החיבורים הקיימים נותקו)', 'ok');
+        umsg.textContent = '';
+      } catch (ex) {
+        umsg.textContent = ex instanceof Error ? ex.message : String(ex);
+        umsg.className = 'error';
+      }
+    };
+  });
+
+  shell.querySelectorAll<HTMLButtonElement>('.cc-u-toggle').forEach((b) => {
+    b.onclick = async () => {
+      const next = b.dataset.status === 'active' ? 'disabled' : 'active';
+      umsg.textContent = 'מעדכן…';
+      umsg.className = 'muted';
+      try {
+        await api.post(`/api/admin/users/${b.dataset.id}/status`, { status: next });
+        const fresh = await api.get<CustomerCard>(`/api/admin/customers/${encodeURIComponent(d.custname)}`);
+        renderCard(shell, fresh);
+      } catch (ex) {
+        umsg.textContent = ex instanceof Error ? ex.message : String(ex);
+        umsg.className = 'error';
+      }
+    };
+  });
+
+  const nuCreate = shell.querySelector('#cc-nu-create') as HTMLButtonElement | null;
+  const nuMsg = shell.querySelector('#cc-nu-msg') as HTMLDivElement | null;
+  if (nuCreate && nuMsg) {
+    nuCreate.onclick = async () => {
+      nuCreate.disabled = true;
+      nuMsg.textContent = 'יוצר…';
+      nuMsg.className = 'muted';
+      try {
+        await api.post('/api/admin/users', {
+          username: (shell.querySelector('#cc-nu-username') as HTMLInputElement).value.trim(),
+          password: (shell.querySelector('#cc-nu-password') as HTMLInputElement).value,
+          custname: d.custname,
+          cust_desc: d.cust_desc ?? '',
+        });
+        toast('המשתמש נוצר ✓', 'ok');
+        const fresh = await api.get<CustomerCard>(`/api/admin/customers/${encodeURIComponent(d.custname)}`);
+        renderCard(shell, fresh);
+      } catch (ex) {
+        nuMsg.textContent = ex instanceof Error ? ex.message : String(ex);
+        nuMsg.className = 'error';
+        nuCreate.disabled = false;
+      }
+    };
+  }
 }
