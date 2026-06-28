@@ -334,6 +334,9 @@ ensureColumn('catalog_cache', 'b2b_min_qty', 'INTEGER');
 ensureColumn('catalog_cache', 'b2b_sort_priority', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('catalog_cache', 'b2b_featured', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('catalog_cache', 'b2b_category_override', 'TEXT');
+// Manual admin "out of stock" override (אזל מהמלאי). 1 = out of stock (grayed,
+// un-orderable); 0 = in stock. Independent of the unused Priority `stock` column.
+ensureColumn('catalog_cache', 'b2b_out_of_stock', 'INTEGER NOT NULL DEFAULT 0');
 // Promotions table predates the current engine; add the columns it needs (the old
 // x_/y_ columns stay, unused). params holds the per-type rule JSON.
 ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");

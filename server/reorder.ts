@@ -74,8 +74,8 @@ export function getReorderSuggestions(
   const out: ReorderSuggestion[] = [];
   for (const [partname, agg] of byPart) {
     const prod = getProduct(partname, custname);
-    // Re-validate: skip anything no longer active/visible or without a usable price.
-    if (!prod || typeof prod.price !== 'number' || prod.price <= 0) continue;
+    // Re-validate: skip anything no longer active/visible, out of stock, or without a usable price.
+    if (!prod || prod.outOfStock || typeof prod.price !== 'number' || prod.price <= 0) continue;
     out.push({
       partname,
       partdes: prod.partdes,

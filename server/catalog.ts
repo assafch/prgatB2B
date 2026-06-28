@@ -227,6 +227,17 @@ export interface CatalogItem {
   min_qty: number;
   featured: number;
   description: string | null;
+  /** true → "אזל מהמלאי": shown grayed, cannot be added to the cart. The customer
+   *  never sees a numeric stock level — only this boolean. */
+  outOfStock: boolean;
+}
+
+/** Single source of truth for product availability. Today: the manual admin
+ *  override only. FUTURE (out of scope): also treat Priority numeric `stock` <= 0
+ *  as out of stock, with the manual override winning. Keep this the only place the
+ *  rule lives, so that change is local. */
+export function isOutOfStock(row: { b2b_out_of_stock: number }): boolean {
+  return row.b2b_out_of_stock === 1;
 }
 
 export function queryCatalog(
@@ -285,7 +296,7 @@ export function queryCatalog(
     .prepare(
       `SELECT c.partname, c.partdes, c.family, c.family_desc, c.barcode, c.list_price, c.image_url, c.box_size,
               c.b2b_partdes_override, c.b2b_image_path, c.b2b_min_qty, c.b2b_featured, c.b2b_description,
-              c.b2b_category_override,
+              c.b2b_category_override, c.b2b_out_of_stock,
               p.price AS personal_price${scoreSelect}
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
@@ -308,6 +319,7 @@ export function queryCatalog(
       b2b_featured: number;
       b2b_description: string | null;
       b2b_category_override: string | null;
+      b2b_out_of_stock: number;
       personal_price: number | null;
     }>;
 
@@ -324,6 +336,7 @@ export function queryCatalog(
     featured: r.b2b_featured,
     description: r.b2b_description,
     price: usePersonal ? r.personal_price ?? r.list_price : r.list_price,
+    outOfStock: isOutOfStock(r),
   }));
 
   return { items, total };
@@ -334,7 +347,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     .prepare(
       `SELECT c.partname, c.partdes, c.family, c.family_desc, c.barcode, c.list_price, c.image_url, c.box_size,
               c.b2b_partdes_override, c.b2b_image_path, c.b2b_min_qty, c.b2b_featured, c.b2b_description,
-              c.b2b_category_override, c.b2b_visible, c.active,
+              c.b2b_category_override, c.b2b_out_of_stock, c.b2b_visible, c.active,
               p.price AS personal_price
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
@@ -356,6 +369,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
         b2b_featured: number;
         b2b_description: string | null;
         b2b_category_override: string | null;
+        b2b_out_of_stock: number;
         b2b_visible: number;
         active: number;
         personal_price: number | null;
@@ -377,6 +391,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     featured: row.b2b_featured,
     description: row.b2b_description,
     price: usePersonal ? row.personal_price ?? row.list_price : row.list_price,
+    outOfStock: isOutOfStock(row),
   };
 }
 

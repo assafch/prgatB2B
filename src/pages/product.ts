@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
-import { toast } from '../ui.js';
+import { toast, oosBadge } from '../ui.js';
 import { refreshCartCount } from '../main.js';
 import { showUpsell } from './upsell.js';
 
@@ -14,14 +14,17 @@ interface Product {
   list_price: number | null;
   image_url: string | null;
   box_size: number;
+  outOfStock?: boolean;
 }
 
 export async function renderProduct(shell: HTMLElement, partname: string): Promise<void> {
   shell.innerHTML = `<div class="muted">טוען…</div>`;
   try {
     const p = await api.get<Product>(`/api/catalog/${encodeURIComponent(partname)}`);
+    const oos = !!p.outOfStock;
+    const d = oos ? ' disabled' : '';
     shell.innerHTML = `
-      <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
+      <div class="card${oos ? ' is-oos' : ''}" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
         <div style="aspect-ratio:1;background:#f3f4f6;border-radius:8px;display:grid;place-items:center;color:#9ca3af">
           ${p.image_url ? `<img src="${escapeAttr(p.image_url)}" style="max-width:100%;max-height:100%"/>` : 'אין תמונה'}
         </div>
@@ -35,15 +38,16 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
           ${p.family ? `<div class="muted">משפחה: ${escapeHtml(p.family_desc || p.family)}</div>` : ''}
           <div style="margin:1rem 0;font-size:1.5rem;font-weight:700;color:var(--brand)">
             ${p.price != null ? `₪${p.price.toFixed(2)}` : 'צור קשר למחיר'}
+            ${oos ? '<div style="margin-top:0.4rem">' + oosBadge() + '</div>' : ''}
           </div>
           <div class="muted" style="margin-bottom:0.5rem">ארגז: ${p.box_size} יחידות</div>
           <div style="display:flex;gap:0.5rem;align-items:stretch">
             <div style="display:flex;flex-direction:column;gap:1px">
-              <button id="step-up" title="הוסף ${p.box_size}" style="padding:0 0.55rem;height:1.2rem;line-height:1;font-size:0.75rem">▲</button>
-              <button id="step-down" title="הפחת ${p.box_size}" style="padding:0 0.55rem;height:1.2rem;line-height:1;font-size:0.75rem">▼</button>
+              <button id="step-up" title="הוסף ${p.box_size}" style="padding:0 0.55rem;height:1.2rem;line-height:1;font-size:0.75rem"${d}>▲</button>
+              <button id="step-down" title="הפחת ${p.box_size}" style="padding:0 0.55rem;height:1.2rem;line-height:1;font-size:0.75rem"${d}>▼</button>
             </div>
-            <input type="number" id="qty" min="0" step="1" value="${p.box_size}" style="width:80px;text-align:center"/>
-            <button id="add">הוסף לסל</button>
+            <input type="number" id="qty" min="0" step="1" value="${p.box_size}" style="width:80px;text-align:center"${d}/>
+            <button id="add"${d}>${oos ? 'אזל מהמלאי' : 'הוסף לסל'}</button>
           </div>
           <div id="msg" style="margin-top:0.5rem"></div>
           <p style="margin-top:1.5rem"><a href="#catalog">← חזרה לקטלוג</a></p>

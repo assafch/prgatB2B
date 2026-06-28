@@ -146,6 +146,12 @@ export function buzz(ms = 10): void {
   }
 }
 
+// ---- Out-of-stock (אזל מהמלאי) — shared label + badge so every surface matches ----
+export const OOS_LABEL = 'אזל מהמלאי';
+export function oosBadge(): string {
+  return `<span class="oos-badge">${OOS_LABEL}</span>`;
+}
+
 // A 44×44px quantity stepper. `part` is escaped for the data-attribute.
 export function qtyStepper(part: string, value: number, step: number): string {
   const p = escapeHtml(part);

@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
-import { toast, openSheet, closeSheet, buzz } from '../ui.js';
+import { toast, openSheet, closeSheet, buzz, oosBadge, OOS_LABEL } from '../ui.js';
 import { refreshCartCount, state as app } from '../main.js';
 import { showUpsell } from './upsell.js';
 
@@ -13,6 +13,7 @@ interface CatalogItem {
   price: number | null;
   image_url: string | null;
   box_size: number;
+  outOfStock?: boolean; // "אזל מהמלאי" — grayed, cannot be added
 }
 
 interface Family {
@@ -218,7 +219,9 @@ function bindDelegation(shell: HTMLElement): void {
     if (localStorage.getItem('add_mode') === 'stepper') return;
     if (t.closest('a, button, input, .stepper, .cat-stepper')) return;
     const card = t.closest('.cat-card, .cat-row') as HTMLElement | null;
-    if (card?.dataset.part) openQtyKeypad(card, shell);
+    if (!card?.dataset.part) return;
+    if (card.dataset.oos === '1') { toast(OOS_LABEL, 'info'); return; } // out of stock — no keypad
+    openQtyKeypad(card, shell);
   });
 }
 
@@ -383,6 +386,7 @@ function bindSwipe(shell: HTMLElement): void {
 }
 
 async function addBoxFromSwipe(card: HTMLElement, shell: HTMLElement): Promise<void> {
+  if (card.dataset.oos === '1') { toast(OOS_LABEL, 'info'); return; } // out of stock — swipe is a no-op
   const part = card.dataset.part!;
   const box = Math.max(1, Number(card.dataset.box) || 1);
   try {
@@ -523,12 +527,13 @@ function priceHtml(it: CatalogItem): string {
 
 function stepperHtml(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
+  const d = it.outOfStock ? ' disabled' : '';
   return `
     <div class="cat-row-buy">
-      <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
-      <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
-      <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
-      <button class="add" data-part="${p}">הוסף</button>
+      <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת"${d}>−</button>
+      <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"${d}/>
+      <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף"${d}>+</button>
+      <button class="add" data-part="${p}"${d}>הוסף</button>
     </div>`;
 }
 
@@ -537,8 +542,10 @@ function stepperHtml(it: CatalogItem): string {
 function gridCard(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
   const enc = encodeURIComponent(it.partname);
+  const oos = !!it.outOfStock;
+  const d = oos ? ' disabled' : '';
   return `
-    <div class="card cat-card" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}">
+    <div class="card cat-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
       <button class="fav fav-card ${favSet.has(it.partname) ? 'on' : ''}" data-part="${p}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       <div class="cat-card-top">
         <a class="cat-card-info" href="#product/${enc}">
@@ -547,14 +554,14 @@ function gridCard(it: CatalogItem): string {
         </a>
         <a class="cat-card-thumb" href="#product/${enc}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
       </div>
-      <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
+      <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span>${oos ? ' ' + oosBadge() : ''}</div>
       <div class="cat-card-buy">
         <div class="cat-stepper">
-          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
-          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
-          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
+          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת"${d}>−</button>
+          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"${d}/>
+          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף"${d}>+</button>
         </div>
-        <button class="add" data-part="${p}">הוסף</button>
+        <button class="add" data-part="${p}"${d}>הוסף</button>
       </div>
     </div>`;
 }
@@ -562,10 +569,11 @@ function gridCard(it: CatalogItem): string {
 // Roomy two-row mobile list row: [thumb · name/SKU · ♥] then [price ... stepper + add].
 function listRow(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
+  const oos = !!it.outOfStock;
   return `
     <div class="swipe-wrap">
       <div class="swipe-bg" aria-hidden="true">＋ ארגז</div>
-      <div class="card cat-row swipe-card" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}">
+      <div class="card cat-row swipe-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
       <div class="cat-row-top">
         <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
         <a class="cat-row-name" href="#product/${encodeURIComponent(it.partname)}">
@@ -575,7 +583,7 @@ function listRow(it: CatalogItem): string {
         <button class="fav ${favSet.has(it.partname) ? 'on' : ''}" data-part="${escapeAttr(it.partname)}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       </div>
       <div class="cat-row-bottom">
-        <div class="cat-row-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
+        <div class="cat-row-price">${priceHtml(it)}<span class="muted"> ליח׳</span>${oos ? ' ' + oosBadge() : ''}</div>
         ${stepperHtml(it)}
       </div>
       </div>

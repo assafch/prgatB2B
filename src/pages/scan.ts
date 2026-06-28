@@ -8,6 +8,7 @@ interface Item {
   partdes: string | null;
   price: number | null;
   box_size: number;
+  outOfStock?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,6 +56,11 @@ export async function renderScan(shell: HTMLElement): Promise<void> {
     busy = true;
     try {
       const { item } = await api.get<{ item: Item }>(`/api/catalog/barcode/${encodeURIComponent(code)}`);
+      if (item.outOfStock) {
+        toast(`${item.partdes || item.partname} — אזל מהמלאי, אינו זמין להזמנה`, 'error');
+        found.innerHTML = `<div class="card is-oos"><b>${escapeHtml(item.partdes || item.partname)}</b> — אזל מהמלאי</div>`;
+        return;
+      }
       await api.put(`/api/cart/lines/${encodeURIComponent(item.partname)}`, { quantity: item.box_size, mode: 'add' });
       await refreshCartCount();
       toast(`✓ ${item.partdes || item.partname} ×${item.box_size}`, 'ok');

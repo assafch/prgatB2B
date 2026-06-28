@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
-import { toast, emptyState, skeleton } from '../ui.js';
+import { toast, emptyState, skeleton, oosBadge } from '../ui.js';
 import { refreshCartCount } from '../main.js';
 
 interface Item {
@@ -9,12 +9,15 @@ interface Item {
   price: number | null;
   image_url: string | null;
   box_size: number;
+  outOfStock?: boolean;
 }
 
 function row(it: Item): string {
   const p = escapeAttr(it.partname);
+  const oos = !!it.outOfStock;
+  const d = oos ? ' disabled' : '';
   return `
-    <div class="card cat-row" data-part="${p}">
+    <div class="card cat-row${oos ? ' is-oos' : ''}" data-part="${p}">
       <div class="cat-row-top">
         <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
         <a class="cat-row-name" href="#product/${encodeURIComponent(it.partname)}">
@@ -24,12 +27,12 @@ function row(it: Item): string {
         <button class="fav on" data-part="${p}" type="button" aria-label="הסר ממועדפים">♥</button>
       </div>
       <div class="cat-row-bottom">
-        <div class="cat-row-price">${it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>'}<span class="muted"> ליח׳</span></div>
+        <div class="cat-row-price">${it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>'}<span class="muted"> ליח׳</span>${oos ? ' ' + oosBadge() : ''}</div>
         <div class="cat-row-buy">
-          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
-          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
-          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
-          <button class="add" data-part="${p}">הוסף</button>
+          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת"${d}>−</button>
+          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"${d}/>
+          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף"${d}>+</button>
+          <button class="add" data-part="${p}"${d}>הוסף</button>
         </div>
       </div>
     </div>`;

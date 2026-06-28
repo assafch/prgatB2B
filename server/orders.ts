@@ -11,8 +11,11 @@ export interface CartLine {
   quantity: number;
   price: number | null;
   line_total: number;
-  /** false when the item is no longer active+visible in the catalog (kept so the user can remove it). */
+  /** false when the item is no longer active+visible in the catalog, OR is marked
+   *  out of stock (kept so the user can remove it; blocks checkout). */
   available: boolean;
+  /** true → marked "אזל מהמלאי" (drives the badge; also forces available=false). */
+  outOfStock: boolean;
 }
 
 const MAX_LINE_QTY = 9999;
@@ -40,7 +43,8 @@ export function getCart(userId: number, custname: string): CartResult {
       quantity: r.quantity,
       price,
       line_total: lineTotal,
-      available: prod !== null,
+      available: prod !== null && !prod.outOfStock,
+      outOfStock: prod?.outOfStock ?? false,
     });
   }
   const promotions = applyPromotions(
@@ -80,6 +84,12 @@ export function setCartLine(
   // partname (including hidden/internal SKUs) and push it into the ERP order.
   const prod = getProduct(partname, custname);
   if (!prod) throw new OrderError('המוצר אינו זמין להזמנה');
+  // Out-of-stock (אזל מהמלאי) items may not be ADDED. mode 'set' is intentionally
+  // allowed so a customer can still reduce/remove one that was added before it went
+  // out of stock — this is the single chokepoint every add path funnels through.
+  if (mode === 'add' && prod.outOfStock) {
+    throw new OrderError('המוצר אזל מהמלאי — אינו זמין להזמנה');
+  }
   // Unpriceable items are rejected at ADD time, not only at submit — otherwise the
   // cart accumulates lines that doom the whole order later (review finding).
   if (typeof prod.price !== 'number' || prod.price <= 0) {
@@ -163,6 +173,9 @@ export async function submitOrder(
     const prod = getProduct(ln.partname, custname);
     if (!prod) {
       throw new OrderError(`המוצר "${ln.partdes ?? ln.partname}" אינו זמין עוד — הסירו אותו מהסל`);
+    }
+    if (prod.outOfStock) {
+      throw new OrderError(`המוצר "${prod.partdes ?? ln.partname}" אזל מהמלאי — הסירו אותו מהסל`);
     }
     if (typeof prod.price !== 'number' || prod.price <= 0) {
       throw new OrderError(
@@ -289,7 +302,7 @@ export function reorderToCart(userId: number, custname: string, orderId: number)
     // Skip items that have since been hidden/deactivated/lost their price instead
     // of failing the whole reorder.
     const prod = getProduct(ln.partname, custname);
-    if (!prod || typeof prod.price !== 'number' || prod.price <= 0) continue;
+    if (!prod || prod.outOfStock || typeof prod.price !== 'number' || prod.price <= 0) continue;
     setCartLine(userId, custname, ln.partname, ln.quantity);
     added++;
   }

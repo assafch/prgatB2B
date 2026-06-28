@@ -35,6 +35,7 @@ export interface AdminProductRow {
   b2b_sort_priority: number;
   b2b_featured: number;
   b2b_category_override: string | null;
+  b2b_out_of_stock: number;
   updated_at: string;
 }
 
@@ -92,7 +93,7 @@ export function listProductsAdmin(q: ListQuery): { items: AdminProductRow[]; tot
     .prepare(
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
-              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, updated_at
+              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock, updated_at
        FROM catalog_cache
        ${where}
        ORDER BY b2b_sort_priority DESC, partdes ASC
@@ -108,7 +109,7 @@ export function getProductAdmin(partname: string): AdminProductRow | null {
     .prepare(
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
-              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, updated_at
+              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock, updated_at
        FROM catalog_cache WHERE partname = ?`
     )
     .get(partname) as AdminProductRow | undefined) ?? null;
@@ -123,6 +124,7 @@ const PATCHABLE_COLUMNS = new Set([
   'b2b_sort_priority',
   'b2b_featured',
   'b2b_category_override',
+  'b2b_out_of_stock',
   'box_size',
 ]);
 
@@ -190,7 +192,7 @@ export function deleteImage(partname: string): void {
 
 export interface BulkPayload {
   partnames: string[];
-  action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature';
+  action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature' | 'mark_out_of_stock' | 'mark_in_stock';
   value?: number;
 }
 
@@ -211,6 +213,12 @@ export function bulkUpdate(payload: BulkPayload): number {
       break;
     case 'unfeature':
       setClause = 'b2b_featured = 0';
+      break;
+    case 'mark_out_of_stock':
+      setClause = 'b2b_out_of_stock = 1';
+      break;
+    case 'mark_in_stock':
+      setClause = 'b2b_out_of_stock = 0';
       break;
     case 'set_box_size':
       if (!Number.isFinite(payload.value) || (payload.value ?? 0) <= 0) return 0;
@@ -251,6 +259,7 @@ const CSV_COLUMNS = [
   'b2b_sort_priority',
   'b2b_featured',
   'b2b_category_override',
+  'b2b_out_of_stock',
 ];
 
 export function exportCsv(): string {
@@ -296,6 +305,8 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
       if ('b2b_featured' in row && row.b2b_featured !== '')
         patch.b2b_featured = ['1', 'true', 'yes', 'y'].includes(row.b2b_featured.toLowerCase()) ? 1 : 0;
       if ('b2b_category_override' in row) patch.b2b_category_override = row.b2b_category_override || null;
+      if ('b2b_out_of_stock' in row && row.b2b_out_of_stock !== '')
+        patch.b2b_out_of_stock = ['1', 'true', 'yes', 'y'].includes(row.b2b_out_of_stock.toLowerCase()) ? 1 : 0;
 
       if (Object.keys(patch).length === 0) {
         skipped++;

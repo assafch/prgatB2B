@@ -19,6 +19,7 @@ interface AdminProduct {
   b2b_sort_priority: number;
   b2b_featured: number;
   b2b_category_override: string | null;
+  b2b_out_of_stock: number;
   updated_at: string;
 }
 
@@ -60,6 +61,8 @@ export async function renderAdminProducts(shell: HTMLElement): Promise<void> {
           <button class="ghost" data-bulk="show">הצג</button>
           <button class="ghost" data-bulk="feature">סמן כמומלצים</button>
           <button class="ghost" data-bulk="unfeature">בטל מומלצים</button>
+          <button class="ghost" data-bulk="mark_out_of_stock">סמן כאזל מהמלאי</button>
+          <button class="ghost" data-bulk="mark_in_stock">סמן כקיים במלאי</button>
           <button class="ghost" data-bulk="set_box_size">עדכן גודל ארגז…</button>
           <button class="ghost" data-bulk="set_min_qty">עדכן מינ׳ הזמנה…</button>
         </div>
@@ -253,6 +256,9 @@ function renderRow(p: AdminProduct): string {
     p.b2b_featured
       ? '<span style="background:#ffeed1;color:#9c5500;padding:1px 6px;border-radius:4px;font-size:0.75rem">⭐</span>'
       : '',
+    p.b2b_out_of_stock
+      ? '<span style="background:#ffe3e3;color:#c0341e;padding:1px 6px;border-radius:4px;font-size:0.75rem">אזל מהמלאי</span>'
+      : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -430,6 +436,9 @@ async function openDrawer(shell: HTMLElement, partname: string): Promise<void> {
         <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
           <input type="checkbox" name="b2b_featured" ${p.b2b_featured ? 'checked' : ''}/> ⭐ מומלץ (קופץ קדימה)
         </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+          <input type="checkbox" name="b2b_out_of_stock" ${p.b2b_out_of_stock ? 'checked' : ''}/> 🚫 אזל מהמלאי (לא ניתן להזמנה)
+        </label>
         <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
           <button type="submit">שמור</button>
           <button type="button" class="ghost" id="drawer-cancel">סגור</button>
@@ -491,6 +500,7 @@ async function openDrawer(shell: HTMLElement, partname: string): Promise<void> {
         b2b_category_override: String(fd.get('b2b_category_override') || ''),
         b2b_visible: fd.get('b2b_visible') === 'on',
         b2b_featured: fd.get('b2b_featured') === 'on',
+        b2b_out_of_stock: fd.get('b2b_out_of_stock') === 'on',
       };
       try {
         await api.patch(`/api/admin/products/${encodeURIComponent(p.partname)}`, patch);

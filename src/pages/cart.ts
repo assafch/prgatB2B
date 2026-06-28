@@ -10,6 +10,7 @@ interface CartLine {
   price: number | null;
   line_total: number;
   available: boolean;
+  outOfStock?: boolean;
 }
 interface Promotions {
   subtotal: number;
@@ -152,7 +153,7 @@ function lineRow(l: CartLine): string {
         <div class="muted" style="font-size:0.82rem">${escapeHtml(l.partname)}${
     l.price != null ? ` · ${formatMoney(l.price)} ליח׳` : ''
   }</div>
-        ${l.available ? '' : '<div class="error" style="font-size:0.8rem">לא זמין יותר — יש להסיר</div>'}
+        ${l.available ? '' : `<div class="error" style="font-size:0.8rem">${l.outOfStock ? 'אזל מהמלאי — יש להסיר' : 'לא זמין יותר — יש להסיר'}</div>`}
       </div>
       ${l.available ? qtyStepper(l.partname, l.quantity, 1) : ''}
       <div style="min-width:72px;text-align:left;font-weight:700">${l.price != null ? formatMoney(l.line_total) : '—'}</div>

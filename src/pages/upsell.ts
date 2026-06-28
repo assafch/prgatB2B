@@ -9,6 +9,7 @@ interface Sug {
   price: number | null;
   image_url: string | null;
   box_size: number;
+  outOfStock?: boolean;
 }
 
 /**
@@ -22,6 +23,7 @@ export async function showUpsell(partname: string): Promise<void> {
   } catch {
     /* ignore */
   }
+  items = items.filter((i) => !i.outOfStock); // don't suggest things they can't order
   if (!items.length) {
     toast('נוסף לסל ✓', 'ok');
     return;
