@@ -13,14 +13,6 @@ interface AUser {
   created_at: string;
 }
 
-async function editPolicy(custname: string): Promise<void> {
-  const p = await api.get<{ kind: string; allow_order_with_open_debt: number }>(`/api/admin/customers/${encodeURIComponent(custname)}/policy`);
-  const kind = window.prompt(`סוג תשלום ל-${custname} (auto / cash / net):`, p.kind) || p.kind;
-  const allow = window.confirm('מורשה להזמין למרות חוב פתוח? (אישור = כן)');
-  await api.patch(`/api/admin/customers/${encodeURIComponent(custname)}/policy`, { kind, allow_order_with_open_debt: allow });
-  toast('מדיניות עודכנה', 'ok');
-}
-
 // Customer / login management: create a login directly, reset a password,
 // enable/disable. Admin accounts are protected server-side from these actions.
 export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
@@ -65,8 +57,7 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
         ${
           u.role !== 'admin'
             ? `<button class="ghost u-reset" data-id="${u.id}" data-name="${escapeAttr(u.username)}">איפוס סיסמה</button>
-               <button class="ghost u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>${u.custname ? `
-               <button class="ghost" data-policy="${escapeAttr(u.custname)}">מדיניות תשלום</button>` : ''}`
+               <button class="ghost u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>`
             : ''
         }
       </div>`
@@ -123,8 +114,5 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
         msg.className = 'error';
       }
     };
-  });
-  list.querySelectorAll('[data-policy]').forEach((b) => {
-    b.addEventListener('click', () => editPolicy((b as HTMLElement).dataset.policy!));
   });
 }
