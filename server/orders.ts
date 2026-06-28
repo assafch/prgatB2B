@@ -5,6 +5,7 @@ import { createOrder, getPriorityConfig, listOrdersForCustomer } from './priorit
 import { getProduct } from './catalog.js';
 import { applyPromotions, type PromoResult } from './promotions.js';
 import { policyEnabled, evaluate } from './paymentPolicy.js';
+import { notifyUser } from './push.js';
 
 export interface CartLine {
   partname: string;
@@ -122,6 +123,8 @@ export interface SubmitResult {
   ordname: string;
   total: number;
   lines: CartLine[];
+  needsPayment?: boolean;
+  amount?: number;
 }
 
 /**
@@ -185,16 +188,21 @@ export async function submitOrder(
     }
   }
 
-  // Payment-policy gate (Phase 2: net-terms open-debt block). Inert unless the
-  // admin flag is on. Cash customers are not gated here. The block uses net debt =
-  // openTotal − pendingSettlement (post-dated cheques already excluded), so a fresh
-  // card payment / submitted cheque lifts it without office reconciliation.
+  // Payment-policy gate (Phase 3: unified net-debt block + cash-hold). Inert unless
+  // the admin flag is on. Net-terms customers blocked on open_debt; cash customers
+  // held as pending_payment (never forwarded to Priority until payment confirmed).
+  let cashHold = false;
+  let requiredAmount = 0;
   if (policyEnabled()) {
     const decision = await evaluate(custname, promotions.total);
     if (!decision.allowOrder && decision.reason === 'open_debt') {
       throw new OrderError(
         `לא ניתן לבצע הזמנה — קיים חוב פתוח בסך ₪${(decision.amount ?? 0).toFixed(2)}. נא לסגור אותו (צ׳ק או אשראי) במסך "חשבוניות" ולנסות שוב.`
       );
+    }
+    if (decision.requiresPayment && decision.reason === 'cash_payment_required') {
+      cashHold = true;
+      requiredAmount = decision.amount ?? promotions.total;
     }
   }
 
@@ -224,6 +232,16 @@ export async function submitOrder(
     }
   });
   tx();
+
+  // Cash-hold: order is recorded locally; payment must arrive before we forward to
+  // Priority. The cart is cleared so the customer can't accidentally re-submit.
+  if (cashHold) {
+    db.prepare(
+      `UPDATE orders_local SET status = 'pending_payment', payment_status = 'pending_payment', payment_required_amount = ? WHERE id = ?`
+    ).run(requiredAmount, localOrderId);
+    clearCart(userId);
+    return { orderId: localOrderId, ordname: '', total, lines, needsPayment: true, amount: requiredAmount };
+  }
 
   // POST to Priority. PRICE is deliberately omitted on PAID lines: Priority prices
   // each line from its own price lists / customer agreements, exactly as a phoned-in
@@ -321,4 +339,47 @@ export function reorderToCart(userId: number, custname: string, orderId: number)
     added++;
   }
   return added;
+}
+
+/** Rebuild the Priority order payload from persisted order_lines (cart is already
+ *  cleared for held orders) and submit it. Returns the Priority ORDNAME. Mirrors
+ *  submitOrder's live payload: paid lines carry no PRICE; freebies/gifts at PRICE 0. */
+export async function sendHeldOrderToPriority(orderId: number): Promise<string> {
+  const order = db.prepare(`SELECT id, custname, details FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; custname: string; details: string | null } | undefined;
+  if (!order) throw new Error(`order ${orderId} not found`);
+  const rows = db.prepare(
+    `SELECT partname, quantity, is_promotion_freebie FROM order_lines WHERE order_id = ?`
+  ).all(orderId) as { partname: string; quantity: number; is_promotion_freebie: number }[];
+  const config = getPriorityConfig();
+  if (!config) throw new Error('Priority not configured');
+  const items = rows.map((r) =>
+    r.is_promotion_freebie
+      ? { PARTNAME: r.partname, TQUANT: r.quantity, PRICE: 0 }
+      : { PARTNAME: r.partname, TQUANT: r.quantity }
+  );
+  return createOrder(config, order.custname, items, order.details ?? undefined, `B2B-${orderId}`);
+}
+
+/** Approve a held (pending_payment) order after its payment confirmed: mark approved,
+ *  link the payment, send to Priority, notify. Idempotent. */
+export async function approveOrder(orderId: number, kind: 'card' | 'check', paymentId: string): Promise<void> {
+  const order = db.prepare(`SELECT id, user_id, status FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; user_id: number; status: string } | undefined;
+  if (!order || order.status !== 'pending_payment') return;
+  db.prepare(
+    `UPDATE orders_local SET payment_status = 'approved', linked_payment_kind = ?, linked_payment_id = ?, approved_at = datetime('now') WHERE id = ?`
+  ).run(kind, paymentId, orderId);
+  let ordname: string;
+  try {
+    ordname = await sendHeldOrderToPriority(orderId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    db.prepare(`UPDATE orders_local SET status = 'failed', error = ? WHERE id = ?`).run(msg, orderId);
+    return;
+  }
+  db.prepare(
+    `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now') WHERE id = ?`
+  ).run(ordname, orderId);
+  notifyUser(order.user_id, { title: 'ההזמנה אושרה ✓', body: `התשלום התקבל — הזמנה ${ordname} נשלחה`, url: '#orders' });
 }
