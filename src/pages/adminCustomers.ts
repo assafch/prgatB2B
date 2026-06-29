@@ -9,6 +9,7 @@ interface AdminCustomer {
   resolvedKind: string; // 'cash' | 'net'
   open_debt_threshold: number | null;
   allow_order_with_open_debt: number; // 0 or 1
+  enforced: number; // 0 or 1 — per-customer policy enforcement flag
   paymentTerms: string | null;
   openTotal: number | null;
 }
@@ -25,6 +26,11 @@ const edits = new Map<string, Record<string, unknown>>();
 function chipStyle(on: boolean): string {
   if (!on) return 'background:#f3f4f6;color:#9aa0a6;border-color:#e5e7eb';
   return 'background:#e7e9f5;color:#3a3f7a;border-color:#c4c8ec';
+}
+
+function enforceChipStyle(on: boolean): string {
+  if (!on) return 'background:#f3f4f6;color:#9aa0a6;border-color:#e5e7eb';
+  return 'background:#d1fae5;color:#065f46;border-color:#6ee7b7';
 }
 
 function setEdit(custname: string, field: string, value: unknown): void {
@@ -140,6 +146,7 @@ async function loadList(shell: HTMLElement): Promise<void> {
             <th style="padding:0.5rem">סוג תשלום</th>
             <th style="padding:0.5rem">סף חוב</th>
             <th style="padding:0.5rem">פטור</th>
+            <th style="padding:0.5rem">אכוף</th>
           </tr>
         </thead>
         <tbody>
@@ -195,6 +202,20 @@ async function loadList(shell: HTMLElement): Promise<void> {
       });
     });
 
+    // Inline editing — enforced toggle chip
+    wrap.querySelectorAll<HTMLButtonElement>('button.enforce-toggle').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = !(chip.dataset.on === '1');
+        chip.dataset.on = on ? '1' : '';
+        chip.setAttribute('style', enforceChipStyle(on));
+        chip.textContent = on ? 'אכוף ✓' : 'כבוי';
+        const tr = chip.closest('tr') as HTMLTableRowElement;
+        tr.classList.add('row-dirty');
+        setEdit(tr.dataset.cust!, 'enforced', on ? 1 : 0);
+      });
+    });
+
     // Pager (server is 0-based: page=0 is the first page)
     const totalPages = Math.max(1, Math.ceil(total / qs.pageSize));
     const pager = shell.querySelector('#cust-pager') as HTMLDivElement;
@@ -231,6 +252,8 @@ function renderRow(r: AdminCustomer): string {
   const thresholdInp = `<input class="cell-edit" data-field="open_debt_threshold" type="number" min="0" value="${r.open_debt_threshold ?? ''}" placeholder="—" style="width:80px" aria-label="סף חוב"/>`;
   const exempt = r.allow_order_with_open_debt === 1;
   const toggleChip = `<button type="button" class="status-toggle" data-on="${exempt ? '1' : ''}" style="${chipStyle(exempt)}">פטור</button>`;
+  const enforced = r.enforced === 1;
+  const enforceChip = `<button type="button" class="enforce-toggle" data-field="enforced" data-on="${enforced ? '1' : ''}" style="${enforceChipStyle(enforced)}">${enforced ? 'אכוף ✓' : 'כבוי'}</button>`;
 
   return `
     <tr data-cust="${cust}" data-resolved-kind="${escapeAttr(r.resolvedKind)}" style="border-bottom:1px solid var(--border);cursor:pointer">
@@ -244,6 +267,7 @@ function renderRow(r: AdminCustomer): string {
       <td style="padding:0.5rem;white-space:nowrap">${kindSel}</td>
       <td style="padding:0.5rem">${thresholdInp}</td>
       <td style="padding:0.5rem">${toggleChip}</td>
+      <td style="padding:0.5rem">${enforceChip}</td>
     </tr>
   `;
 }

@@ -22,6 +22,7 @@ interface CustomerCardPolicy {
   kind: string; // 'auto' | 'cash' | 'net'
   open_debt_threshold: number | null;
   allow_order_with_open_debt: number;
+  enforced: number; // 0 or 1 — per-customer policy enforcement flag
 }
 
 interface CustomerCard {
@@ -137,6 +138,15 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
     <div class="card" style="margin-bottom:0.75rem">
       <h2 style="margin-top:0">מדיניות תשלום</h2>
       <div style="display:flex;flex-direction:column;gap:0.75rem">
+        <div style="padding:0.6rem 0.75rem;border-radius:6px;border:1.5px solid ${d.policy.enforced ? '#6ee7b7' : '#e5e7eb'};background:${d.policy.enforced ? '#f0fdf4' : '#fafafa'}">
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-weight:700;font-size:0.95rem">
+            <input type="checkbox" id="cc-enforce" ${d.policy.enforced ? 'checked' : ''}/>
+            אכוף מדיניות עבור לקוח זה (השקה הדרגתית)
+          </label>
+          <div id="cc-enforce-hint" style="margin-top:0.3rem;font-size:0.82rem;color:${d.policy.enforced ? '#065f46' : '#9aa0a6'}">
+            ${d.policy.enforced ? 'המדיניות פעילה ללקוח זה' : 'המדיניות אינה פעילה ללקוח זה (מצב רגיל)'}
+          </div>
+        </div>
         <div>
           <label for="cc-kind" style="display:block;font-size:0.85rem;color:var(--muted,#666);margin-bottom:0.25rem">סוג תשלום</label>
           <select id="cc-kind">
@@ -184,8 +194,22 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
   const kindSel = shell.querySelector('#cc-kind') as HTMLSelectElement;
   const thrInp = shell.querySelector('#cc-thr') as HTMLInputElement;
   const exemptChk = shell.querySelector('#cc-exempt') as HTMLInputElement;
+  const enforceChk = shell.querySelector('#cc-enforce') as HTMLInputElement;
+  const enforceHint = shell.querySelector('#cc-enforce-hint') as HTMLDivElement;
   const saveBtn = shell.querySelector('#cc-save') as HTMLButtonElement;
   const msgEl = shell.querySelector('#cc-msg') as HTMLSpanElement;
+
+  // Update enforce hint + border live when checkbox changes
+  enforceChk.addEventListener('change', () => {
+    const on = enforceChk.checked;
+    const box = enforceChk.closest('div[style]') as HTMLElement | null;
+    if (box) {
+      box.style.borderColor = on ? '#6ee7b7' : '#e5e7eb';
+      box.style.background = on ? '#f0fdf4' : '#fafafa';
+    }
+    enforceHint.style.color = on ? '#065f46' : '#9aa0a6';
+    enforceHint.textContent = on ? 'המדיניות פעילה ללקוח זה' : 'המדיניות אינה פעילה ללקוח זה (מצב רגיל)';
+  });
 
   // Update auto-hint live when kind changes
   const hintEl = shell.querySelector<HTMLDivElement>('.auto-hint');
@@ -205,6 +229,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
         kind: kindSel.value,
         open_debt_threshold: thrVal === '' ? null : Number(thrVal),
         allow_order_with_open_debt: exemptChk.checked,
+        enforced: enforceChk.checked,
       });
       toast('המדיניות נשמרה ✓', 'ok');
       msgEl.textContent = '';
