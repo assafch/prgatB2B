@@ -51,6 +51,16 @@ const SETTING_KEYS = {
 export function policyEnabled(): boolean {
   return getSettingBool(SETTING_KEYS.enabled, false);
 }
+
+/** Is the payment policy individually enabled for this customer? */
+export function isEnforced(custname: string): boolean {
+  const row = db.prepare('SELECT enforced FROM customer_policies WHERE custname = ?').get(custname) as { enforced?: number } | undefined;
+  return !!(row && row.enforced);
+}
+/** Policy fires for a customer iff the master flag is on AND the customer is enrolled. */
+export function enforcedFor(custname: string): boolean {
+  return policyEnabled() && isEnforced(custname);
+}
 function cashMatchList(): string[] {
   return (getSetting(SETTING_KEYS.cashMatch) || 'מזומן').split(',').map((s) => s.trim()).filter(Boolean);
 }

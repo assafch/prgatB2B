@@ -8,7 +8,7 @@ import { getAccountSummary, type BalanceSummary } from './finance.js';
 import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
 import { activePromotions } from './promotions.js';
 import { getProduct } from './catalog.js';
-import { resolvePolicy, policyEnabled, pendingSettlement } from './paymentPolicy.js';
+import { resolvePolicy, enforcedFor, pendingSettlement } from './paymentPolicy.js';
 
 export interface LastOrderView {
   id: number;
@@ -88,7 +88,7 @@ export async function getHomeData(
 ): Promise<HomeData> {
   // Finance can be slow / unavailable; the rest is instant local SQLite.
   const summary = await getAccountSummary(custname);
-  const pol = policyEnabled() ? resolvePolicy(custname, summary.profile?.paymentTerms ?? null) : null;
+  const pol = enforcedFor(custname) ? resolvePolicy(custname, summary.profile?.paymentTerms ?? null) : null;
   const netDebt = pol && summary.balanceOk ? Math.max(0, summary.balance.openTotal - pendingSettlement(custname)) : 0;
 
   const lastRow = db

@@ -4,7 +4,7 @@ import { db } from './db.js';
 import { createOrder, getPriorityConfig, listOrdersForCustomer } from './priority.js';
 import { getProduct } from './catalog.js';
 import { applyPromotions, type PromoResult } from './promotions.js';
-import { policyEnabled, evaluate } from './paymentPolicy.js';
+import { enforcedFor, evaluate } from './paymentPolicy.js';
 import { notifyUser } from './push.js';
 import { getCheckForUser } from './payments.js';
 
@@ -194,7 +194,7 @@ export async function submitOrder(
   // held as pending_payment (never forwarded to Priority until payment confirmed).
   let cashHold = false;
   let requiredAmount = 0;
-  if (policyEnabled()) {
+  if (enforcedFor(custname)) {
     const decision = await evaluate(custname, promotions.total);
     if (!decision.allowOrder && decision.reason === 'open_debt') {
       throw new OrderError(
