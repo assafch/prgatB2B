@@ -42,6 +42,23 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         <input id="s-policy-debt" type="number" min="0" placeholder="0" value="${escapeHtml(txt('policy_net_debt_threshold') || '0')}" style="width:100%;box-sizing:border-box"/>
       </fieldset>
 
+      <hr style="margin:1rem 0;border:none;border-top:1px solid var(--border)"/>
+      <fieldset style="border:1px solid var(--border);border-radius:6px;padding:0.75rem 1rem;margin:0">
+        <legend style="font-weight:600;padding:0 0.4rem">קבלות אוטומטיות (Priority)</legend>
+        <div class="set-row"><span>הפעל יצירת קבלה אוטומטית ב-Priority (כבוי = ללא שינוי)</span><input type="checkbox" id="s-receipts-enabled" ${on('priority_receipts_enabled') ? 'checked' : ''}/></div>
+        <div class="set-row" style="margin-top:0.6rem"><span>קופה (CASHNAME)</span></div>
+        <input id="s-receipt-cashname" type="text" placeholder="020" value="${escapeHtml(txt('priority_receipt_cashname'))}" style="width:100%;box-sizing:border-box"/>
+        <div class="set-row" style="margin-top:0.6rem"><span>אחראי (OWNERLOGIN)</span></div>
+        <input id="s-receipt-ownerlogin" type="text" placeholder="" value="${escapeHtml(txt('priority_receipt_ownerlogin'))}" style="width:100%;box-sizing:border-box"/>
+        <div class="set-row" style="margin-top:0.6rem"><span>קוד תשלום אשראי</span></div>
+        <input id="s-receipt-cc-paymentcode" type="text" placeholder="13" value="${escapeHtml(txt('priority_receipt_cc_paymentcode') || '13')}" style="width:100%;box-sizing:border-box"/>
+        <div class="set-row" style="margin-top:0.6rem"><span>מסוף (אופציונלי)</span></div>
+        <input id="s-receipt-terminal" type="text" placeholder="" value="${escapeHtml(txt('priority_receipt_terminal'))}" style="width:100%;box-sizing:border-box"/>
+        <div class="set-row" style="margin-top:0.6rem"><span>לקוח בדיקה יחיד (מספר לקוח — ריק = כל הלקוחות)</span></div>
+        <input id="s-receipts-test-custname" type="text" placeholder="" value="${escapeHtml(txt('priority_receipts_test_custname'))}" style="width:100%;box-sizing:border-box"/>
+        <div id="s-receipts-failed" style="margin-top:0.75rem"><span class="muted">טוען…</span></div>
+      </fieldset>
+
       <button id="s-save" style="margin-top:1rem;width:100%">שמירת הגדרות</button>
       <div id="s-msg" style="margin-top:0.5rem;text-align:center"></div>
     </div>
@@ -74,6 +91,12 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         payment_policy_enabled: (c.querySelector('#s-policy') as HTMLInputElement).checked,
         policy_cash_paydes_match: (c.querySelector('#s-policy-cash') as HTMLInputElement).value,
         policy_net_debt_threshold: (c.querySelector('#s-policy-debt') as HTMLInputElement).value,
+        priority_receipts_enabled: (c.querySelector('#s-receipts-enabled') as HTMLInputElement).checked,
+        priority_receipt_cashname: (c.querySelector('#s-receipt-cashname') as HTMLInputElement).value,
+        priority_receipt_ownerlogin: (c.querySelector('#s-receipt-ownerlogin') as HTMLInputElement).value,
+        priority_receipt_cc_paymentcode: (c.querySelector('#s-receipt-cc-paymentcode') as HTMLInputElement).value,
+        priority_receipt_terminal: (c.querySelector('#s-receipt-terminal') as HTMLInputElement).value,
+        priority_receipts_test_custname: (c.querySelector('#s-receipts-test-custname') as HTMLInputElement).value,
       });
       msg.textContent = '✓ ההגדרות נשמרו';
       msg.className = 'ok';
@@ -103,6 +126,23 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       pbmsg.className = 'error';
     }
   };
+
+  // Failed receipts: fetch lazily after shell renders
+  const renderFailedReceipts = async () => {
+    const el = c.querySelector('#s-receipts-failed') as HTMLDivElement | null;
+    if (!el) return;
+    try {
+      const { count } = await api.get<{ count: number; receipts: unknown[] }>('/api/admin/receipts/failed');
+      if (count === 0) {
+        el.innerHTML = '<span class="muted">קבלות שנכשלו: אין</span>';
+      } else {
+        el.innerHTML = `<span class="error" style="font-weight:600">קבלות שנכשלו: ${count}</span>`;
+      }
+    } catch {
+      el.innerHTML = '<span class="muted">לא ניתן לטעון סטטוס קבלות</span>';
+    }
+  };
+  void renderFailedReceipts();
 
   // Stuck orders: fetch lazily after shell renders, re-fetch after resend
   const renderStuckOrders = async () => {

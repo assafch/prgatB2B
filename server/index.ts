@@ -67,7 +67,7 @@ import {
   submitOrder,
   sweepPendingOrders,
 } from './orders.js';
-import { sweepPendingReceipts } from './priorityReceipts.js';
+import { sweepPendingReceipts, listFailedReceipts, failedReceiptCount } from './priorityReceipts.js';
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
@@ -1315,8 +1315,14 @@ const SETTABLE = new Set([
   'payment_policy_enabled',
   'policy_cash_paydes_match',
   'policy_net_debt_threshold',
+  'priority_receipts_enabled',
+  'priority_receipt_cashname',
+  'priority_receipt_ownerlogin',
+  'priority_receipt_cc_paymentcode',
+  'priority_receipt_terminal',
+  'priority_receipts_test_custname',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled']);
 
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
   res.json({ settings: getAllSettings() });
@@ -1510,6 +1516,7 @@ app.delete('/api/admin/products/:partname/image', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/orders/stuck', requireAdmin, (req, res) => { res.json({ orders: listStuckOrders() }); });
+app.get('/api/admin/receipts/failed', requireAdmin, (req, res) => { res.json({ count: failedReceiptCount(), receipts: listFailedReceipts() }); });
 app.post('/api/admin/orders/:id/resend', requireAdmin, ah(async (req, res) => {
   const r = await resendApprovedOrder(Number(req.params.id));
   res.status(r.ok ? 200 : 400).json(r);
