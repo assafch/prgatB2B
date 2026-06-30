@@ -399,12 +399,17 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
 /** Link an already-submitted cheque to a held order and approve it (cheque = approve
  *  at submit, decision #2). */
 export async function payHeldOrderByCheck(userId: number, custname: string, orderId: number, checkId: string): Promise<boolean> {
-  const order = db.prepare(`SELECT id, status, custname, user_id FROM orders_local WHERE id = ?`).get(orderId) as
-    | { id: number; status: string; custname: string; user_id: number } | undefined;
+  const order = db.prepare(`SELECT id, status, custname, user_id, payment_required_amount FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; status: string; custname: string; user_id: number; payment_required_amount: number | null } | undefined;
   if (!order || order.user_id !== userId || order.custname !== custname) throw new OrderError('ההזמנה לא נמצאה');
   if (order.status !== 'pending_payment') throw new OrderError('ההזמנה אינה ממתינה לתשלום');
-  const chk = getCheckForUser(userId, checkId) as { status?: string } | null;
+  const chk = getCheckForUser(userId, checkId) as { status?: string; amount?: number; is_postdated?: number } | null;
   if (!chk || chk.status !== 'submitted') throw new OrderError('הצ׳ק לא נמצא או טרם אושר');
+  // Guard 1: reject post-dated cheques — must be payable immediately.
+  if (chk.is_postdated) throw new OrderError('צ׳ק דחוי אינו תקף לאישור הזמנה — נדרש צ׳ק לפירעון מיידי');
+  // Guard 2: cheque amount must cover the order's required amount (VAT-inclusive).
+  const required = Number(order.payment_required_amount) || 0;
+  if ((chk.amount ?? 0) + 0.01 < required) throw new OrderError('סכום הצ׳ק (₪' + (chk.amount ?? 0).toFixed(2) + ') נמוך מסכום ההזמנה (₪' + required.toFixed(2) + ')');
   // Atomically CLAIM the cheque for THIS order (order_id IS NULL) so a single cheque
   // can't approve multiple held orders — one cheque settles one order.
   const linked = db
