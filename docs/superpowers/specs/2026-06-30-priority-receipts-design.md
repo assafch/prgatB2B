@@ -11,6 +11,23 @@ Priority. Today the app writes **only an ORDER**; card payments live solely in t
 makes the app create a **receipt (קבלה / תקבול)** in Priority automatically when a card
 payment succeeds. The ORDER keeps being created exactly as today.
 
+## #1 principle — the customer flow is NEVER blocked by receipts
+
+Receipt creation is **entirely decoupled and asynchronous** from the customer experience.
+Once a card charge has **succeeded** (PSP re-query → `status='paid'`), the customer is done:
+their order is approved/sent and they keep working **regardless of what happens with the
+Priority receipt**. A receipt failure (Priority down, bad config, validation error, outage)
+**must never**: block or delay any request, change the order's approved/sent status, surface
+an error to the customer, or trigger a refund. It is recorded as `failed` and **left for
+manual handling** (admin queue + alert) and automatic sweep-retry. Concretely:
+- The receipt is **only ever enqueued for a charge that actually succeeded** (`status='paid'`).
+- Enqueue is **fire-and-forget and non-throwing** — wrapped so even a failure to enqueue is
+  logged, never propagated into `confirmCard` / order approval / invoice-payment.
+- The receipt is **created only in the background sweep**, never synchronously inside a
+  request, so a slow/failing Priority call cannot delay the customer's response.
+- Order creation/approval (`approveOrder` → `sendHeldOrderToPriority`) is independent: its
+  success/failure is untouched by, and does not gate, the receipt.
+
 ## Verified Priority facts (live OData, read-only, 2026-06-30)
 
 - **Receipt entity = `TINVOICES`** ("קבלות"), API-enabled. Key `IVNUM,DEBIT,IVTYPE`;
@@ -74,10 +91,12 @@ payment succeeds. The ORDER keeps being created exactly as today.
 
 ## Error handling
 
-Never blocks or refunds the customer (money already captured). A failed POST leaves the row
-`failed` with the error + increments `attempts`; the sweep retries automatically. A standing
-`failed` count raises an **admin alert + counter** in the admin panel (reuse the existing
-stuck-orders/alert mechanism).
+Implements the #1 principle. Money is already captured, so we never block or refund. A
+failed POST leaves the row `failed` with the error + increments `attempts`; the sweep retries
+automatically. A standing `failed` count raises an **admin alert + counter** in the admin
+panel (reuse the existing stuck-orders/alert mechanism) for **manual handling**. The enqueue
+call in `confirmCard` is wrapped in try/catch and can never propagate an error into the
+customer flow; receipt creation never runs inside a customer request.
 
 ## Feature flag
 
