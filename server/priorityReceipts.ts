@@ -1,7 +1,7 @@
 // Priority receipt (TINVOICES) creation. The customer flow is NEVER blocked by this:
 // enqueue is fire-and-forget, creation runs only in the background sweep, failures are
 // left for manual handling. Spec: 2026-06-30-priority-receipts.
-import { db, getSetting } from './db.js';
+import { db, getSetting, getSettingBool } from './db.js';
 import { getPriorityConfig, priorityRequest } from './priority.js';
 
 export interface ReceiptConfig {
@@ -45,6 +45,27 @@ export function buildReceiptBody(inp: ReceiptInput, cfg: ReceiptConfig): Record<
   if (inp.ordname) body.ORDNAME = inp.ordname;
   if (inp.invoiceRefs && inp.invoiceRefs.length) body.REFERENCE = inp.invoiceRefs.join(',').slice(0, 25);
   return body;
+}
+
+/** Is the receipt pipeline active for this customer? Off by default; an optional single
+ *  test-customer allowlist lets it be enabled for one custname first. */
+export function receiptsEnabledFor(custname: string): boolean {
+  if (!getSettingBool('priority_receipts_enabled', false)) return false;
+  const only = getSetting('priority_receipts_test_custname');
+  return !only || only.trim() === custname;
+}
+
+/** Fire-and-forget, NON-THROWING: enqueue a receipt for a paid card. Any failure here is
+ *  logged and swallowed — it must never propagate into the customer flow. */
+export function enqueueReceipt(cardPaymentId: string, custname: string): void {
+  try {
+    if (!receiptsEnabledFor(custname)) return;
+    db.prepare(
+      "INSERT INTO priority_receipts (card_payment_id, status) VALUES (?, 'pending') ON CONFLICT(card_payment_id) DO NOTHING"
+    ).run(cardPaymentId);
+  } catch (err) {
+    console.warn('[receipts] enqueue failed (non-blocking):', err);
+  }
 }
 
 function receiptConfig(): ReceiptConfig {

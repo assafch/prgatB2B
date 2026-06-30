@@ -328,6 +328,13 @@ async function returnPaidCard(id: string): Promise<CardRow | null> {
     const { approveOrder } = await import('./orders.js'); // dynamic import avoids load-time circular dependency
     await approveOrder(Number(fresh.order_id), 'card', id);
   }
+  try {
+    const { enqueueReceipt } = await import('./priorityReceipts.js'); // dynamic import avoids load cycle
+    const crow = db.prepare('SELECT custname FROM card_payments WHERE id = ?').get(id) as { custname: string } | undefined;
+    if (crow) enqueueReceipt(id, crow.custname);
+  } catch (err) {
+    console.warn('[receipts] enqueue hook failed (non-blocking):', err);
+  }
   return getCardAny(id);
 }
 
