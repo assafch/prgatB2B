@@ -11,8 +11,8 @@ assert.equal(derivePolicyKind('תשלום מזומן בלבד', ['מזומן']),
 const net = { kind: 'net', requirePaymentBeforeApproval: false, blockOnOpenDebt: true, openDebtThreshold: 0, allowOrderWithOpenDebt: false };
 const cash = { kind: 'cash', requirePaymentBeforeApproval: true, blockOnOpenDebt: false, openDebtThreshold: 0, allowOrderWithOpenDebt: false };
 
-// cash → must pay the cart total, order allowed (held)
-assert.deepEqual(decide(cash, 0, 500), { allowOrder: true, requiresPayment: true, amount: 500, reason: 'cash_payment_required' });
+// cash → must pay the cart total VAT-inclusive (500 × 1.18 = 590 incl-VAT 18%), order allowed (held)
+assert.deepEqual(decide(cash, 0, 500), { allowOrder: true, requiresPayment: true, amount: 590, reason: 'cash_payment_required' });
 // net + open debt > 0 → blocked
 assert.equal(decide(net, 120, 500).allowOrder, false);
 assert.equal(decide(net, 120, 500).reason, 'open_debt');

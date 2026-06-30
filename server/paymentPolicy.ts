@@ -3,6 +3,7 @@
 import { db, getSetting, getSettingBool } from './db.js';
 import { getAccountSummary } from './finance.js';
 import { unreconciledCardTotal } from './cardPayments.js';
+import { withVat } from './money.js';
 
 export type PolicyKind = 'cash' | 'net';
 export interface Policy {
@@ -32,7 +33,8 @@ export function derivePolicyKind(paydes: string | null, cashMatch: string[]): Po
  *  excludes post-dated cheques). `cartTotal` is the new order total. */
 export function decide(policy: Policy, netDebt: number, cartTotal: number): PolicyDecision {
   if (policy.kind === 'cash') {
-    return { allowOrder: true, requiresPayment: true, amount: round2(cartTotal), reason: 'cash_payment_required' };
+    // Cart prices are pre-VAT (BASEPLPRICE); Priority invoices include VAT — charge the gross-up.
+    return { allowOrder: true, requiresPayment: true, amount: withVat(cartTotal), reason: 'cash_payment_required' };
   }
   if (policy.blockOnOpenDebt && !policy.allowOrderWithOpenDebt && netDebt > policy.openDebtThreshold + 0.001) {
     return { allowOrder: false, requiresPayment: false, amount: round2(netDebt), reason: 'open_debt' };
