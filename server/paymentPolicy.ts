@@ -2,7 +2,7 @@
 // testable; the DB-backed resolve/evaluate live in later tasks. Spec: 2026-06-28-payment-policy.
 import { db, getSetting, getSettingBool } from './db.js';
 import { getAccountSummary } from './finance.js';
-import { unreconciledCardTotal } from './cardPayments.js';
+import { paidDebtCardTotal } from './cardPayments.js';
 import { withVat } from './money.js';
 
 export type PolicyKind = 'cash' | 'net';
@@ -88,14 +88,17 @@ export function resolvePolicy(custname: string, paymentTerms: string | null): Po
   };
 }
 
-const RECON_WINDOW = '-1 day';
+const RECON_WINDOW = '-3 days';
 /** Money "in flight" that should offset open debt so a fresh payment lifts the
- *  block: unreconciled card payments + cheques the customer has submitted recently. */
+ *  block: confirmed debt card payments + non-post-dated cheques the customer has
+ *  submitted recently. Pending card intents are intentionally excluded (H2 fix) —
+ *  only a confirmed 'paid' card transaction counts against the block. */
 export function pendingSettlement(custname: string): number {
-  const card = unreconciledCardTotal(custname);
+  const card = paidDebtCardTotal(custname);
   const chq = db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS s FROM payment_checks
-     WHERE custname = ? AND status = 'submitted' AND submitted_at >= datetime('now', ?)`
+     WHERE custname = ? AND status = 'submitted' AND is_postdated = 0
+       AND submitted_at >= datetime('now', ?)`
   ).get(custname, RECON_WINDOW) as { s: number };
   return Math.round(((card + (chq.s || 0)) + Number.EPSILON) * 100) / 100;
 }

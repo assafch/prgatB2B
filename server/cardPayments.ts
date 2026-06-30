@@ -126,19 +126,31 @@ async function createPspIntent(opts: {
   return { id, url: created.url };
 }
 
-/** Sum of recent card payments not yet known to be reconciled into Priority's
+/** Sum of recent DEBT card payments not yet known to be reconciled into Priority's
  *  ACC_DEBIT (pending, or paid within a short window). Subtracted from openTotal so a
  *  customer can't pay the same debt twice before the office posts the receipt. Bounded
- *  to RECON_WINDOW so an already-reconciled payment stops deflating the payable cap. */
-const RECON_WINDOW = '-1 day';
+ *  to RECON_WINDOW so an already-reconciled payment stops deflating the payable cap.
+ *  Only counts debt kinds (not order_payment) so prepays don't wrongly deflate the cap. */
+const RECON_WINDOW = '-3 days';
 export function unreconciledCardTotal(custname: string): number {
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(amount), 0) AS s FROM card_payments
-       WHERE custname = ? AND status IN ('pending', 'paid') AND created_at >= datetime('now', ?)`
+       WHERE custname = ? AND status IN ('pending', 'paid')
+         AND kind IN ('debt', 'debt_partial')
+         AND created_at >= datetime('now', ?)`
     )
     .get(custname, RECON_WINDOW) as { s: number };
   return round2(row.s || 0);
+}
+
+/** Confirmed (paid) debt card payments in the recon window — used by the open-debt
+ *  BLOCK offset (an unpaid 'pending' intent must NOT lift the block). */
+export function paidDebtCardTotal(custname: string): number {
+  const row = db.prepare(
+    "SELECT COALESCE(SUM(amount),0) AS s FROM card_payments WHERE custname = ? AND status = 'paid' AND kind IN ('debt','debt_partial') AND COALESCE(paid_at, created_at) >= datetime('now', '-3 days')"
+  ).get(custname) as { s: number };
+  return Math.round(((row.s || 0) + Number.EPSILON) * 100) / 100;
 }
 
 /** Create a hosted-page intent to pay the open debt — either a chosen set of invoices
