@@ -773,7 +773,11 @@ app.post('/api/orders', requireCustomer, blockIfMaintenance, ordersMinuteLimiter
   const { details } = (req.body || {}) as { details?: string };
   try {
     const result = await submitOrder(req.user!.id, req.user!.custname!, details);
-    notifyUser(req.user!.id, { title: 'ההזמנה נקלטה ✓', body: `הזמנה ${result.ordname} התקבלה בהצלחה`, url: '#orders' });
+    if (result.needsPayment) {
+      notifyUser(req.user!.id, { title: 'ההזמנה ממתינה לתשלום', body: 'השלימו תשלום כדי שההזמנה תאושר ותישלח', url: '#order-pay/' + result.orderId });
+    } else {
+      notifyUser(req.user!.id, { title: 'ההזמנה נקלטה ✓', body: `הזמנה ${result.ordname} התקבלה בהצלחה`, url: '#orders' });
+    }
     res.json(result);
   } catch (err) {
     // User-facing validation errors (e.g. empty cart) are safe to surface.
@@ -1038,7 +1042,7 @@ app.post('/api/payments/card/intent', requireOwner, blockIfMaintenance, cardPayL
 }));
 
 // Pay a held (pending_payment) order by card — returns the PSP hosted-page URL.
-app.post('/api/orders/:id/pay/card', requireOwner, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+app.post('/api/orders/:id/pay/card', requireCustomer, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
   try {
     const intent = await createCardOrderIntent(req.user!.id, req.user!.custname!, Number(req.params.id), undefined, appBaseUrl(req));
     res.json(intent);
@@ -1049,7 +1053,7 @@ app.post('/api/orders/:id/pay/card', requireOwner, blockIfMaintenance, cardPayLi
   }
 }));
 
-app.post('/api/orders/:id/pay/check', requireOwner, blockIfMaintenance, cartLimiter, ah(async (req: AuthedRequest, res) => {
+app.post('/api/orders/:id/pay/check', requireCustomer, blockIfMaintenance, cartLimiter, ah(async (req: AuthedRequest, res) => {
   const checkId = typeof (req.body || {}).checkId === 'string' ? (req.body as { checkId: string }).checkId : '';
   if (!checkId) { res.status(400).json({ error: 'חסר מזהה צ׳ק' }); return; }
   try {
@@ -1347,6 +1351,7 @@ app.post('/api/admin/users', requireAdmin, sensitiveLimiter, ah(async (req: Auth
     cust_desc: b.cust_desc,
     email: b.email,
     phone: b.phone,
+    customerRole: b.customer_role,
   });
   res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true, id: result.id } : { error: result.error });
 }));
@@ -1385,20 +1390,6 @@ app.post('/api/admin/customers/batch', requireAdmin, (req: AuthedRequest, res) =
 app.get('/api/admin/customers/:custname', requireAdmin, ah(async (req: AuthedRequest, res) => { res.json(await getCustomerAdmin(req.params.custname)); }));
 app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, res) => { patchCustomer(req.params.custname, (req.body || {}) as Record<string, unknown>); res.json({ ok: true }); });
 
-app.get('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
-  const row = db.prepare('SELECT custname, kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(req.params.custname) || { custname: req.params.custname, kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0 };
-  res.json(row);
-});
-app.patch('/api/admin/customers/:custname/policy', requireAdmin, (req, res) => {
-  const b = (req.body || {}) as { kind?: string; open_debt_threshold?: number | null; allow_order_with_open_debt?: boolean };
-  const kind = ['auto', 'cash', 'net'].includes(String(b.kind)) ? b.kind : 'auto';
-  const thr = b.open_debt_threshold == null ? null : Number(b.open_debt_threshold);
-  const allow = b.allow_order_with_open_debt ? 1 : 0;
-  db.prepare(`INSERT INTO customer_policies (custname, kind, open_debt_threshold, allow_order_with_open_debt, updated_at)
-              VALUES (?, ?, ?, ?, datetime('now'))
-              ON CONFLICT(custname) DO UPDATE SET kind=excluded.kind, open_debt_threshold=excluded.open_debt_threshold, allow_order_with_open_debt=excluded.allow_order_with_open_debt, updated_at=datetime('now')`).run(req.params.custname, kind, thr, allow);
-  res.json({ ok: true });
-});
 
 // ---------- Admin: business analytics (from Priority; cached) ----------
 app.get('/api/admin/analytics/revenue', requireAdmin, adminAnalyticsLimiter, ah(async (_req, res) => {

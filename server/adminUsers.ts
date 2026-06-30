@@ -33,6 +33,7 @@ export interface CreateLoginInput {
   cust_desc?: string;
   email?: string;
   phone?: string;
+  customerRole?: string;
 }
 
 /** Create a customer login directly (active immediately, no invite). */
@@ -48,13 +49,15 @@ export async function createCustomerLogin(
   if (!custname) return { ok: false, error: 'יש להזין מספר לקוח (custname)' };
   const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(username);
   if (exists) return { ok: false, error: 'שם המשתמש כבר קיים' };
+  const customerRole: 'owner' | 'orderer' =
+    input.customerRole === 'orderer' ? 'orderer' : 'owner';
   const hash = await hashPassword(input.password);
   const info = db
     .prepare(
-      `INSERT INTO users (username, password_hash, role, custname, cust_desc, email, phone, status)
-       VALUES (?, ?, 'customer', ?, ?, ?, ?, 'active')`
+      `INSERT INTO users (username, password_hash, role, custname, cust_desc, email, phone, status, customer_role)
+       VALUES (?, ?, 'customer', ?, ?, ?, ?, 'active', ?)`
     )
-    .run(username, hash, custname, input.cust_desc?.trim() || null, input.email?.trim() || null, input.phone?.trim() || null);
+    .run(username, hash, custname, input.cust_desc?.trim() || null, input.email?.trim() || null, input.phone?.trim() || null, customerRole);
   return { ok: true, id: Number(info.lastInsertRowid) };
 }
 
