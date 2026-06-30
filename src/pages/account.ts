@@ -194,7 +194,7 @@ async function renderStaff(host: HTMLElement): Promise<void> {
         <p class="muted" style="margin-top:-0.3rem">הוסיפו משתמשים לעובדים שמזמינים — הם רואים קטלוג ומזמינים, אך ללא גישה לחוב/חשבוניות/תשלומים.</p>
         <div class="form-grid">
           <input id="st-user" placeholder="שם משתמש"/>
-          <input id="st-pass" placeholder="סיסמה (10+ תווים)"/>
+          <input id="st-pass" placeholder="סיסמה (6+ תווים)"/>
         </div>
         <button id="st-add" style="width:100%;margin-top:0.5rem">הוסף עובד</button>
         <div id="st-msg" style="margin-top:0.4rem;text-align:center"></div>
@@ -244,7 +244,7 @@ async function renderStaff(host: HTMLElement): Promise<void> {
     });
     host.querySelectorAll<HTMLButtonElement>('.st-reset').forEach((b) => {
       b.onclick = async () => {
-        const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (10+ תווים):`);
+        const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (6+ תווים):`);
         if (!np) return;
         try {
           await api.post(`/api/account/staff/${b.dataset.id}/reset-password`, { new_password: np });

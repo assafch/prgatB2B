@@ -115,7 +115,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
       <div style="margin-top:0.6rem;display:flex;flex-direction:column;gap:0.5rem">
         <div class="form-grid">
           <input id="cc-nu-username" placeholder="שם משתמש"/>
-          <input id="cc-nu-password" type="password" placeholder="סיסמה (10+ תווים)"/>
+          <input id="cc-nu-password" type="password" placeholder="סיסמה (6+ תווים)"/>
           <input id="cc-nu-email" type="email" placeholder="אימייל (אופציונלי)"/>
           <input id="cc-nu-phone" placeholder="טלפון (אופציונלי)"/>
         </div>
@@ -248,7 +248,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
 
   shell.querySelectorAll<HTMLButtonElement>('.cc-u-reset').forEach((b) => {
     b.onclick = async () => {
-      const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (10+ תווים):`);
+      const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (6+ תווים):`);
       if (!np) return;
       umsg.textContent = 'מאפס…';
       umsg.className = 'muted';

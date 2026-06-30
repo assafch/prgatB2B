@@ -30,7 +30,7 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
       <h2 style="margin-top:0">יצירת התחברות ללקוח</h2>
       <div class="form-grid">
         <input id="u-username" placeholder="שם משתמש"/>
-        <input id="u-password" placeholder="סיסמה (10+ תווים)"/>
+        <input id="u-password" placeholder="סיסמה (6+ תווים)"/>
         <input id="u-custname" placeholder="מספר לקוח ב-Priority (custname)"/>
         <input id="u-desc" placeholder="שם העסק (אופציונלי)"/>
       </div>
@@ -87,7 +87,7 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
   const msg = c.querySelector('#u-msg') as HTMLDivElement;
   list.querySelectorAll<HTMLButtonElement>('.u-reset').forEach((b) => {
     b.onclick = async () => {
-      const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (10+ תווים):`);
+      const np = window.prompt(`סיסמה חדשה ל-${b.dataset.name} (6+ תווים):`);
       if (!np) return;
       msg.textContent = 'מאפס…';
       msg.className = 'muted';

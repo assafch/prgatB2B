@@ -70,7 +70,7 @@ export function validateUsername(username: string): string | null {
 }
 
 export function validatePassword(password: string, username?: string): string | null {
-  if (typeof password !== 'string' || password.length < 10) return 'סיסמה: לפחות 10 תווים';
+  if (typeof password !== 'string' || password.length < 6) return 'סיסמה: לפחות 6 תווים';
   if (password.length > 128) return 'סיסמה ארוכה מדי';
   if (/^(.)\1+$/.test(password)) return 'סיסמה חלשה מדי';
   if (COMMON_PASSWORDS.has(password.toLowerCase())) return 'הסיסמה הזו נפוצה מדי — בחרו אחרת';
