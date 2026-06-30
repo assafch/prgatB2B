@@ -107,6 +107,8 @@ export function pendingSettlement(custname: string): number {
 export async function evaluate(custname: string, cartTotal: number): Promise<PolicyDecision & { kind: PolicyKind }> {
   const summary = await getAccountSummary(custname);
   const policy = resolvePolicy(custname, summary.profile?.paymentTerms ?? null);
+  // M2: fail-open on Priority outage — bypass block but log it
+  if (!summary.balanceOk) console.warn('[policy] balance unavailable for ' + custname + ' — open-debt block bypassed (fail-open)');
   const openTotal = summary.balanceOk ? summary.balance.openTotal : 0;
   const netDebt = Math.max(0, openTotal - pendingSettlement(custname));
   return { ...decide(policy, netDebt, cartTotal), kind: policy.kind };

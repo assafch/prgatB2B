@@ -72,7 +72,10 @@ export function patchCustomer(custname: string, patch: Record<string, unknown>):
   let kind = cur.kind;
   if (patch.kind != null && ['auto', 'cash', 'net'].includes(String(patch.kind))) kind = String(patch.kind);
   let thr = cur.open_debt_threshold;
-  if ('open_debt_threshold' in patch) thr = (patch.open_debt_threshold === '' || patch.open_debt_threshold == null) ? null : Number(patch.open_debt_threshold);
+  if ('open_debt_threshold' in patch) {
+    const n = (patch.open_debt_threshold === '' || patch.open_debt_threshold == null) ? null : Number(patch.open_debt_threshold);
+    thr = (n == null || !isFinite(n) || n < 0) ? null : n;
+  }
   let allow = cur.allow_order_with_open_debt;
   if ('allow_order_with_open_debt' in patch) allow = patch.allow_order_with_open_debt ? 1 : 0;
   let enforced = cur.enforced;

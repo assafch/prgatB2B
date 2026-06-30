@@ -275,6 +275,12 @@ export async function createCardOrderIntent(
   const amount = Number(order.payment_required_amount);
   if (!(amount > 0)) throw new Error('order amount unavailable');
 
+  // M1: reject if already paid (duplicate tab / race)
+  const paid = db.prepare("SELECT id FROM card_payments WHERE order_id = ? AND kind = 'order_payment' AND status = 'paid' LIMIT 1").get(String(orderId));
+  if (paid) throw new Error('order already paid');
+  // Expire any stale not-yet-paid intents so only the newest will be live
+  db.prepare("UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending')").run(String(orderId));
+
   let email = '';
   try {
     const summary = await getAccountSummary(custname);
