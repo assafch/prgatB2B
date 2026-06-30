@@ -34,6 +34,10 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
         <input id="u-custname" placeholder="מספר לקוח ב-Priority (custname)"/>
         <input id="u-desc" placeholder="שם העסק (אופציונלי)"/>
       </div>
+      <select id="u-role" style="margin-top:0.4rem;width:100%">
+        <option value="owner">אחראי (גישה לחיוב/תשלום)</option>
+        <option value="orderer">מזמין (הזמנות בלבד)</option>
+      </select>
       <button id="u-create" style="margin-top:0.6rem;width:100%">צור משתמש</button>
       <div id="u-cmsg" style="margin-top:0.5rem;text-align:center"></div>
     </div>
@@ -74,6 +78,7 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
         password: (c.querySelector('#u-password') as HTMLInputElement).value,
         custname: (c.querySelector('#u-custname') as HTMLInputElement).value.trim(),
         cust_desc: (c.querySelector('#u-desc') as HTMLInputElement).value.trim(),
+        customer_role: (c.querySelector('#u-role') as HTMLSelectElement).value,
       });
       cmsg.textContent = '✓ המשתמש נוצר';
       cmsg.className = 'ok';

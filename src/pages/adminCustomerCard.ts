@@ -59,7 +59,7 @@ export async function renderCustomerCard(shell: HTMLElement, custname: string): 
 function renderCard(shell: HTMLElement, d: CustomerCard): void {
   const resolvedHint =
     d.policy.kind === 'auto'
-      ? `<div class="muted auto-hint" style="font-size:0.85rem;margin-top:0.5rem">נגזר מ-Priority: ${escapeHtml(d.finance.paymentTerms ?? '—')} → ${d.resolvedKind === 'cash' ? 'מזומן' : 'שוטף'}</div>`
+      ? `<div class="muted auto-hint" style="font-size:0.85rem;margin-top:0.5rem">נגזר מ-Priority: ${escapeHtml(d.finance.paymentTerms ?? '—')} → ${d.resolvedKind === 'cash' ? 'מזומן' : 'שוטף'}${d.policy.enforced ? ' — ודא שהסיווג נכון' : ''}</div>`
       : '';
 
   const financeSection = d.finance.priorityOk
@@ -119,6 +119,10 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
           <input id="cc-nu-email" type="email" placeholder="אימייל (אופציונלי)"/>
           <input id="cc-nu-phone" placeholder="טלפון (אופציונלי)"/>
         </div>
+        <select id="cc-nu-role">
+          <option value="owner">אחראי (גישה לחיוב/תשלום)</option>
+          <option value="orderer">מזמין (הזמנות בלבד)</option>
+        </select>
         <button id="cc-nu-create">צור משתמש</button>
         <div id="cc-nu-msg" style="text-align:center"></div>
       </div>
@@ -159,6 +163,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
         <div>
           <label for="cc-thr" style="display:block;font-size:0.85rem;color:var(--muted,#666);margin-bottom:0.25rem">סף חוב (₪) — חסימת הזמנות מעל סכום זה</label>
           <input id="cc-thr" type="number" min="0" placeholder="—" value="${d.policy.open_debt_threshold != null ? d.policy.open_debt_threshold : ''}" style="width:160px"/>
+          <div class="muted" style="font-size:0.8rem;margin-top:0.3rem">החסימה חלה על כל יתרת החוב הפתוחה מעל הסף (כולל חשבוניות שטרם הגיע מועד פירעונן).</div>
         </div>
         <div>
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
@@ -292,6 +297,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
           password: (shell.querySelector('#cc-nu-password') as HTMLInputElement).value,
           custname: d.custname,
           cust_desc: d.cust_desc ?? '',
+          customer_role: (shell.querySelector('#cc-nu-role') as HTMLSelectElement).value,
         });
         toast('המשתמש נוצר ✓', 'ok');
         const fresh = await api.get<CustomerCard>(`/api/admin/customers/${encodeURIComponent(d.custname)}`);
