@@ -32,8 +32,8 @@ export async function renderInvite(
         <label>שם משתמש (3–32 תווים: אותיות באנגלית, ספרות, נקודה או מקף)</label>
         <input name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9._\\-]+" autocomplete="username" />
         <div style="height:0.5rem"></div>
-        <label>סיסמה (10+ תווים)</label>
-        <input name="password" type="password" required minlength="10" autocomplete="new-password" />
+        <label>סיסמה (6+ תווים)</label>
+        <input name="password" type="password" required minlength="6" autocomplete="new-password" />
         <div style="height:1rem"></div>
         <button type="submit" style="width:100%">סיים והיכנס</button>
         <div id="acc-err" class="error" style="margin-top:0.5rem"></div>
