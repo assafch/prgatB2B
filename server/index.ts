@@ -67,6 +67,7 @@ import {
   submitOrder,
   sweepPendingOrders,
 } from './orders.js';
+import { sweepPendingReceipts } from './priorityReceipts.js';
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
@@ -1584,6 +1585,9 @@ async function startup() {
   // Abandoned held orders (pending_payment, never linked): sweep at boot and hourly.
   sweepPendingOrders();
   setInterval(() => sweepPendingOrders(), 3600_000).unref();
+  // Priority receipts: create/retry pending rows at boot and every 5 min.
+  sweepPendingReceipts().catch(() => {});
+  setInterval(() => { sweepPendingReceipts().catch(() => {}); }, 5 * 60_000).unref();
   // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
   scheduleSnapshots();
   app.listen(PORT, () => {

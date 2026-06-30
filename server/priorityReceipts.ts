@@ -146,3 +146,31 @@ export async function createReceipt(cardPaymentId: string): Promise<string> {
   if (!ivnum) throw new Error('receipt POST returned no IVNUM');
   return ivnum;
 }
+
+/** Background worker: create receipts for pending/failed rows. Never runs in a request. */
+export async function sweepPendingReceipts(): Promise<void> {
+  if (!getSettingBool('priority_receipts_enabled', false)) return;
+  const rows = db.prepare(
+    "SELECT card_payment_id FROM priority_receipts WHERE status IN ('pending','failed') AND attempts < 20 ORDER BY created_at LIMIT 25"
+  ).all() as { card_payment_id: string }[];
+  for (const r of rows) {
+    try {
+      const ivnum = await createReceipt(r.card_payment_id);
+      db.prepare("UPDATE priority_receipts SET status='created', receipt_ivnum=?, error=NULL, updated_at=datetime('now') WHERE card_payment_id=?").run(ivnum, r.card_payment_id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      db.prepare("UPDATE priority_receipts SET status='failed', error=?, attempts=attempts+1, updated_at=datetime('now') WHERE card_payment_id=?").run(msg, r.card_payment_id);
+      console.warn('[receipts] create failed (left for manual handling):', r.card_payment_id, msg);
+    }
+  }
+}
+
+/** Admin recovery queue: receipts that have not been created. */
+export function listFailedReceipts(): Array<Record<string, unknown>> {
+  return db.prepare(
+    "SELECT card_payment_id, status, error, attempts, created_at FROM priority_receipts WHERE status='failed' ORDER BY created_at DESC LIMIT 100"
+  ).all() as Array<Record<string, unknown>>;
+}
+export function failedReceiptCount(): number {
+  return (db.prepare("SELECT COUNT(*) n FROM priority_receipts WHERE status='failed'").get() as { n: number }).n;
+}
