@@ -234,6 +234,25 @@ export async function createOrder(
   return ordname;
 }
 
+/** Look up an existing Priority order by its internal BOOKNUM reference (e.g. "B2B-42").
+ *  Returns the ORDNAME if an order is found, or null if none exists.
+ *  Used by resendApprovedOrder to detect orders that were created at Priority but whose
+ *  response was lost — so we can adopt the existing order instead of creating a duplicate. */
+export async function findOrderByBookNum(
+  config: PriorityConfig,
+  bookNum: string
+): Promise<string | null> {
+  const safe = bookNum.replace(/'/g, "''");
+  const result = await priorityRequest(
+    config,
+    `ORDERS?$filter=BOOKNUM eq '${safe}'&$top=1&$select=ORDNAME,BOOKNUM`
+  );
+  const rows = (result.value || []) as Array<Record<string, unknown>>;
+  if (rows.length === 0) return null;
+  const ordname = String(rows[0].ORDNAME || '').trim();
+  return ordname || null;
+}
+
 // --------- Financial helpers (customer profile, invoices, AR) ---------
 // Entity/field names verified against the live company a051014 via scripts/probe-priority*.mjs.
 

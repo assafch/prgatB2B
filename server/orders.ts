@@ -1,7 +1,7 @@
 // Order submission: cart -> orders_local -> Priority ORDERS -> store ORDNAME back.
 
 import { db } from './db.js';
-import { createOrder, getPriorityConfig, listOrdersForCustomer } from './priority.js';
+import { createOrder, findOrderByBookNum, getPriorityConfig, listOrdersForCustomer } from './priority.js';
 import { getProduct } from './catalog.js';
 import { applyPromotions, type PromoResult } from './promotions.js';
 import { enforcedFor, evaluate } from './paymentPolicy.js';
@@ -422,10 +422,26 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
 
 const PENDING_TTL = '-48 hours';
 /** Delete abandoned held orders (pending_payment, no payment ever linked, older than
- *  the TTL). Local-only — nothing was sent to Priority. Returns the count removed. */
+ *  the TTL). Local-only — nothing was sent to Priority. Returns the count removed.
+ *  Guards: orders with a non-terminal card_payment or an active payment_check are
+ *  excluded — a card may have been charged at the PSP even if linked_payment_id is
+ *  still NULL (IPN dropped), so we must not delete those orders. */
 export function sweepPendingOrders(): number {
   const stale = db.prepare(
-    `SELECT id FROM orders_local WHERE status = 'pending_payment' AND linked_payment_id IS NULL AND created_at < datetime('now', ?)`
+    `SELECT id FROM orders_local
+     WHERE status = 'pending_payment'
+       AND linked_payment_id IS NULL
+       AND created_at < datetime('now', ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM card_payments cp
+         WHERE cp.order_id = CAST(orders_local.id AS TEXT)
+           AND cp.status IN ('created','pending','paid')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM payment_checks pc
+         WHERE pc.order_id = CAST(orders_local.id AS TEXT)
+           AND pc.status NOT IN ('cancelled','bounced')
+       )`
   ).all(PENDING_TTL) as { id: number }[];
   const delLines = db.prepare('DELETE FROM order_lines WHERE order_id = ?');
   const delOrder = db.prepare('DELETE FROM orders_local WHERE id = ?');
@@ -435,14 +451,38 @@ export function sweepPendingOrders(): number {
 }
 
 /** Re-send a paid-but-unsent order to Priority (recovery for a Priority outage after
- *  payment: payment_status='approved' while priority_ordname is still null). */
+ *  payment: payment_status='approved' while priority_ordname is still null).
+ *  Idempotent: before creating, checks Priority for an existing order whose BOOKNUM
+ *  matches our reference "B2B-<id>". If found, adopts the existing ORDNAME and marks
+ *  submitted without re-creating — prevents double-billing when the original POST
+ *  succeeded but its response was lost. */
 export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolean; ordname?: string; error?: string }> {
-  const order = db.prepare(`SELECT id, payment_status, priority_ordname FROM orders_local WHERE id = ?`).get(orderId) as
-    | { id: number; payment_status: string; priority_ordname: string | null } | undefined;
+  const order = db.prepare(`SELECT id, payment_status, priority_ordname, custname FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; payment_status: string; priority_ordname: string | null; custname: string } | undefined;
   if (!order) return { ok: false, error: 'not found' };
   if (order.priority_ordname) return { ok: true, ordname: order.priority_ordname };
   if (order.payment_status !== 'approved') return { ok: false, error: 'not paid' };
   try {
+    // Idempotency check: look for an existing Priority order with our BOOKNUM reference
+    // before creating a new one. This handles the case where the original POST reached
+    // Priority but the response was lost (network blip / server crash after POST).
+    const config = getPriorityConfig();
+    if (config) {
+      try {
+        const existing = await findOrderByBookNum(config, `B2B-${orderId}`);
+        if (existing) {
+          console.log(`[orders] resend: found existing Priority order ${existing} for B2B-${orderId} — adopting (no re-create)`);
+          db.prepare(
+            `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now'), error = NULL WHERE id = ?`
+          ).run(existing, orderId);
+          return { ok: true, ordname: existing };
+        }
+      } catch (lookupErr) {
+        // Lookup failed (Priority down, network error, etc.). Log and fall through to
+        // create — residual risk: duplicate if the original POST actually succeeded.
+        console.warn(`[orders] resend: BOOKNUM lookup failed for B2B-${orderId}; falling back to create (risk: duplicate):`, lookupErr);
+      }
+    }
     const ordname = await sendHeldOrderToPriority(orderId);
     db.prepare(`UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now'), error = NULL WHERE id = ?`).run(ordname, orderId);
     return { ok: true, ordname };
