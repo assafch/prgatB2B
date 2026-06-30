@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { formatMoney, escapeHtml } from '../format.js';
 import { toast } from '../ui.js';
 import { refreshCartCount } from '../main.js';
+import { renderPushCard } from './pushPrompt.js';
 
 interface CartLine {
   partname: string;
@@ -174,6 +175,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
                  <div style="margin-top:0.75rem"><a href="#home">חזרה לדף הבית</a></div>`
           }
         </div>`;
+      renderPushCard(shell, { compact: true });
     } catch (ex) {
       msg.textContent = ex instanceof Error ? ex.message : String(ex);
       msg.className = 'error';

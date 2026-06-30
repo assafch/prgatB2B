@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { formatMoney, formatDateTime, escapeHtml, escapeAttr } from '../format.js';
 import { toast, statusChip, skeleton, errorState, buzz } from '../ui.js';
 import { state, refreshCartCount } from '../main.js';
+import { renderPushCard } from './pushPrompt.js';
 
 interface Suggestion {
   partname: string;
@@ -229,6 +230,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
   });
 
   wireUsualBasket(shell);
+  renderPushCard(shell);
 }
 
 // A3 — usual-basket checklist interactivity. Skips are client-side; the add posts
