@@ -96,6 +96,7 @@ function wirePayPanel(shell: HTMLElement, d: InvoicesResult): void {
   const btn = panel.querySelector('#pay2-go') as HTMLButtonElement;
   const msg = panel.querySelector('#pay2-msg') as HTMLElement;
   const payable = round2(Number(panel.dataset.payable) || 0);
+  const capNote = panel.querySelector('#pay2-cap-note') as HTMLElement | null;
   const cbs = Array.from(shell.querySelectorAll<HTMLInputElement>('.pay2-cb'));
 
   const refresh = () => {
@@ -107,8 +108,17 @@ function wirePayPanel(shell: HTMLElement, d: InvoicesResult): void {
   cbs.forEach((cb) =>
     cb.addEventListener('change', () => {
       if (cbs.some((c) => c.checked)) {
-        const sum = cbs.filter((c) => c.checked).reduce((s, c) => s + Number(c.dataset.amount || 0), 0);
-        amountEl.value = round2(sum).toFixed(2);
+        const selSum = round2(cbs.filter((c) => c.checked).reduce((s, c) => s + Number(c.dataset.amount || 0), 0));
+        const capped = Math.min(selSum, payable); // never display more than the real open balance
+        amountEl.value = capped.toFixed(2);
+        if (capNote) {
+          capNote.textContent =
+            capped < selSum - 0.005
+              ? `יתרת החוב בפועל ${formatMoney(capped)} (קיים תשלום/זיכוי על-חשבון)`
+              : '';
+        }
+      } else {
+        if (capNote) capNote.textContent = '';
       }
       refresh();
     })
@@ -204,6 +214,7 @@ function payPanel(d: InvoicesResult, hasList: boolean): string {
         <label for="pay2-amount" style="flex:none;font-weight:600">סכום (₪)</label>
         <input id="pay2-amount" type="number" inputmode="decimal" min="0" step="0.01" value="${payable.toFixed(2)}" style="flex:1"/>
       </div>
+      <div id="pay2-cap-note" class="muted" style="font-size:0.82rem;margin-top:0.3rem"></div>
       ${inProcess > 0.005 ? `<div class="muted" style="font-size:0.8rem;margin-top:0.45rem">⏳ ₪${inProcess.toFixed(2)} בתהליך עיבוד — היתרה תתעדכן לאחר אישור במשרד.</div>` : ''}
       <button id="pay2-go" class="pay2-cta">💳 לתשלום מאובטח</button>
       <div id="pay2-msg" style="margin-top:0.4rem;text-align:center"></div>

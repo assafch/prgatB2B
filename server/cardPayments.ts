@@ -180,10 +180,19 @@ export async function createCardDebtIntent(
     const unpaid = await getUnpaidInvoices(custname).catch(() => []);
     const chosen = unpaid.filter((u) => selectedNums.includes(u.ivnum));
     if (!chosen.length) throw new Error('לא נבחרו חשבוניות לתשלום');
-    amount = round2(chosen.reduce((sum, u) => sum + u.amount, 0));
+    const sumSelected = round2(chosen.reduce((sum, u) => sum + u.amount, 0));
+    amount = round2(Math.min(sumSelected, debt)); // never charge more than the real open balance
     paidItems = chosen.map((u) => u.ivnum);
-    payplusItems = chosen.map((u) => ({ name: `חשבונית מס׳ ${u.ivnum}`, amount: u.amount }));
-    label = chosen.length === 1 ? `חשבונית מס׳ ${chosen[0].ivnum}` : `תשלום ${chosen.length} חשבוניות`;
+    // If capped below the itemized sum (on-account credit / partial payment exists), the
+    // per-invoice breakdown won't reconcile to the charged total — drop the itemization and
+    // use a generic label so PayPlus items always sum to the amount; keep paid_items as the office hint.
+    if (amount < sumSelected - 0.01) {
+      payplusItems = undefined;
+      label = `תשלום חוב — ${custname}`;
+    } else {
+      payplusItems = chosen.map((u) => ({ name: `חשבונית מס׳ ${u.ivnum}`, amount: u.amount }));
+      label = chosen.length === 1 ? `חשבונית מס׳ ${chosen[0].ivnum}` : `תשלום ${chosen.length} חשבוניות`;
+    }
   } else {
     amount = debt; // whole-balance fallback (e.g. customer with no itemized invoices)
     label = `תשלום חוב — ${custname}`;
