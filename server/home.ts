@@ -31,6 +31,8 @@ export interface HomePromo {
 export interface HomeData {
   custname: string;
   custDesc: string | null;
+  /** display name: the local cust_desc, else the Priority customer name (CUSTDES). */
+  customerName: string | null;
   balance: BalanceSummary;
   priorityOk: boolean;
   balanceOk: boolean;
@@ -120,6 +122,7 @@ export async function getHomeData(
   return {
     custname,
     custDesc,
+    customerName: custDesc || summary.profile?.name || null,
     balance: summary.balance,
     priorityOk: summary.priorityOk,
     balanceOk: summary.balanceOk,

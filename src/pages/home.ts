@@ -31,6 +31,7 @@ interface HomePromo {
 interface HomeData {
   custname: string;
   custDesc: string | null;
+  customerName?: string | null;
   balance: { openTotal: number; openCount: number; obligo: number | null; creditLimit: number | null };
   priorityOk: boolean;
   balanceOk: boolean;
@@ -54,7 +55,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     return;
   }
 
-  const name = d.custDesc || state.me?.cust_desc || '';
+  const name = d.customerName || d.custDesc || state.me?.cust_desc || '';
   const owing = d.balance.openTotal > 0;
   // 'orderer' staff don't see finance (debt/pay) — that's the owner's view.
   const isOrderer = state.me?.customer_role === 'orderer';
