@@ -167,6 +167,10 @@ export async function createCardDebtIntent(
   if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
   const debt = round2(summary.balance.openTotal);
   if (debt <= 0) throw new Error('אין חוב פתוח לתשלום');
+  // Authoritative payable = open balance (ACC_DEBIT) minus card payments already in flight,
+  // so we never charge past the real debt (on-account credit / partial payment) NOR double-pay
+  // an unreconciled in-process payment. Matches the client display + the partial-pay path.
+  const payableCap = round2(Math.max(0, debt - unreconciledCardTotal(custname)));
 
   // Resolve the selection server-side: the client sends only invoice numbers; we look up
   // each invoice's authoritative amount and sum them. No selection → whole open balance.
@@ -181,7 +185,7 @@ export async function createCardDebtIntent(
     const chosen = unpaid.filter((u) => selectedNums.includes(u.ivnum));
     if (!chosen.length) throw new Error('לא נבחרו חשבוניות לתשלום');
     const sumSelected = round2(chosen.reduce((sum, u) => sum + u.amount, 0));
-    amount = round2(Math.min(sumSelected, debt)); // never charge more than the real open balance
+    amount = round2(Math.min(sumSelected, payableCap)); // never charge more than the real open balance
     paidItems = chosen.map((u) => u.ivnum);
     // If capped below the itemized sum (on-account credit / partial payment exists), the
     // per-invoice breakdown won't reconcile to the charged total — drop the itemization and
@@ -194,7 +198,7 @@ export async function createCardDebtIntent(
       label = chosen.length === 1 ? `חשבונית מס׳ ${chosen[0].ivnum}` : `תשלום ${chosen.length} חשבוניות`;
     }
   } else {
-    amount = debt; // whole-balance fallback (e.g. customer with no itemized invoices)
+    amount = payableCap; // whole-balance fallback (e.g. customer with no itemized invoices)
     label = `תשלום חוב — ${custname}`;
   }
   if (amount <= 0) throw new Error('הסכום לתשלום אינו תקין');
