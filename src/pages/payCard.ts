@@ -91,6 +91,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
         <span>לתשלום</span>
         <span id="pc-total" style="color:var(--brand)">${formatMoney(debt)}</span>
       </div>
+      <div id="pc-cap-note" class="muted" style="font-size:0.8rem;margin-top:0.2rem"></div>
       <button id="pc-go" style="width:100%;padding:0.8rem;font-weight:700;margin-top:0.6rem">לתשלום מאובטח ←</button>
       <div id="pc-msg" style="margin-top:0.5rem"></div>
       ${secureNote}
@@ -100,11 +101,19 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
   const cbs = Array.from(shell.querySelectorAll<HTMLInputElement>('.pc-cb'));
   const all = shell.querySelector('#pc-all') as HTMLInputElement;
   const totalEl = shell.querySelector('#pc-total') as HTMLElement;
+  const capNote = shell.querySelector('#pc-cap-note') as HTMLElement | null;
   const btn = shell.querySelector('#pc-go') as HTMLButtonElement;
   const recalc = () => {
     const checked = cbs.filter((c) => c.checked);
-    const total = checked.reduce((s, c) => s + Number(c.dataset.amount || 0), 0);
+    const sum = checked.reduce((s, c) => s + Number(c.dataset.amount || 0), 0);
+    // Never show/charge more than the authoritative open balance: an on-account credit or
+    // partial payment can make the invoices' full totals sum higher than the real debt.
+    const total = Math.round(Math.min(sum, debt) * 100) / 100;
     totalEl.textContent = formatMoney(total);
+    if (capNote) {
+      capNote.textContent =
+        total < sum - 0.005 ? `יתרת החוב בפועל ${formatMoney(total)} (קיים תשלום/זיכוי על-חשבון)` : '';
+    }
     all.checked = checked.length === cbs.length;
     all.indeterminate = checked.length > 0 && checked.length < cbs.length;
     btn.disabled = checked.length === 0;
