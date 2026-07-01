@@ -71,7 +71,7 @@ import { sweepPendingReceipts, listFailedReceipts, failedReceiptCount } from './
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
-import { listCustomersAdmin, getCustomerAdmin, patchCustomer, batchUpdateCustomers } from './customers.js';
+import { listCustomersAdmin, getCustomerAdmin, patchCustomer, batchUpdateCustomers, resetCustomerPortal } from './customers.js';
 import { getAccountSummary, getInvoices, getInvoiceDetail, getUnpaidInvoices, warmFinance } from './finance.js';
 import {
   bulkUpdate,
@@ -1417,6 +1417,10 @@ app.post('/api/admin/customers/batch', requireAdmin, (req: AuthedRequest, res) =
 });
 app.get('/api/admin/customers/:custname', requireAdmin, ah(async (req: AuthedRequest, res) => { res.json(await getCustomerAdmin(req.params.custname)); }));
 app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, res) => { patchCustomer(req.params.custname, (req.body || {}) as Record<string, unknown>); res.json({ ok: true }); });
+app.post('/api/admin/customers/:custname/reset-portal', requireAdmin, (req, res) => {
+  const r = resetCustomerPortal(req.params.custname);
+  res.json({ ok: true, ...r });
+});
 
 
 // ---------- Admin: business analytics (from Priority; cached) ----------

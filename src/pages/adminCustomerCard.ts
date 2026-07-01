@@ -193,6 +193,12 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
       <div class="muted">אין דגלים נוספים כרגע</div>
       <!-- extension point: future per-company flags go here -->
     </div>
+
+    <div class="card" style="margin-top:0.75rem;border:1px solid var(--err,#c00)">
+      <div style="font-weight:700;color:var(--err,#c00)">איפוס נתוני פורטל</div>
+      <div class="muted" style="font-size:0.85rem;margin-top:0.25rem">מוחק את ההזמנות המקומיות והסל של החברה באפליקציה (לניקוי נתוני בדיקה). לא משפיע על Priority, על חשבוניות, או על תשלומים.</div>
+      <button id="cc-reset-portal" class="ghost" style="margin-top:0.5rem;color:var(--err,#c00)">🗑️ מחק הזמנות וסל</button>
+    </div>
   `;
 
   // Wire up save
@@ -309,4 +315,14 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
       }
     };
   }
+
+  // --- Danger: reset portal data ---
+  shell.querySelector('#cc-reset-portal')?.addEventListener('click', async () => {
+    if (!window.confirm(`למחוק את כל ההזמנות המקומיות והסל של ${d.cust_desc || d.custname}? פעולה בלתי הפיכה (לא משפיע על Priority/חשבוניות/תשלומים).`)) return;
+    try {
+      const r = await api.post<{ orders: number; carts: number }>(`/api/admin/customers/${encodeURIComponent(d.custname)}/reset-portal`, {});
+      toast(`נמחקו ${r.orders} הזמנות`, 'ok');
+      renderCustomerCard(shell, d.custname);
+    } catch (ex) { toast(ex instanceof Error ? ex.message : String(ex), 'error'); }
+  });
 }

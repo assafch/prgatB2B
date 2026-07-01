@@ -102,6 +102,18 @@ export function batchUpdateCustomers(items: Array<Record<string, unknown>>): num
   return n;
 }
 
+/** Delete a company's PORTAL data (local orders + their lines via cascade, + any current
+ *  cart) — for test-data cleanup. Does NOT touch users, Priority, or payment records. The
+ *  derived "usual basket" clears automatically (it reads submitted orders). */
+export function resetCustomerPortal(custname: string): { orders: number; carts: number } {
+  const tx = db.transaction(() => {
+    const carts = db.prepare('DELETE FROM cart_lines WHERE user_id IN (SELECT id FROM users WHERE custname = ?)').run(custname).changes;
+    const orders = db.prepare('DELETE FROM orders_local WHERE custname = ?').run(custname).changes; // order_lines cascade
+    return { orders, carts };
+  });
+  return tx();
+}
+
 export async function getCustomerAdmin(custname: string): Promise<Record<string, unknown>> {
   const policy = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt, enforced FROM customer_policies WHERE custname = ?').get(custname)
     || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0, enforced: 0 };
