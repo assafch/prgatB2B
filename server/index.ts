@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSettings } from './db.js';
-import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus } from './adminUsers.js';
+import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus, updateCustomerDetails, deleteCustomerUser } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
 import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
@@ -1377,6 +1377,17 @@ app.post('/api/admin/users/:id/status', requireAdmin, (req: AuthedRequest, res) 
   }
   const result = setUserStatus(Number(req.params.id), status);
   res.status(result.ok ? 200 : 400).json(result.ok ? { ok: true } : { error: result.error });
+});
+
+app.patch('/api/admin/users/:id', requireAdmin, sensitiveLimiter, (req: AuthedRequest, res) => {
+  const b = (req.body || {}) as { custname?: string; cust_desc?: string };
+  const r = updateCustomerDetails(Number(req.params.id), b.custname || '', typeof b.cust_desc === 'string' ? b.cust_desc : null);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, sensitiveLimiter, (req: AuthedRequest, res) => {
+  const r = deleteCustomerUser(Number(req.params.id));
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 // ---------- Admin: company list (group-by custname, cached finance, resolved policy) ----------

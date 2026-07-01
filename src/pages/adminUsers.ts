@@ -61,7 +61,9 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
         ${
           u.role !== 'admin'
             ? `<button class="ghost u-reset" data-id="${u.id}" data-name="${escapeAttr(u.username)}">איפוס סיסמה</button>
-               <button class="ghost u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>`
+               <button class="ghost u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>
+               <button class="ghost u-edit" data-id="${u.id}" data-name="${escapeAttr(u.username)}" data-custname="${escapeAttr(u.custname || '')}" data-desc="${escapeAttr(u.cust_desc || '')}">ערוך מספר לקוח</button>
+               <button class="ghost u-del" data-id="${u.id}" data-name="${escapeAttr(u.username)}">מחק</button>`
             : ''
         }
       </div>`
@@ -117,6 +119,36 @@ export async function renderUsersAdmin(c: HTMLElement): Promise<void> {
       } catch (ex) {
         msg.textContent = ex instanceof Error ? ex.message : String(ex);
         msg.className = 'error';
+      }
+    };
+  });
+  list.querySelectorAll<HTMLButtonElement>('.u-edit').forEach((b) => {
+    b.onclick = async () => {
+      const id = b.dataset.id!;
+      const curCust = b.dataset.custname || '';
+      const curDesc = b.dataset.desc || '';
+      const custname = window.prompt('מספר לקוח ב-Priority (custname):', curCust);
+      if (custname === null) return;
+      const cust_desc = window.prompt('שם העסק (אופציונלי):', curDesc) ?? '';
+      try {
+        await api.patch(`/api/admin/users/${id}`, { custname, cust_desc });
+        toast('עודכן ✓', 'ok');
+        renderUsersAdmin(c);
+      } catch (ex) {
+        toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      }
+    };
+  });
+  list.querySelectorAll<HTMLButtonElement>('.u-del').forEach((b) => {
+    b.onclick = async () => {
+      const id = b.dataset.id!;
+      if (!window.confirm(`למחוק את המשתמש ${b.dataset.name}? פעולה בלתי הפיכה.`)) return;
+      try {
+        await api.del(`/api/admin/users/${id}`);
+        toast('נמחק', 'ok');
+        renderUsersAdmin(c);
+      } catch (ex) {
+        toast(ex instanceof Error ? ex.message : String(ex), 'error');
       }
     };
   });

@@ -92,3 +92,23 @@ export function setUserStatus(userId: number, status: 'active' | 'disabled'): { 
   if (status === 'disabled') revokeOtherSessions(userId); // kill active sessions now
   return { ok: true };
 }
+
+/** Update a customer login's Priority custname and business name. Refuses admins. */
+export function updateCustomerDetails(id: number, custname: string, custDesc: string | null): { ok: true } | { ok: false; error: string } {
+  const cn = (custname || '').trim();
+  if (!cn) return { ok: false, error: 'יש להזין מספר לקוח (custname)' };
+  const u = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string } | undefined;
+  if (!u) return { ok: false, error: 'המשתמש לא נמצא' };
+  if (u.role === 'admin') return { ok: false, error: 'לא ניתן לערוך מנהל' };
+  db.prepare("UPDATE users SET custname = ?, cust_desc = ? WHERE id = ? AND role = 'customer'").run(cn, (custDesc || '').trim() || null, id);
+  return { ok: true };
+}
+
+/** Delete a customer login. Sessions and related data cascade via FK. Refuses admins. */
+export function deleteCustomerUser(id: number): { ok: true } | { ok: false; error: string } {
+  const u = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string } | undefined;
+  if (!u) return { ok: false, error: 'המשתמש לא נמצא' };
+  if (u.role === 'admin') return { ok: false, error: 'לא ניתן למחוק מנהל' };
+  db.prepare("DELETE FROM users WHERE id = ? AND role = 'customer'").run(id);
+  return { ok: true };
+}
