@@ -82,10 +82,12 @@ export async function renderAccount(shell: HTMLElement): Promise<void> {
       </div>
       <div id="passkey-card"></div>
       <div id="push-card"></div>
+      <div id="mobile-card"></div>
       <div id="staff-card"></div>
     `;
     renderPasskeys(shell.querySelector('#passkey-card') as HTMLElement);
     void renderPush(shell.querySelector('#push-card') as HTMLElement);
+    renderMobile(shell.querySelector('#mobile-card') as HTMLElement, a.phone);
     if (isOwner) void renderStaff(shell.querySelector('#staff-card') as HTMLElement);
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
@@ -256,6 +258,30 @@ async function renderStaff(host: HTMLElement): Promise<void> {
     });
   };
   draw(staff);
+}
+
+function renderMobile(host: HTMLElement, phone: string | null): void {
+  host.innerHTML = `
+    <div class="card" style="max-width:720px;margin:1rem auto 0">
+      <div style="font-weight:700;margin-bottom:0.4rem">📱 מספר נייד לעדכונים</div>
+      <div style="display:flex;gap:0.5rem">
+        <input id="acc-mobile" type="tel" inputmode="tel" placeholder="05XXXXXXXX" value="${escapeAttr(phone || '')}" style="flex:1"/>
+        <button id="acc-mobile-save">שמור</button>
+      </div>
+      <div id="acc-mobile-msg" style="margin-top:0.35rem;text-align:center;font-size:0.85rem"></div>
+    </div>`;
+  const mmsg = host.querySelector('#acc-mobile-msg') as HTMLDivElement | null;
+  (host.querySelector('#acc-mobile-save') as HTMLButtonElement | null)?.addEventListener('click', async () => {
+    const val = (host.querySelector('#acc-mobile') as HTMLInputElement).value.trim();
+    try {
+      await api.patch('/api/account/phone', { phone: val });
+      if (mmsg) { mmsg.textContent = 'נשמר ✓'; mmsg.className = 'ok'; }
+      toast('מספר הנייד נשמר ✓', 'ok');
+    } catch (ex) {
+      const m = ex instanceof Error ? ex.message : String(ex);
+      if (mmsg) { mmsg.textContent = m; mmsg.className = 'error'; }
+    }
+  });
 }
 
 function balanceSection(a: Account): string {

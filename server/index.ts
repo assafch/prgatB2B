@@ -840,6 +840,16 @@ app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => 
   });
 }));
 
+app.patch('/api/account/phone', requireCustomer, sensitiveLimiter, (req: AuthedRequest, res) => {
+  const raw = String(((req.body || {}) as { phone?: string }).phone || '').trim();
+  const digits = raw.replace(/[^0-9]/g, '');
+  // allow clearing, else require a valid Israeli mobile (05XXXXXXXX = 10 digits)
+  if (digits && !/^05\d{8}$/.test(digits)) { res.status(400).json({ error: 'מספר נייד לא תקין (למשל 05XXXXXXXX)' }); return; }
+  const phone = digits || null;
+  db.prepare('UPDATE users SET phone = ? WHERE id = ?').run(phone, req.user!.id);
+  res.json({ ok: true, phone });
+});
+
 app.get('/api/invoices', requireOwner, financeLimiter, ah(async (req: AuthedRequest, res) => {
   const custname = req.user!.custname!;
   const result = await getInvoices(custname);
