@@ -37,7 +37,12 @@ export function bottomNav({ active, cartCount }: NavState): string {
 }
 
 let toastTimer: number | undefined;
-export function toast(message: string, kind: 'ok' | 'error' | 'info' = 'info'): void {
+/**
+ * `action` adds an inline button (e.g. cart swipe-delete's "בטל"/Undo) — the toast
+ * then lingers longer (5s vs 3.2s) to give a real chance to tap it, and any tap
+ * dismisses the toast immediately before running the callback.
+ */
+export function toast(message: string, kind: 'ok' | 'error' | 'info' = 'info', action?: { label: string; onClick: () => void }): void {
   let el = document.getElementById('app-toast');
   if (!el) {
     el = document.createElement('div');
@@ -45,12 +50,21 @@ export function toast(message: string, kind: 'ok' | 'error' | 'info' = 'info'): 
     el.setAttribute('role', 'status');
     document.body.appendChild(el);
   }
-  el.className = `app-toast ${kind} show`;
-  el.textContent = message;
+  el.className = `app-toast ${kind} show${action ? ' has-action' : ''}`;
+  if (action) {
+    el.innerHTML = `<span class="toast-msg">${escapeHtml(message)}</span><button type="button" class="toast-action">${escapeHtml(action.label)}</button>`;
+    el.querySelector('.toast-action')!.addEventListener('click', () => {
+      if (toastTimer) clearTimeout(toastTimer);
+      el!.className = 'app-toast';
+      action.onClick();
+    });
+  } else {
+    el.textContent = message;
+  }
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
     el!.className = 'app-toast';
-  }, 3200);
+  }, action ? 5000 : 3200);
 }
 
 // Promise-based confirm (replaces native confirm() which is ugly on mobile).

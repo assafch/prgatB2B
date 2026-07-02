@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { formatMoney, escapeHtml, escapeAttr } from '../format.js';
-import { toast, confirmDialog, qtyStepper, bindSteppers, emptyState } from '../ui.js';
+import { toast, confirmDialog, qtyStepper, bindSteppers, emptyState, priceBlock, buzz, OOS_LABEL } from '../ui.js';
 import { refreshCartCount } from '../main.js';
 
 interface CartLine {
@@ -47,6 +47,8 @@ async function load(shell: HTMLElement): Promise<void> {
   }
 
   const hasUnavailable = cart.lines.some((l) => !l.available);
+  const totalItems = cart.lines.length;
+  const totalUnits = cart.lines.reduce((s, l) => s + l.quantity, 0);
 
   // Customer-discount summary (מחירון struck total → הנחת לקוח −N%) — independent
   // of the promotions engine below (coupon/promo savings apply AFTER this discount,
@@ -79,46 +81,51 @@ async function load(shell: HTMLElement): Promise<void> {
       : '';
 
   shell.innerHTML = `
-    <div class="card">
-      <h1 style="margin-top:0">הסל שלי</h1>
-      <div id="cart-lines">
-        ${cart.lines.map(lineRow).join('')}
-      </div>
-      ${giftsHtml}
-      ${giftNudge}
+    <div class="cart-head">
+      <span class="cart-head-title">הסל שלי</span>
+      <span class="cart-head-sub">${totalItems} פריטים · ${totalUnits} יח׳</span>
+      <button type="button" id="clear" class="cart-head-clear">רוקן סל</button>
+    </div>
+    <div id="cart-lines" class="cart-lines">
+      ${cart.lines.map(lineRow).join('')}
+    </div>
+    ${giftsHtml}
+    ${giftNudge}
+    <div class="cart-tpl-row">
+      <button type="button" id="save-tpl" class="cart-tpl-link">💾 שמור כתבנית</button>
+      <span>·</span>
+      <a href="#templates" class="cart-tpl-link">📋 התבניות שלי</a>
+    </div>
+    <div class="thumb-bar-spacer" id="cart-bar-spacer"></div>
+    <div class="thumb-bar cart-summary-bar">
+      ${hasCustDiscount ? `<div class="cart-summary-row"><span>סה״כ לפי מחירון</span><s class="price-was">${formatMoney(listTotal)}</s></div>` : ''}
       ${
         hasCustDiscount
-          ? `<div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border)">
-               <div class="cart-discount-row"><span>מחירון</span><s class="price-was">${formatMoney(listTotal)}</s></div>
-               <div class="cart-discount-row pct"><span>הנחת לקוח <span dir="ltr">−${custDiscountPct}%</span></span><span dir="ltr">−${formatMoney(custDiscountAmt)}</span></div>
-             </div>`
+          ? `<div class="cart-summary-row discount"><span>הנחת לקוח <span dir="ltr">−${custDiscountPct}%</span></span><span dir="ltr">−${formatMoney(custDiscountAmt)}</span></div>`
           : ''
       }
+      ${hasCustDiscount ? `<div class="cart-savings-pill">💰 חסכת ${formatMoney(custDiscountAmt)} בהזמנה זו</div>` : ''}
       ${
         hasDiscount
-          ? `<div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border)">
-               <div class="cart-promo-line muted"><span>סכום ביניים</span><span>${formatMoney(cart.total)}</span></div>
-               ${promoLinesHtml}
-             </div>`
+          ? `<div class="cart-promo-line muted"><span>סכום ביניים</span><span>${formatMoney(cart.total)}</span></div>${promoLinesHtml}`
           : ''
       }
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;padding-top:0.75rem;border-top:2px solid var(--border)">
-        <span style="font-weight:700">סה״כ${hasDiscount ? ' לתשלום' : ''}</span>
-        <span style="font-weight:900;font-size:1.3rem;color:var(--brand)">${formatMoney(finalTotal)}</span>
-      </div>
-      ${hasCustDiscount ? `<div class="cart-savings-pill">💰 חסכת ${formatMoney(custDiscountAmt)} בהזמנה זו</div>` : ''}
-      <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">המחיר הסופי ייקבע ב-Priority לפי ההסכם שלך</div>
-    </div>
-    <div style="display:flex;gap:0.5rem;margin-top:1rem">
-      <button class="ghost" id="clear">רוקן סל</button>
-      <button id="checkout" style="flex:1" ${hasUnavailable ? 'disabled' : ''}>המשך לסיום הזמנה ←</button>
-    </div>
-    ${hasUnavailable ? `<div class="error" style="text-align:center;margin-top:0.5rem;font-size:0.9rem">יש להסיר פריטים שאינם זמינים כדי להמשיך</div>` : ''}
-    <div style="display:flex;gap:1rem;justify-content:center;margin-top:0.6rem;font-size:0.9rem">
-      <button id="save-tpl" style="background:none;border:none;color:var(--brand);cursor:pointer;padding:0">💾 שמירה כתבנית</button>
-      <a href="#templates">📋 התבניות שלי</a>
+      <div class="cart-summary-total"><b>סה״כ לתשלום</b><b>${formatMoney(finalTotal)}</b></div>
+      <button id="checkout" class="cart-summary-cta" ${hasUnavailable ? 'disabled' : ''}>לסיום הזמנה · ${formatMoney(finalTotal)} ←</button>
+      ${
+        hasUnavailable
+          ? `<div class="cart-blocked-note">יש להסיר פריטים שאינם זמינים כדי להמשיך</div>`
+          : `<div class="cart-certainty">✓ המחירים סופיים וכוללים את ההנחה שלך לפי ההסכם</div>`
+      }
     </div>
   `;
+
+  // Reserve exactly as much scroll-bottom padding as the sticky bar occupies, so
+  // the last row is never hidden behind it (bar height varies with the discount
+  // rows above, so this is measured, not guessed).
+  const spacer = shell.querySelector<HTMLElement>('#cart-bar-spacer');
+  const bar = shell.querySelector<HTMLElement>('.cart-summary-bar');
+  if (spacer && bar) spacer.style.height = `${Math.ceil(bar.getBoundingClientRect().height) + 10}px`;
 
   bindSteppers(shell, async (part, qty) => {
     try {
@@ -132,13 +139,7 @@ async function load(shell: HTMLElement): Promise<void> {
     }
   });
 
-  shell.querySelectorAll<HTMLButtonElement>('button.remove').forEach((b) => {
-    b.addEventListener('click', async () => {
-      await api.put(`/api/cart/lines/${encodeURIComponent(b.dataset.part!)}`, { quantity: 0 });
-      await refreshCartCount();
-      await load(shell);
-    });
-  });
+  bindSwipe(shell);
 
   shell.querySelector('#clear')?.addEventListener('click', async () => {
     if (!(await confirmDialog('לרוקן את כל הסל?', 'רוקן', 'ביטול'))) return;
@@ -164,17 +165,132 @@ async function load(shell: HTMLElement): Promise<void> {
 }
 
 function lineRow(l: CartLine): string {
+  const name = l.partdes || l.partname;
+  const unavailable = !l.available;
   return `
-    <div class="dash-row" style="padding:0.6rem 0;border-bottom:1px solid var(--border)${l.available ? '' : ';opacity:0.6'}">
-      <div class="grow">
-        <div style="font-weight:600">${escapeHtml(l.partdes || l.partname)}</div>
-        <div class="muted" style="font-size:0.82rem">${escapeHtml(l.partname)}${
-    l.price != null ? ` · ${formatMoney(l.price)} ליח׳` : ''
-  }</div>
-        ${l.available ? '' : `<div class="error" style="font-size:0.8rem">${l.outOfStock ? 'אזל מהמלאי — יש להסיר' : 'לא זמין יותר — יש להסיר'}</div>`}
+    <div class="swipe-wrap cart-swipe-wrap">
+      <div class="swipe-bg cart-swipe-bg" aria-hidden="true">🗑 מחק</div>
+      <div class="cart-line swipe-card${unavailable ? ' cart-line-unavail' : ''}" data-part="${escapeAttr(l.partname)}" data-qty="${l.quantity}" data-name="${escapeAttr(name)}">
+        <div class="cart-line-top">
+          <div class="cart-line-thumb" aria-hidden="true"><span>—</span></div>
+          <div class="cart-line-name">${escapeHtml(name)}</div>
+          <div class="cart-line-total">${l.price != null ? formatMoney(l.line_total) : '—'}</div>
+        </div>
+        <div class="cart-line-sku">${escapeHtml(l.partname)} · ${priceBlock(l, { variant: 'inline', size: 'sm' })}</div>
+        <div class="cart-line-bottom">
+          ${
+            l.available
+              ? `<div class="cart-stepper-compact">${qtyStepper(l.partname, l.quantity, 1)}</div><span class="cart-line-units">${l.quantity} יח׳</span>`
+              : `<span class="cart-line-unavail-note">${l.outOfStock ? OOS_LABEL : 'לא זמין יותר'} — החליקו להסרה</span>`
+          }
+        </div>
       </div>
-      ${l.available ? qtyStepper(l.partname, l.quantity, 1) : ''}
-      <div style="min-width:72px;text-align:left;font-weight:700">${l.price != null ? formatMoney(l.line_total) : '—'}</div>
-      <button class="ghost remove" data-part="${escapeAttr(l.partname)}" aria-label="הסר" style="padding:0.4rem 0.6rem">🗑</button>
     </div>`;
+}
+
+// Swipe-to-delete — the same axis-lock mechanic as the catalog's swipe-to-add
+// (A2, src/pages/catalog.ts): axis locks after the first 10px so a vertical
+// scroll is never hijacked. Committing past the threshold removes the line
+// immediately (no confirm dialog) and offers an Undo toast; the stepper's "−"
+// down to 0 and "רוקן סל" remain as the non-gesture fallbacks. Unlike the
+// catalog's add-swipe, this applies to unavailable/OOS lines too — removing
+// them is exactly what those lines need.
+function bindSwipe(shell: HTMLElement): void {
+  const root = shell.querySelector('#cart-lines') as HTMLElement;
+  if (!root) return;
+  let active: HTMLElement | null = null;
+  let startX = 0;
+  let startY = 0;
+  let dx = 0;
+  let axis: '' | 'x' | 'y' = '';
+  let pid = -1;
+  const THRESH = -80; // leftward px past which the delete commits
+
+  const endSwipe = (commit: boolean) => {
+    if (!active) return;
+    const card = active;
+    active = null;
+    axis = '';
+    card.classList.remove('swiping');
+    card.classList.add('snapping');
+    card.style.transform = '';
+    if (commit) {
+      const part = card.dataset.part!;
+      const name = card.dataset.name || part;
+      const qty = Number(card.dataset.qty) || 0;
+      void deleteLineWithUndo(shell, part, name, qty);
+    }
+    setTimeout(() => card.classList.remove('snapping'), 240);
+  };
+
+  root.addEventListener('pointerdown', (e) => {
+    const card = (e.target as HTMLElement).closest('.swipe-card') as HTMLElement | null;
+    if (!card) return;
+    if ((e.target as HTMLElement).closest('a, button, input')) return; // let controls work
+    active = card;
+    startX = e.clientX;
+    startY = e.clientY;
+    dx = 0;
+    axis = '';
+    pid = e.pointerId;
+    card.classList.remove('snapping');
+  });
+
+  root.addEventListener('pointermove', (e) => {
+    if (!active || e.pointerId !== pid) return;
+    const mx = e.clientX - startX;
+    const my = e.clientY - startY;
+    if (!axis) {
+      if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+      axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if (axis === 'x') {
+        active.classList.add('swiping');
+        try {
+          active.setPointerCapture(pid);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        endSwipe(false); // vertical → release to native scroll
+        return;
+      }
+    }
+    if (axis !== 'x') return;
+    e.preventDefault();
+    dx = Math.max(-160, Math.min(0, mx)); // RTL: only leftward reveals the delete layer
+    active.style.transform = `translateX(${dx}px)`;
+  });
+
+  root.addEventListener('pointerup', (e) => {
+    if (!active || e.pointerId !== pid) return;
+    const commit = axis === 'x' && dx <= THRESH;
+    endSwipe(commit);
+  });
+  root.addEventListener('pointercancel', () => endSwipe(false));
+}
+
+async function deleteLineWithUndo(shell: HTMLElement, part: string, name: string, prevQty: number): Promise<void> {
+  try {
+    await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: 0 });
+    buzz();
+    await refreshCartCount();
+    await load(shell);
+    toast(`${name} הוסר מהסל`, 'info', {
+      label: 'בטל',
+      onClick: () => {
+        void (async () => {
+          try {
+            await api.put(`/api/cart/lines/${encodeURIComponent(part)}`, { quantity: prevQty });
+            await refreshCartCount();
+            await load(shell);
+          } catch (ex) {
+            toast(ex instanceof Error ? ex.message : String(ex), 'error');
+          }
+        })();
+      },
+    });
+  } catch (ex) {
+    toast(ex instanceof Error ? ex.message : String(ex), 'error');
+    await load(shell);
+  }
 }
