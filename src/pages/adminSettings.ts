@@ -23,6 +23,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       <div class="set-row"><span>תשלום בצ׳ק (צילום)</span><input type="checkbox" id="s-check" ${on('check_payment_enabled', true) ? 'checked' : ''}/></div>
       <div class="set-row"><span>תשלום בכרטיס אשראי (Visa)</span><input type="checkbox" id="s-pay" ${on('payments_enabled') ? 'checked' : ''}/></div>
       <div class="muted" style="font-size:0.8rem;margin-top:-0.2rem">תשלום בכרטיס דורש חשבון סליקה (PSP) — השאירו כבוי עד שיוגדר.</div>
+      <div class="set-row"><span>מחיר מחירון + הנחת לקוח (קו אדום על המחיר המלא)</span><input type="checkbox" id="s-discount" ${on('discount_pricing_enabled') ? 'checked' : ''}/></div>
 
       <hr style="margin:1rem 0;border:none;border-top:1px solid var(--border)"/>
       <div class="set-row"><span>הודעה ללקוחות (באנר)</span><input type="checkbox" id="s-ann" ${on('announcement_enabled') ? 'checked' : ''}/></div>
@@ -84,6 +85,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       await api.patch('/api/admin/settings', {
         check_payment_enabled: (c.querySelector('#s-check') as HTMLInputElement).checked,
         payments_enabled: (c.querySelector('#s-pay') as HTMLInputElement).checked,
+        discount_pricing_enabled: (c.querySelector('#s-discount') as HTMLInputElement).checked,
         announcement_enabled: (c.querySelector('#s-ann') as HTMLInputElement).checked,
         announcement_text: (c.querySelector('#s-ann-text') as HTMLTextAreaElement).value,
         maintenance_enabled: (c.querySelector('#s-maint') as HTMLInputElement).checked,

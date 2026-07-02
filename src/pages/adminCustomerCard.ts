@@ -32,6 +32,7 @@ interface CustomerCard {
   resolvedKind: 'cash' | 'net';
   users: CustomerCardUser[];
   finance: CustomerCardFinance;
+  discount?: { percent: number | null; source: string | null; updated_at: string | null };
 }
 
 function roleLabel(role: string): string {
@@ -175,6 +176,19 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
           <button id="cc-save">שמור מדיניות</button>
           <span id="cc-msg" style="margin-inline-start:0.75rem"></span>
         </div>
+        <div class="set-row" style="align-items:center">
+          <span>הנחת לקוח (%)
+            <span class="muted" style="font-size:0.75rem">${d.discount?.percent != null
+              ? `${d.discount.percent}% · ${d.discount.source === 'manual' ? 'ידני' : 'מהזמנות'} · עודכן ${String(d.discount.updated_at || '').slice(0, 10)}`
+              : 'אין — יסונכרן מהזמנות או הזינו ידנית'}</span>
+          </span>
+          <span style="display:flex;gap:0.4rem;align-items:center">
+            <input id="cc-discount" type="number" inputmode="decimal" min="0" max="60" step="0.5" style="width:4.5rem"
+              value="${d.discount?.source === 'manual' ? d.discount.percent : ''}" placeholder="אוטו׳"/>
+            <button id="cc-discount-save" class="ghost">שמור</button>
+            <button id="cc-discount-refresh" class="ghost" title="משוך מההזמנות האחרונות ב-Priority">↻</button>
+          </span>
+        </div>
       </div>
     </div>
 
@@ -315,6 +329,23 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
       }
     };
   }
+
+  // --- Discount override ---
+  shell.querySelector('#cc-discount-save')?.addEventListener('click', async () => {
+    const v = (shell.querySelector('#cc-discount') as HTMLInputElement).value.trim();
+    try {
+      await api.patch(`/api/admin/customers/${encodeURIComponent(d.custname)}`, { discount_percent: v === '' ? null : Number(v) });
+      toast('הנחה נשמרה ✓', 'ok');
+      renderCustomerCard(shell, d.custname);
+    } catch (ex) { toast(ex instanceof Error ? ex.message : String(ex), 'error'); }
+  });
+  shell.querySelector('#cc-discount-refresh')?.addEventListener('click', async () => {
+    try {
+      const r = await api.post<{ percent: number | null }>(`/api/admin/customers/${encodeURIComponent(d.custname)}/refresh-discount`, {});
+      toast(r.percent != null ? `נמשך: ${r.percent}%` : 'לא נמצאה הנחה בהזמנות', 'ok');
+      renderCustomerCard(shell, d.custname);
+    } catch (ex) { toast(ex instanceof Error ? ex.message : String(ex), 'error'); }
+  });
 
   // --- Danger: reset portal data ---
   shell.querySelector('#cc-reset-portal')?.addEventListener('click', async () => {
