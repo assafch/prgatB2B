@@ -133,9 +133,14 @@ async function createPspIntent(opts: {
  *  Only counts debt kinds (not order_payment) so prepays don't wrongly deflate the cap. */
 const RECON_WINDOW = '-3 days';
 // A hosted-page intent that was never completed only deflates the payable cap for
-// this long. Beyond it the page link is long dead (PSP pages expire well under an
-// hour) — without this bound one declined/abandoned attempt would zero the cap for
-// the whole RECON_WINDOW and lock the customer out of card payment.
+// this long. Beyond it the page link is long dead (PayPlus pages are created with a
+// hard 30-min expiry) — without this bound one declined/abandoned attempt would zero
+// the cap for the whole RECON_WINDOW and lock the customer out of card payment.
+// Accepted residual: a 'failed' (declined) intent stops deflating the cap immediately
+// so the customer can retry at once, but its page stays chargeable until the 30-min
+// expiry — paying BOTH a fresh intent and the stale declined page in that window
+// over-pays the debt. Both charges are recorded 'paid' (confirmCard pays from any
+// non-paid status), so the office sees it at reconciliation and refunds via PayPlus.
 const PENDING_INTENT_TTL = '-2 hours';
 export function unreconciledCardTotal(custname: string): number {
   const row = db

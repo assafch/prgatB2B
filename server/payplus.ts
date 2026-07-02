@@ -77,6 +77,10 @@ export async function createPaymentPage(input: {
     amount: Number(input.amount.toFixed(2)), // SHEKELS, never agorot
     currency_code: 'ILS',
     more_info: input.ref, // our 24-hex intent id — echoed back, cross-checked on confirm
+    // Hard 30-minute page expiry (don't inherit whatever the terminal's page settings
+    // say): bounds how long a stale/declined page stays chargeable after we've marked
+    // its intent failed/expired and freed the payable cap.
+    expiry_datetime: '30',
     sendEmailApproval: false,
     sendEmailFailure: false,
     send_failure_callback: true, // also fire the IPN on declines
