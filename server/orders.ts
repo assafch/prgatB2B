@@ -546,23 +546,37 @@ export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolea
 
 /** Boot-time recovery: any order still in 'submitting' means the process died (or was
  *  drained) mid-POST — the ERP may or may not hold the order. Resolve each by BOOKNUM:
- *  found → adopt as submitted; not found → mark failed (held orders keep
- *  payment_status='approved' so they land in the admin resend queue). Runs at boot
- *  only, before traffic — a live process never leaves rows in this state at rest. */
+ *  found → adopt as submitted (and clear the cart, exactly like a live adoption);
+ *  not found → mark failed (held orders keep payment_status='approved' so they land
+ *  in the admin resend queue). The stuck set is captured synchronously at boot
+ *  (before traffic); resolution waits 90s — a POST force-killed at the 35s drain cap
+ *  can commit at Priority up to its 120s budget, and 35s + 90s clears that window.
+ *  Declaring 'failed' too early would invite the customer retry-duplicate this
+ *  function exists to prevent. */
 export async function recoverStuckSubmittingOrders(): Promise<void> {
   const stuck = db.prepare(
-    `SELECT id, custname FROM orders_local WHERE status = 'submitting'`
-  ).all() as { id: number; custname: string }[];
+    `SELECT id, custname, user_id FROM orders_local WHERE status = 'submitting'`
+  ).all() as { id: number; custname: string; user_id: number }[];
   if (!stuck.length) return;
   const config = getPriorityConfig();
-  console.warn(`[orders] boot recovery: ${stuck.length} order(s) stuck in 'submitting'`);
+  if (!config) {
+    // No Priority credentials on this boot — we have zero ERP evidence either way.
+    // Leave the rows for a properly-configured boot; never mark failed blind.
+    console.warn(`[orders] boot recovery: ${stuck.length} stuck order(s) but Priority is not configured — leaving for next boot`);
+    return;
+  }
+  console.warn(`[orders] boot recovery: ${stuck.length} order(s) stuck in 'submitting' — resolving in 90s`);
+  await new Promise((r) => setTimeout(r, 90_000));
   for (const o of stuck) {
     try {
-      const existing = config ? await findOrderByBookNum(config, `B2B-${o.id}`, o.custname) : null;
+      const existing = await findOrderByBookNum(config, `B2B-${o.id}`, o.custname);
       if (existing) {
         db.prepare(
           `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now'), error = NULL WHERE id = ? AND status = 'submitting'`
         ).run(existing, o.id);
+        // The interrupted submit never reached its clearCart — without this, the
+        // still-full cart invites a resubmit of an order the ERP already holds.
+        clearCart(o.user_id);
         console.log(`[orders] boot recovery: order ${o.id} adopted Priority ${existing}`);
       } else {
         db.prepare(

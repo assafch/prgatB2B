@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { formatMoney, escapeHtml } from '../format.js';
 import { toast } from '../ui.js';
-import { refreshCartCount } from '../main.js';
+import { refreshCartCount, state } from '../main.js';
 import { renderPushCard } from './pushPrompt.js';
 
 interface CartLine {
@@ -73,11 +73,18 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
   const dates = deliveryOptions();
 
   // Hard debt block — disables order submission when customer has open debt and policy blocks it.
+  // netDebt is 0 for staff 'orderer' logins (server redacts the amount) — show the
+  // block without a nonsense "₪0.00" figure, and point them at the owner.
+  const isOrderer = state.me?.customer_role === 'orderer';
   const debtBlock = home?.paymentPolicy?.blocksOnDebt
     ? `<div class="card" style="border:1px solid var(--err);background:#fdecec;margin-bottom:0.75rem">
          <div style="font-weight:700;color:var(--err)">לא ניתן לבצע הזמנה — קיים חוב פתוח</div>
-         <div class="muted" style="font-size:0.9rem;margin-top:0.25rem">יש לסגור חוב פתוח של ₪${home.paymentPolicy!.netDebt.toFixed(2)} לפני ביצוע הזמנה.</div>
-         <a class="es-cta" href="#invoices" style="display:inline-block;margin-top:0.6rem">סגור חוב ←</a>
+         <div class="muted" style="font-size:0.9rem;margin-top:0.25rem">${
+           !isOrderer && home.paymentPolicy!.netDebt > 0
+             ? `יש לסגור חוב פתוח של ₪${home.paymentPolicy!.netDebt.toFixed(2)} לפני ביצוע הזמנה.`
+             : 'יש לסגור את החוב הפתוח לפני ביצוע הזמנה — פנו לבעל העסק.'
+         }</div>
+         ${!isOrderer ? '<a class="es-cta" href="#invoices" style="display:inline-block;margin-top:0.6rem">סגור חוב ←</a>' : ''}
        </div>`
     : '';
 

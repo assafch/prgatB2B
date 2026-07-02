@@ -166,10 +166,14 @@ export async function expireStaleCardIntents(): Promise<number> {
   let expired = 0;
   for (const row of stale) {
     try {
-      const fresh = await confirmCard(row.id); // pays + approves order if the PSP says paid
+      // throwOnQueryFailure: expiring is only safe on an AUTHORITATIVE not-paid
+      // answer. On a failed PSP query the row stays 'pending' and the next sweep
+      // (10 min) retries — it no longer deflates the cap past the TTL anyway.
+      const fresh = await confirmCard(row.id, { throwOnQueryFailure: true }); // pays + approves order if the PSP says paid
       if (fresh && fresh.status === 'paid') continue;
-    } catch {
-      /* PSP unreachable — fall through: the page is hours past its 30-min expiry */
+    } catch (err) {
+      console.warn(`[card] expiry sweep: PSP query failed for ${row.id} — retrying next sweep:`, err instanceof Error ? err.message : err);
+      continue;
     }
     const r = db.prepare(`UPDATE card_payments SET status = 'expired' WHERE id = ? AND status = 'pending'`).run(row.id);
     expired += r.changes;
@@ -386,8 +390,11 @@ async function returnPaidCard(id: string): Promise<CardRow | null> {
 }
 
 /** Authoritative confirm via provider re-query (callback never trusted). Cross-
- *  checks the returned ref === our intent id and the amount before marking paid. */
-export async function confirmCard(id: string): Promise<CardRow | null> {
+ *  checks the returned ref === our intent id and the amount before marking paid.
+ *  opts.throwOnQueryFailure: rethrow PSP query errors instead of returning the row
+ *  unchanged — callers that must DISTINGUISH "PSP says not paid" from "no answer"
+ *  (the expiry sweep) need the difference; the request paths deliberately don't. */
+export async function confirmCard(id: string, opts?: { throwOnQueryFailure?: boolean }): Promise<CardRow | null> {
   const row = getCardAny(id);
   if (!row) return null;
   if (row.status === 'paid') return row;
@@ -397,6 +404,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
     try {
       tx = await tranzila.findTransaction({ ref: id, index: row.tranzila_index, createdAt: row.created_at });
     } catch (err) {
+      if (opts?.throwOnQueryFailure) throw err;
       console.warn('[card] tranzila confirm query failed:', err instanceof Error ? err.message : err);
       return row;
     }
@@ -430,6 +438,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
       // re-query against Transactions/View is the authoritative confirmation.
       tx = await payplus.findTransaction({ ref: id });
     } catch (err) {
+      if (opts?.throwOnQueryFailure) throw err;
       console.warn('[card] payplus confirm query failed:', err instanceof Error ? err.message : err);
       return row;
     }
@@ -461,6 +470,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
   try {
     tx = await getTransaction(row.upay_cashier_id);
   } catch (err) {
+    if (opts?.throwOnQueryFailure) throw err;
     console.warn('[card] confirm query failed:', err instanceof Error ? err.message : err);
     return row;
   }
