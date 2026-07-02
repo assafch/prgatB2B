@@ -74,6 +74,7 @@ import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
 import { listCustomersAdmin, getCustomerAdmin, patchCustomer, batchUpdateCustomers, resetCustomerPortal } from './customers.js';
 import { getAccountSummary, getInvoices, getInvoiceDetail, getUnpaidInvoices, warmFinance } from './finance.js';
+import { refreshCustomerDiscounts, sweepCustomerDiscounts } from './discounts.js';
 import {
   bulkUpdate,
   batchUpdate,
@@ -353,7 +354,11 @@ app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res
   setSessionCookie(res, token, user.role);
   db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id);
   // Warm the finance snapshot in the background so the first dashboard load is instant.
-  if (user.role === 'customer' && user.custname) warmFinance(user.custname);
+  if (user.role === 'customer' && user.custname) {
+    warmFinance(user.custname);
+    // Fire-and-forget: first catalog paint uses whatever is cached; this refreshes for next time.
+    refreshCustomerDiscounts(user.custname).catch(() => {});
+  }
   res.json({
     user: {
       id: user.id,
@@ -1439,11 +1444,36 @@ app.post('/api/admin/customers/batch', requireAdmin, (req: AuthedRequest, res) =
   res.json({ changes: batchUpdateCustomers(items) });
 });
 app.get('/api/admin/customers/:custname', requireAdmin, ah(async (req: AuthedRequest, res) => { res.json(await getCustomerAdmin(req.params.custname)); }));
-app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, res) => { patchCustomer(req.params.custname, (req.body || {}) as Record<string, unknown>); res.json({ ok: true }); });
+app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, res) => {
+  const body = (req.body || {}) as Record<string, unknown>;
+  if ('discount_percent' in body) {
+    const raw = body.discount_percent;
+    if (raw === null || raw === '') {
+      db.prepare("DELETE FROM customer_discounts WHERE custname = ? AND source = 'manual'").run(req.params.custname);
+    } else {
+      const pct = Number(raw);
+      if (!isFinite(pct) || pct <= 0 || pct > 60) { res.status(400).json({ error: 'אחוז הנחה חייב להיות בין 0 ל-60' }); return; }
+      db.prepare(
+        `INSERT INTO customer_discounts (custname, percent, source, updated_at) VALUES (?, ?, 'manual', datetime('now'))
+         ON CONFLICT(custname) DO UPDATE SET percent = excluded.percent, source = 'manual', updated_at = datetime('now')`
+      ).run(req.params.custname, pct);
+    }
+  }
+  patchCustomer(req.params.custname, body);
+  res.json({ ok: true });
+});
 app.post('/api/admin/customers/:custname/reset-portal', requireAdmin, (req, res) => {
   const r = resetCustomerPortal(req.params.custname);
   res.status(r.ok ? 200 : 409).json(r);
 });
+app.post('/api/admin/customers/:custname/refresh-discount', requireAdmin, ah(async (req, res) => {
+  try {
+    const percent = await refreshCustomerDiscounts(req.params.custname);
+    res.json({ ok: true, percent });
+  } catch (err) {
+    res.status(502).json({ error: 'רענון מ-Priority נכשל — נסו שוב' });
+  }
+}));
 
 
 // ---------- Admin: business analytics (from Priority; cached) ----------
@@ -1650,6 +1680,9 @@ async function startup() {
   // Priority receipts: create/retry pending rows at boot and every 5 min.
   sweepPendingReceipts().catch(() => {});
   setInterval(() => { sweepPendingReceipts().catch(() => {}); }, 5 * 60_000).unref();
+  // Per-customer discount percents (derived from recent Priority orders): daily.
+  sweepCustomerDiscounts().catch((err) => console.warn('[discounts] sweep failed:', err));
+  setInterval(() => { sweepCustomerDiscounts().catch((err) => console.warn('[discounts] sweep failed:', err)); }, 86400_000).unref();
   // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
   scheduleSnapshots();
   const server = app.listen(PORT, () => {

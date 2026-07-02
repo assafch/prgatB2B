@@ -145,5 +145,7 @@ export async function getCustomerAdmin(custname: string): Promise<Record<string,
     };
   } catch { /* leave priorityOk:false */ }
   const resolvedKind = resolvePolicy(custname, (finance.paymentTerms as string) ?? null).kind;
-  return { custname, cust_desc, policy, resolvedKind, users, finance };
+  const discount = db.prepare('SELECT percent, source, updated_at FROM customer_discounts WHERE custname = ?').get(custname)
+    || { percent: null, source: null, updated_at: null };
+  return { custname, cust_desc, policy, resolvedKind, users, finance, discount };
 }
