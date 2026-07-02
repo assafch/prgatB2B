@@ -1,6 +1,6 @@
 import { api } from '../api.js';
-import { escapeAttr, escapeHtml } from '../format.js';
-import { toast, openSheet, closeSheet, buzz, OOS_LABEL } from '../ui.js';
+import { escapeAttr, escapeHtml, formatMoney } from '../format.js';
+import { toast, openSheet, closeSheet, buzz, OOS_LABEL, priceBlock, discountChip, hasRealDiscount } from '../ui.js';
 import { refreshCartCount, state as app } from '../main.js';
 import { showUpsell } from './upsell.js';
 
@@ -232,14 +232,19 @@ function openQtyKeypad(card: HTMLElement, shell: HTMLElement): void {
   const part = card.dataset.part!;
   const box = Math.max(1, Number(card.dataset.box) || 1);
   const price = card.dataset.price ? Number(card.dataset.price) : null;
+  const listPrice = card.dataset.listPrice ? Number(card.dataset.listPrice) : null;
+  const priceInfo = { price, list_price: listPrice };
   const name = card.dataset.name || part;
   let qty = box; // start at one box — the common wholesale unit
 
   const body = document.createElement('div');
   body.innerHTML = `
     <div class="qsheet-head">
-      <div class="qsheet-name">${escapeHtml(name)}</div>
-      <div class="qsheet-box">${box > 1 ? `ארגז = ${box} יח׳` : 'ליחידה'}</div>
+      <div class="qsheet-head-top">
+        <div class="qsheet-name">${escapeHtml(name)}</div>
+        <div class="qsheet-box">${box > 1 ? `ארגז = ${box} יח׳` : 'ליחידה'}</div>
+      </div>
+      ${price != null ? `<div class="qsheet-price-row">${priceBlock(priceInfo, { variant: 'inline' })}${discountChip(priceInfo)}</div>` : ''}
     </div>
     <div class="qsheet-row">
       <button class="qsheet-step minus" type="button" aria-label="הפחת">−</button>
@@ -255,7 +260,7 @@ function openQtyKeypad(card: HTMLElement, shell: HTMLElement): void {
       <button class="qsheet-chip" type="button" data-add="10">+10</button>
       ${box > 1 ? '<button class="qsheet-chip box" type="button" data-box-snap>×ארגז</button>' : ''}
     </div>
-    <button class="qsheet-cta" type="button" data-confirm>הוסף לעגלה</button>`;
+    <button class="qsheet-cta" type="button" data-confirm data-price="${price ?? ''}" data-list-price="${listPrice ?? ''}">הוסף לעגלה</button>`;
 
   const qtyEl = body.querySelector('[data-qty]') as HTMLElement;
   const subEl = body.querySelector('[data-sub]') as HTMLElement;
@@ -267,7 +272,14 @@ function openQtyKeypad(card: HTMLElement, shell: HTMLElement): void {
       box > 1 && Number.isInteger(boxes)
         ? `${qty} יח׳ · ${boxes} ${boxes === 1 ? 'ארגז' : 'ארגזים'}`
         : `${qty} יח׳`;
-    cta.textContent = price != null ? `הוסף לעגלה · ₪${(qty * price).toFixed(2)}` : 'הוסף לעגלה';
+    if (price == null) {
+      cta.textContent = 'הוסף לעגלה';
+    } else {
+      const netAmt = qty * price;
+      const listAmt = listPrice != null ? qty * listPrice : null;
+      const hint = listAmt != null && listAmt - netAmt > 0.005 ? ` <span class="qsheet-cta-hint">(במקום ${formatMoney(listAmt)})</span>` : '';
+      cta.innerHTML = `הוסף לעגלה · ${formatMoney(netAmt)}${hint}`;
+    }
   };
   render();
 
@@ -440,6 +452,24 @@ async function resetAndLoad(shell: HTMLElement): Promise<void> {
   await loadMore(shell);
 }
 
+// One-time dismissible banner: shown once per device (localStorage) when the
+// current customer's catalog carries at least one real discount, per the board.
+const DISCOUNT_BANNER_KEY = 'discount_banner_dismissed';
+function maybeShowDiscountBanner(shell: HTMLElement, items: CatalogItem[]): void {
+  if (localStorage.getItem(DISCOUNT_BANNER_KEY) === '1') return;
+  const grid = shell.querySelector('#catalog-grid') as HTMLElement | null;
+  if (!grid || grid.parentElement?.querySelector('.discount-banner')) return; // already shown
+  if (!items.some(hasRealDiscount)) return;
+  const banner = document.createElement('div');
+  banner.className = 'discount-banner';
+  banner.innerHTML = `<span class="ico" aria-hidden="true">🏷️</span><span class="txt">המחירים שלך כוללים הנחת לקוח קבועה</span><button type="button" class="dismiss" aria-label="סגירה">✕</button>`;
+  banner.querySelector('.dismiss')!.addEventListener('click', () => {
+    localStorage.setItem(DISCOUNT_BANNER_KEY, '1');
+    banner.remove();
+  });
+  grid.insertAdjacentElement('beforebegin', banner);
+}
+
 async function loadMore(shell: HTMLElement): Promise<void> {
   if (state.loading || !state.hasMore) return;
   const gen = loadGen;
@@ -456,15 +486,17 @@ async function loadMore(shell: HTMLElement): Promise<void> {
     if (isGrouped()) params.set('sort', 'family'); // contiguous families for grouping
     params.set('page', String(state.page));
     params.set('pageSize', String(state.pageSize));
+    const isFirstPage = state.page === 1;
     const { items, total } = await api.get<{ items: CatalogItem[]; total: number }>(`/api/catalog?${params}`);
     if (gen !== loadGen) return; // a reset/search/view-switch superseded this load
     state.total = total;
-    if (state.page === 1 && items.length === 0) {
+    if (isFirstPage && items.length === 0) {
       grid.innerHTML = `<div class="card muted">לא נמצאו מוצרים. אם הקטלוג ריק, אדמין צריך להריץ סנכרון מ-Priority.</div>`;
       status.textContent = '';
       state.hasMore = false;
       return;
     }
+    if (isFirstPage) maybeShowDiscountBanner(shell, items);
     if (isGrouped()) appendGrouped(grid, items);
     else grid.insertAdjacentHTML('beforeend', items.map(state.view === 'grid' ? gridCard : listRow).join(''));
     state.loaded += items.length;
@@ -522,14 +554,6 @@ function appendGrouped(grid: HTMLElement, items: CatalogItem[]): void {
   }
 }
 
-function priceHtml(it: CatalogItem): string {
-  if (it.price == null) return '<span class="muted">צור קשר</span>';
-  const discounted = it.list_price != null && it.list_price - it.price > 0.005;
-  return discounted
-    ? `₪${it.price.toFixed(2)}<s class="price-was">₪${it.list_price!.toFixed(2)}</s>`
-    : `₪${it.price.toFixed(2)}`;
-}
-
 function stepperHtml(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
   return `
@@ -558,7 +582,7 @@ function gridCard(it: CatalogItem): string {
   const enc = encodeURIComponent(it.partname);
   const oos = !!it.outOfStock;
   return `
-    <div class="card cat-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
+    <div class="card cat-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-list-price="${it.list_price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
       <button class="fav fav-card ${favSet.has(it.partname) ? 'on' : ''}" data-part="${p}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       <div class="cat-card-top">
         <a class="cat-card-info" href="#product/${enc}">
@@ -567,7 +591,7 @@ function gridCard(it: CatalogItem): string {
         </a>
         <a class="cat-card-thumb" href="#product/${enc}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
       </div>
-      <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
+      <div class="cat-card-price">${priceBlock(it, { reserveTop: true })}</div>
       ${
         oos
           ? oosBarHtml()
@@ -592,7 +616,7 @@ function listRow(it: CatalogItem): string {
   return `
     <div class="swipe-wrap">
       <div class="swipe-bg" aria-hidden="true">＋ ארגז</div>
-      <div class="card cat-row swipe-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
+      <div class="card cat-row swipe-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-list-price="${it.list_price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
       <div class="cat-row-top">
         <a class="cat-thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
         <a class="cat-row-name" href="#product/${encodeURIComponent(it.partname)}">
@@ -602,7 +626,7 @@ function listRow(it: CatalogItem): string {
         <button class="fav ${favSet.has(it.partname) ? 'on' : ''}" data-part="${escapeAttr(it.partname)}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       </div>
       <div class="cat-row-bottom">
-        <div class="cat-row-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
+        <div class="cat-row-price">${priceBlock(it)}</div>
         ${oos ? '' : stepperHtml(it)}
       </div>
       ${oos ? oosBarHtml() : ''}

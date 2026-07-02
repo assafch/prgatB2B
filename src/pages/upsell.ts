@@ -1,12 +1,13 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
-import { toast } from '../ui.js';
+import { toast, priceBlock } from '../ui.js';
 import { refreshCartCount } from '../main.js';
 
 interface Sug {
   partname: string;
   partdes: string | null;
   price: number | null;
+  list_price: number | null;
   image_url: string | null;
   box_size: number;
   outOfStock?: boolean;
@@ -42,7 +43,7 @@ export async function showUpsell(partname: string): Promise<void> {
           <div class="upsell-item">
             <a class="thumb" href="#product/${encodeURIComponent(it.partname)}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '—'}</a>
             <div class="nm">${escapeHtml(it.partdes || it.partname)}</div>
-            <div class="pr">${it.price != null ? `₪${it.price.toFixed(2)}` : ''}</div>
+            <div class="pr">${it.price != null ? priceBlock(it, { size: 'sm' }) : ''}</div>
             <button class="up-add" data-part="${escapeAttr(it.partname)}" data-box="${it.box_size}">+ הוסף</button>
           </div>`
           )

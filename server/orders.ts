@@ -13,6 +13,9 @@ export interface CartLine {
   partdes: string | null;
   quantity: number;
   price: number | null;
+  /** Base list price (pre customer-discount) for the cart summary's struck total.
+   *  Null when the product has no list price on record — never gates checkout. */
+  list_price: number | null;
   line_total: number;
   /** false when the item is no longer active+visible in the catalog, OR is marked
    *  out of stock (kept so the user can remove it; blocks checkout). */
@@ -45,6 +48,7 @@ export function getCart(userId: number, custname: string): CartResult {
       partdes: prod?.partdes ?? null,
       quantity: r.quantity,
       price,
+      list_price: prod?.list_price ?? null,
       line_total: lineTotal,
       available: prod !== null && !prod.outOfStock,
       outOfStock: prod?.outOfStock ?? false,

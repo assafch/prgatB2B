@@ -1,6 +1,6 @@
 import { api } from '../api.js';
-import { escapeAttr, escapeHtml } from '../format.js';
-import { toast, oosBadge } from '../ui.js';
+import { escapeAttr, escapeHtml, formatMoney } from '../format.js';
+import { toast, oosBadge, priceBlock, discountChip, hasRealDiscount } from '../ui.js';
 import { refreshCartCount } from '../main.js';
 import { showUpsell } from './upsell.js';
 
@@ -36,13 +36,12 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
           <div class="muted">מק״ט: ${escapeHtml(p.partname)}</div>
           ${p.barcode ? `<div class="muted">ברקוד: ${escapeHtml(p.barcode)}</div>` : ''}
           ${p.family ? `<div class="muted">משפחה: ${escapeHtml(p.family_desc || p.family)}</div>` : ''}
-          <div style="margin:1rem 0;font-size:1.5rem;font-weight:700;color:var(--brand)">
+          <div style="margin:1rem 0 0">
             ${p.price != null
-              ? `₪${p.price.toFixed(2)}${p.list_price != null && p.list_price - p.price > 0.005
-                  ? `<s class="price-was">₪${p.list_price.toFixed(2)}</s> <span class="badge ok" style="font-size:0.72rem">הנחה ${Math.round((1 - p.price / p.list_price) * 100)}%</span>`
-                  : ''}`
-              : 'צור קשר למחיר'}
+              ? `<div class="product-price-row">${priceBlock(p, { variant: 'inline', size: 'lg' })}${discountChip(p)}</div>`
+              : '<span style="font-size:1.3rem;font-weight:700;color:var(--brand)">צור קשר למחיר</span>'}
             ${oos ? '<div style="margin-top:0.4rem">' + oosBadge() + '</div>' : ''}
+            ${hasRealDiscount(p) ? `<div class="product-price-note">🏷️ המחיר שלך · כולל הנחת לקוח קבועה · מחירון ${formatMoney(p.list_price!)}</div>` : ''}
           </div>
           <div class="muted" style="margin-bottom:0.5rem">ארגז: ${p.box_size} יחידות</div>
           <div style="display:flex;gap:0.5rem;align-items:stretch">
@@ -126,7 +125,7 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
               <a class="rail-item" href="#product/${encodeURIComponent(it.partname)}">
                 <div class="thumb">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : 'אין תמונה'}</div>
                 <div class="nm">${escapeHtml(it.partdes || it.partname)}</div>
-                <div class="pr">${it.price != null ? `₪${it.price.toFixed(2)}` : ''}</div>
+                <div class="pr">${it.price != null ? priceBlock(it, { size: 'sm' }) : ''}</div>
               </a>`
               )
               .join('')}

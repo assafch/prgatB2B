@@ -146,6 +146,56 @@ export function buzz(ms = 10): void {
   }
 }
 
+// ---- Discount pricing (Discount Pricing board, section A) ----
+// Shared everywhere a per-unit price is shown: catalog grid/list, product page,
+// favorites, similar-products rail, upsell sheet, qty-keypad header. Server sends
+// `price` (net, after the customer's flat discount) and `list_price` (base) on
+// every catalog/product item; a discount is only "real" when list_price − price
+// exceeds half an agora (protects against float noise showing a phantom ₪0.00 line).
+export interface PriceFields {
+  price: number | null;
+  list_price: number | null;
+}
+
+export function hasRealDiscount(it: PriceFields): boolean {
+  return it.price != null && it.list_price != null && it.list_price - it.price > 0.005;
+}
+
+/**
+ * Two-storey discount price block: a small struck list price sits above the bold
+ * net price + muted "ליח׳" (the board's recommended V2 layout — fixed ~90px width,
+ * survives 4-digit prices next to the catalog stepper at 360px).
+ * - `variant: 'stack'` (default): compact grid/list form, storeys stacked.
+ * - `variant: 'inline'`: storeys side by side — roomier surfaces (product page,
+ *   qty-keypad header).
+ * - `size: 'sm' | 'lg'`: shrink for rails/upsell chips, or grow for the product page.
+ * - `reserveTop`: keep an invisible placeholder top storey even without a discount,
+ *   so grid cards with mixed discounted/non-discounted items stay the same height.
+ */
+export function priceBlock(
+  it: PriceFields,
+  opts: { variant?: 'stack' | 'inline'; size?: 'sm' | 'lg'; reserveTop?: boolean } = {}
+): string {
+  if (it.price == null) return '<span class="muted">צור קשר</span>';
+  const discounted = hasRealDiscount(it);
+  const cls = ['price-block', `price-block-${opts.variant || 'stack'}`];
+  if (opts.size) cls.push(`price-block-${opts.size}`);
+  const top = discounted
+    ? `<s class="price-was">₪${it.list_price!.toFixed(2)}</s>`
+    : opts.reserveTop
+      ? `<s class="price-was price-ph" aria-hidden="true">₪0.00</s>`
+      : '';
+  return `<span class="${cls.join(' ')}">${top}<span class="price-net">₪${it.price.toFixed(2)}<span class="price-unit"> ליח׳</span></span></span>`;
+}
+
+/** Red "−N%" discount chip (product page + qty-keypad header, per the board — not
+ *  the compact catalog/rail surfaces). Empty string when there's no real discount. */
+export function discountChip(it: PriceFields): string {
+  if (!hasRealDiscount(it)) return '';
+  const pct = Math.round((1 - it.price! / it.list_price!) * 100);
+  return `<span class="discount-chip" dir="ltr">−${pct}%</span>`;
+}
+
 // ---- Out-of-stock (אזל מהמלאי) — shared label + badge so every surface matches ----
 export const OOS_LABEL = 'אזל מהמלאי';
 export function oosBadge(): string {

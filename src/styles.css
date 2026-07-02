@@ -289,7 +289,7 @@ input:focus, select:focus, textarea:focus {
 .upsell-item .thumb { height: 70px; display: grid; place-items: center; background: #f3f4f6; border-radius: 6px; overflow: hidden; color: #9ca3af; }
 .upsell-item .thumb img { max-width: 100%; max-height: 100%; }
 .upsell-item .nm { font-size: 0.8rem; margin: 0.3rem 0; height: 2.4em; overflow: hidden; color: var(--text); }
-.upsell-item .pr { font-weight: 700; color: var(--brand); font-size: 0.9rem; }
+.upsell-item .pr { min-height: 1.1rem; }
 .upsell-item .up-add { width: 100%; margin-top: 0.4rem; padding: 0.35rem; font-size: 0.85rem; }
 .upsell-actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
 .upsell-actions button { flex: 1; }
@@ -330,10 +330,21 @@ input:focus, select:focus, textarea:focus {
 .cat-card-thumb { width: 76px; height: 76px; flex: none; border-radius: 8px; background: #fff; border: 1px solid var(--border); display: grid; place-items: center; overflow: hidden; color: #9ca3af; padding: 4px; box-sizing: border-box; }
 .cat-card-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .cat-card .fav-card { position: absolute; top: 5px; inset-inline-end: 5px; z-index: 1; background: rgba(255,255,255,0.88); border-radius: 50%; width: 28px; height: 28px; display: grid; place-items: center; font-size: 1rem; padding: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
-.cat-card-price { font-weight: 800; color: var(--text); font-size: 1.15rem; letter-spacing: -0.01em; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0; }
-.cat-card-price .muted { font-weight: 400; font-size: 0.72rem; }
-/* Struck base price shown next to the customer's discounted price. Red LINE (not
-   red text) per spec — reads as "sale", not as an error. */
+.cat-card-price { display: flex; }
+.cat-card-price .price-net { color: var(--text); font-size: 1.15rem; letter-spacing: -0.01em; }
+
+/* ---- Two-storey discount price block (Discount Pricing board, section A) ----
+   Struck list price on top (red LINE, not red text — reads as "sale", not as an
+   error) over the bold net price + muted "ליח׳". `.price-block-inline` lays both
+   storeys side by side for roomier surfaces (product page, qty-keypad header).
+   Fixed ~90px width so the stacked form survives 4-digit prices next to the
+   catalog stepper at 360px; `.price-ph` reserves the same height without content
+   so grid cards with mixed discounted/non-discounted items stay equal height. */
+.price-block { display: inline-flex; min-width: 90px; }
+.price-block-stack { flex-direction: column; gap: 1px; }
+.price-block-inline { flex-direction: row; align-items: center; gap: 7px; min-width: 0; }
+.price-block .price-was { display: block; margin-inline-start: 0; }
+.price-block-inline .price-was { display: inline-block; }
 .price-was {
   font-weight: 400;
   font-size: 0.78rem;
@@ -341,10 +352,28 @@ input:focus, select:focus, textarea:focus {
   text-decoration: line-through;
   text-decoration-color: var(--err, #c00);
   text-decoration-thickness: 1.5px;
-  margin-inline-start: 0.35rem; /* gap after the bold price in RTL flow */
   white-space: nowrap;
 }
+.price-was.price-ph { visibility: hidden; }
+.price-block .price-net { display: inline-flex; align-items: baseline; gap: 3px; font-weight: 800; color: var(--brand); font-size: 1rem; line-height: 1.15; white-space: nowrap; }
+.price-block .price-unit { font-weight: 400; color: var(--muted); font-size: 0.72rem; }
+.price-block-sm .price-net { font-size: 0.88rem; }
+.price-block-sm .price-was { font-size: 0.68rem; }
+.price-block-sm .price-unit { font-size: 0.64rem; }
+.price-block-lg .price-net { font-size: 1.5rem; font-weight: 900; }
+.price-block-lg .price-was { font-size: 0.875rem; }
+.price-block-lg .price-unit { font-size: 0.8rem; }
 .is-oos .price-was { text-decoration-color: #aab0b6; }
+.is-oos .price-net, .is-oos .price-unit { color: #9aa1ab; }
+
+/* Red "−N%" discount chip — product page + qty-keypad header only, per the board. */
+.discount-chip { display: inline-block; background: #fff1f0; color: #c2362b; font-weight: 800; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid #f5d5d2; white-space: nowrap; }
+
+/* One-time dismissible catalog banner (Discount Pricing board, section B). */
+.discount-banner { display: flex; align-items: center; gap: 8px; background: #eef2f8; color: var(--brand); border-radius: 11px; padding: 0.55rem 0.75rem; margin-bottom: 0.6rem; font-size: 0.85rem; font-weight: 700; }
+.discount-banner .txt { flex: 1; }
+.discount-banner .dismiss { background: none; border: none; color: #9aa1ab; font-size: 0.9rem; font-weight: 700; padding: 0; cursor: pointer; line-height: 1; }
+
 .cat-card-buy { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; margin-top: auto; flex-wrap: wrap; }
 .cat-card-buy .add { padding: 0 0.6rem; min-height: 40px; flex: 1; background: #fff; color: var(--brand); border: 2px solid var(--brand); border-radius: 10px; font-weight: 700; }
 .cat-card-buy .add:hover:not(:disabled) { background: rgba(35, 77, 143, 0.07); }
@@ -375,8 +404,8 @@ input:focus, select:focus, textarea:focus {
 .cat-row-name .nm { font-weight: 600; color: var(--text); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .cat-row-name .sku { color: var(--muted); font-size: 0.76rem; margin-top: 2px; }
 .cat-row-bottom { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
-.cat-row-price { font-weight: 800; color: var(--brand); font-size: 1.1rem; white-space: nowrap; }
-.cat-row-price .muted { font-weight: 400; font-size: 0.72rem; }
+.cat-row-price { white-space: nowrap; }
+.cat-row-price .price-net { font-size: 1.1rem; }
 .cat-row-buy { display: flex; align-items: stretch; gap: 0.3rem; }
 .cat-row-buy .step-up, .cat-row-buy .step-down { width: 40px; padding: 0; font-size: 1.35rem; font-weight: 700; line-height: 1; }
 .cat-row-buy .qty { width: 52px; text-align: center; font-size: 1.1rem; font-weight: 700; padding: 0.35rem 0; -moz-appearance: textfield; }
@@ -397,6 +426,18 @@ input:focus, select:focus, textarea:focus {
 .cart-gift-nudge { background: #fff8e6; border: 1px dashed #d9a400; border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 0.5rem; font-size: 0.88rem; text-align: center; }
 .cart-promo-line { display: flex; justify-content: space-between; padding: 0.2rem 0; font-size: 0.92rem; color: #1a7a3a; }
 .cart-promo-line.muted { color: var(--muted); }
+
+/* Customer-discount summary rows (מחירון struck total → הנחת לקוח −N%) — layered
+   BEFORE the promotions block above (promo/coupon savings apply after the
+   customer's flat discount, per the plan). */
+.cart-discount-row { display: flex; justify-content: space-between; align-items: baseline; padding: 0.15rem 0; font-size: 0.85rem; }
+.cart-discount-row .price-was { font-size: 0.85rem; }
+.cart-discount-row.pct { color: #c2362b; font-weight: 700; }
+.cart-savings-pill { margin-top: 0.5rem; background: #fff8f0; border: 1px solid #f7e3c8; color: #9a6b1f; font-weight: 700; font-size: 0.8rem; padding: 0.5rem 0.7rem; border-radius: 9px; text-align: center; }
+
+/* Product page — big inline price row + light note explaining the customer discount. */
+.product-price-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 1rem 0 0; }
+.product-price-note { display: flex; align-items: center; gap: 6px; margin-top: 0.5rem; background: #f6f8fa; border-radius: 9px; padding: 0.5rem 0.7rem; font-size: 0.8rem; color: #5b6573; }
 
 /* Brand logo in the top bar */
 .logo-img { height: 34px; width: auto; display: block; }
@@ -485,7 +526,7 @@ input:focus, select:focus, textarea:focus {
 .rail-item .thumb { width: 100%; aspect-ratio: 1; border-radius: 6px; background: #f3f4f6; display: grid; place-items: center; color: #9ca3af; font-size: 0.7rem; overflow: hidden; margin-bottom: 0.4rem; }
 .rail-item .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .rail-item .nm { font-size: 0.8rem; font-weight: 600; line-height: 1.25; height: 2.5em; overflow: hidden; }
-.rail-item .pr { font-weight: 800; color: var(--brand); font-size: 0.88rem; margin-top: 0.2rem; }
+.rail-item .pr { margin-top: 0.2rem; }
 
 /* ---- A3 · Usual-basket checklist ---- */
 .usual-list { display: flex; flex-direction: column; }
@@ -563,7 +604,6 @@ input:focus, select:focus, textarea:focus {
 .is-oos { background: #f4f5f7 !important; border-color: #e4e7ec !important; box-shadow: none; }
 .is-oos .nm { color: #6b7280; }
 .is-oos .cat-card-price, .is-oos .cat-row-price { color: #9aa1ab; }
-.is-oos .cat-card-price .muted, .is-oos .cat-row-price .muted { color: #9aa1ab; }
 .is-oos img { filter: grayscale(1); opacity: 0.55; }
 /* product.ts and favorites.ts still render real disabled buy controls on OOS rows
    (out of Stage-5 scope) — keep them reading clearly inactive. */
@@ -596,9 +636,13 @@ tr.row-dirty { background: #fffbe6; }
 .pay2-cta { margin-top: 0.7rem; }
 
 /* ---- A1 · Quantity-keypad sheet ---- */
-.qsheet-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; }
+.qsheet-head { margin-bottom: 0.9rem; }
+.qsheet-head-top { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; }
 .qsheet-name { font-weight: 800; font-size: 1.02rem; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qsheet-box { font-size: 0.8rem; color: var(--muted); flex: none; }
+.qsheet-price-row { display: flex; align-items: center; gap: 6px; margin-top: 0.3rem; }
+.qsheet-price-row .price-net { font-size: 0.95rem; }
+.qsheet-cta-hint { font-weight: 400; font-size: 0.72rem; opacity: 0.75; }
 .qsheet-row { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.9rem; }
 .qsheet-step { flex: none; width: var(--tap); height: var(--tap); border-radius: 15px; border: none; font-size: 1.9rem; font-weight: 700; padding: 0; }
 .qsheet-step.minus { background: #f2f4f7; color: var(--text); }

@@ -8,6 +8,7 @@ interface CartLine {
   partdes: string | null;
   quantity: number;
   price: number | null;
+  list_price: number | null;
   line_total: number;
   available: boolean;
   outOfStock?: boolean;
@@ -47,6 +48,14 @@ async function load(shell: HTMLElement): Promise<void> {
 
   const hasUnavailable = cart.lines.some((l) => !l.available);
 
+  // Customer-discount summary (מחירון struck total → הנחת לקוח −N%) — independent
+  // of the promotions engine below (coupon/promo savings apply AFTER this discount,
+  // in their own rows). Only shown when there's a real, priced list-vs-net gap.
+  const listTotal = Math.round(cart.lines.reduce((s, l) => s + (l.list_price ?? l.price ?? 0) * l.quantity, 0) * 100) / 100;
+  const custDiscountAmt = Math.round((listTotal - cart.total) * 100) / 100;
+  const hasCustDiscount = custDiscountAmt > 0.005;
+  const custDiscountPct = hasCustDiscount && listTotal > 0 ? Math.round((custDiscountAmt / listTotal) * 100) : 0;
+
   const promo = cart.promotions;
   const hasDiscount = !!promo && promo.discount > 0;
   const finalTotal = promo ? promo.total : cart.total;
@@ -78,6 +87,14 @@ async function load(shell: HTMLElement): Promise<void> {
       ${giftsHtml}
       ${giftNudge}
       ${
+        hasCustDiscount
+          ? `<div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border)">
+               <div class="cart-discount-row"><span>מחירון</span><s class="price-was">${formatMoney(listTotal)}</s></div>
+               <div class="cart-discount-row pct"><span>הנחת לקוח <span dir="ltr">−${custDiscountPct}%</span></span><span dir="ltr">−${formatMoney(custDiscountAmt)}</span></div>
+             </div>`
+          : ''
+      }
+      ${
         hasDiscount
           ? `<div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border)">
                <div class="cart-promo-line muted"><span>סכום ביניים</span><span>${formatMoney(cart.total)}</span></div>
@@ -89,6 +106,7 @@ async function load(shell: HTMLElement): Promise<void> {
         <span style="font-weight:700">סה״כ${hasDiscount ? ' לתשלום' : ''}</span>
         <span style="font-weight:900;font-size:1.3rem;color:var(--brand)">${formatMoney(finalTotal)}</span>
       </div>
+      ${hasCustDiscount ? `<div class="cart-savings-pill">💰 חסכת ${formatMoney(custDiscountAmt)} בהזמנה זו</div>` : ''}
       <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">המחיר הסופי ייקבע ב-Priority לפי ההסכם שלך</div>
     </div>
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
