@@ -129,6 +129,14 @@ export function bustFinanceCache(custname?: string): void {
       }
     }
   }
+  // Also drop persisted snapshots directly: right after a restart the in-memory map
+  // is empty, and iterating it alone would silently keep the stale persisted row —
+  // a post-payment bust must never serve the pre-payment balance.
+  try {
+    db.prepare(`DELETE FROM finance_cache WHERE key LIKE '%:' || ?`).run(custname);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Fire-and-forget warm of a customer's finance snapshots (called on login) so the

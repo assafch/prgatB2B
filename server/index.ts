@@ -1643,7 +1643,7 @@ async function startup() {
   setInterval(() => { sweepPendingReceipts().catch(() => {}); }, 5 * 60_000).unref();
   // Daily local DB snapshot (VACUUM INTO, 30d retention) — see server/backup.ts.
   scheduleSnapshots();
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`[prgatB2B] listening on :${PORT}`);
     const config = getPriorityConfig();
     if (config) {
@@ -1655,6 +1655,28 @@ async function startup() {
       console.warn('[prgatB2B] CHECK_IMAGE_KEY missing/invalid (need 64 hex chars) — cheque uploads will be refused');
     }
   });
+
+  // Graceful shutdown: Railway sends SIGTERM on every deploy. Without this the
+  // process dies mid-flight — killing in-progress Priority order submits and
+  // payment confirmations. Drain active requests, with a hard cap so a hung
+  // connection can't stall the deploy.
+  let shuttingDown = false;
+  const shutdown = (sig: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[prgatB2B] ${sig} received — draining in-flight requests`);
+    server.close(() => {
+      console.log('[prgatB2B] drained — exiting');
+      process.exit(0);
+    });
+    server.closeIdleConnections();
+    setTimeout(() => {
+      console.warn('[prgatB2B] drain timeout — forcing exit');
+      process.exit(0);
+    }, 15_000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startup().catch((err) => {

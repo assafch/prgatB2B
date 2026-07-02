@@ -60,7 +60,18 @@ export async function priorityRequest(
   if (body) options.body = JSON.stringify(body);
 
   console.log(`[Priority] ${method} ${url}`);
-  const res = await fetch(url, options);
+  // Bound every ERP call: a hung Priority connection would otherwise stall order
+  // submit / first home load for minutes and wedge the finance-cache refresh.
+  options.signal = AbortSignal.timeout(30_000);
+  let res: Response;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(`Priority API timeout: ${method} ${endpoint.split('?')[0] ?? endpoint}`);
+    }
+    throw err;
+  }
   const text = await res.text();
   let data: unknown;
   try {

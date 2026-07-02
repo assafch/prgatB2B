@@ -9,7 +9,7 @@ P1 dashboard/UX, P2 passkeys, invoices + detail, check-photo payments).
 |---|---|
 | Production | https://web-production-ac422.up.railway.app |
 | Local | `npm run dev` (Vite + tsx), `.env` holds secrets (gitignored) |
-| Test customer | `elibait` / `Orgat2026!Eli` — real customer **הכל לבית אלי**, custname **10516**, רמת גן |
+| Test customer | `elibait` / (password in the team vault — NEVER commit it; the previously committed one must be rotated) — real customer **הכל לבית אלי**, custname **10516**, רמת גן |
 | Admin | `assaf` / (rotate this) — full admin |
 | Priority | company a051014, env tabp008h.ini — **READ-ONLY for QA** |
 
