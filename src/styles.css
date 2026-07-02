@@ -554,16 +554,24 @@ input:focus, select:focus, textarea:focus {
 .sheet-actions { display: flex; gap: 0.6rem; }
 .sheet-actions button { flex: 1; padding: 0.75rem; }
 
-/* ---- Out of stock (אזל מהמלאי) — grayed card + coral badge, reused everywhere ---- */
-/* OPAQUE gray — NOT opacity: a list row sits over a green "＋ ארגז" swipe layer,
-   and a translucent card lets it bleed through. No card-level grayscale filter
-   either, so the coral "אזל מהמלאי" badge keeps its color. */
-.is-oos { background: #eceef1 !important; box-shadow: none; }
-.is-oos .nm, .is-oos .sku, .is-oos .cat-card-price, .is-oos .cat-row-price { color: #8d959d; }
-.is-oos .cat-card-price .muted, .is-oos .cat-row-price .muted { color: #aab0b6; }
-.is-oos img { filter: grayscale(1); opacity: 0.6; }
-.is-oos :disabled { opacity: 0.5; } /* the disabled add/stepper read clearly inactive */
+/* ---- Out of stock (אזל מהמלאי) — Variant 1 (design handoff, muted-grey), reused
+   everywhere ---- */
+/* Quiet grey, never green (green = "added to cart" success) and never the coral
+   debt/error red. Card bg/border + greyscale-and-dim image + muted text is the
+   whole story; in src/pages/catalog.ts the buy controls are replaced by a single
+   .oos-bar strip below, so there is nothing left to visually "disable" there. */
+.is-oos { background: #f4f5f7 !important; border-color: #e4e7ec !important; box-shadow: none; }
+.is-oos .nm { color: #6b7280; }
+.is-oos .cat-card-price, .is-oos .cat-row-price { color: #9aa1ab; }
+.is-oos .cat-card-price .muted, .is-oos .cat-row-price .muted { color: #9aa1ab; }
+.is-oos img { filter: grayscale(1); opacity: 0.55; }
+/* product.ts and favorites.ts still render real disabled buy controls on OOS rows
+   (out of Stage-5 scope) — keep them reading clearly inactive. */
+.is-oos :disabled { opacity: 0.5; }
 .oos-badge { display: inline-block; background: #ffd9d4; color: #b3301c; font-weight: 800; font-size: 0.72rem; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+/* Single strip that replaces the stepper+add controls on an OOS catalog card/row. */
+.oos-bar { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: auto; background: #eceef1; color: #6b7280; font-weight: 800; font-size: 0.85rem; padding: 0.65rem; border-radius: 11px; }
+.oos-bar svg { flex: none; opacity: 0.7; }
 
 /* ---- Admin products: inline (multi-row) editing ---- */
 .cell-edit { width: 62px; padding: 0.25rem; text-align: center; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
@@ -610,6 +618,9 @@ tr.row-dirty { background: #fffbe6; }
 /* Spacing comes from the .cat-list / .cat-fam-items flex gap, like ungrouped rows. */
 .swipe-wrap { position: relative; overflow: hidden; border-radius: var(--radius); touch-action: pan-y; }
 .swipe-bg { position: absolute; inset: 0; background: #1f8a5b; border-radius: var(--radius); display: flex; align-items: center; justify-content: flex-start; padding-inline-start: 1.4rem; color: #fff; font-weight: 800; font-size: 1rem; }
+/* Never reveal the green "add" layer behind an out-of-stock row — the swipe is a
+   no-op there (see addBoxFromSwipe's data-oos guard in catalog.ts). */
+.swipe-wrap:has(.is-oos) .swipe-bg { display: none; }
 .swipe-card { position: relative; margin-bottom: 0 !important; will-change: transform; }
 .swipe-card.swiping { transition: none; }
 .swipe-card.snapping { transition: transform 0.22s ease; }

@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeAttr, escapeHtml } from '../format.js';
-import { toast, openSheet, closeSheet, buzz, oosBadge, OOS_LABEL } from '../ui.js';
+import { toast, openSheet, closeSheet, buzz, OOS_LABEL } from '../ui.js';
 import { refreshCartCount, state as app } from '../main.js';
 import { showUpsell } from './upsell.js';
 
@@ -532,23 +532,31 @@ function priceHtml(it: CatalogItem): string {
 
 function stepperHtml(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
-  const d = it.outOfStock ? ' disabled' : '';
   return `
     <div class="cat-row-buy">
-      <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת"${d}>−</button>
-      <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"${d}/>
-      <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף"${d}>+</button>
-      <button class="add" data-part="${p}"${d}>הוסף</button>
+      <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
+      <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
+      <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
+      <button class="add" data-part="${p}">הוסף</button>
+    </div>`;
+}
+
+// Out-of-stock Variant 1 (design handoff): a single quiet strip replaces the whole
+// stepper+add control cluster — no disabled buttons, no badge next to the price.
+function oosBarHtml(): string {
+  return `
+    <div class="oos-bar">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+      ${OOS_LABEL}
     </div>`;
 }
 
 // Compact grouped-grid card: name + SKU (right), small thumbnail (left), price,
-// then [הוסף] + [− qty +] stepper.
+// then [הוסף] + [− qty +] stepper (or a single .oos-bar strip when out of stock).
 function gridCard(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
   const enc = encodeURIComponent(it.partname);
   const oos = !!it.outOfStock;
-  const d = oos ? ' disabled' : '';
   return `
     <div class="card cat-card${oos ? ' is-oos' : ''}" data-part="${p}" data-box="${it.box_size}" data-price="${it.price ?? ''}" data-name="${escapeAttr(it.partdes || it.partname)}" data-oos="${oos ? '1' : ''}">
       <button class="fav fav-card ${favSet.has(it.partname) ? 'on' : ''}" data-part="${p}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
@@ -559,19 +567,25 @@ function gridCard(it: CatalogItem): string {
         </a>
         <a class="cat-card-thumb" href="#product/${enc}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>
       </div>
-      <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span>${oos ? ' ' + oosBadge() : ''}</div>
+      <div class="cat-card-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
+      ${
+        oos
+          ? oosBarHtml()
+          : `
       <div class="cat-card-buy">
         <div class="cat-stepper">
-          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת"${d}>−</button>
-          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"${d}/>
-          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף"${d}>+</button>
+          <button class="step-down" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הפחת">−</button>
+          <input type="number" min="0" step="1" value="${it.box_size}" class="qty" data-part="${p}" aria-label="כמות"/>
+          <button class="step-up" data-part="${p}" data-step="${it.box_size}" type="button" aria-label="הוסף">+</button>
         </div>
-        <button class="add" data-part="${p}"${d}>הוסף</button>
-      </div>
+        <button class="add" data-part="${p}">הוסף</button>
+      </div>`
+      }
     </div>`;
 }
 
-// Roomy two-row mobile list row: [thumb · name/SKU · ♥] then [price ... stepper + add].
+// Roomy two-row mobile list row: [thumb · name/SKU · ♥] then [price ... stepper + add],
+// or a single .oos-bar strip below the price when out of stock.
 function listRow(it: CatalogItem): string {
   const p = escapeAttr(it.partname);
   const oos = !!it.outOfStock;
@@ -588,9 +602,10 @@ function listRow(it: CatalogItem): string {
         <button class="fav ${favSet.has(it.partname) ? 'on' : ''}" data-part="${escapeAttr(it.partname)}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       </div>
       <div class="cat-row-bottom">
-        <div class="cat-row-price">${priceHtml(it)}<span class="muted"> ליח׳</span>${oos ? ' ' + oosBadge() : ''}</div>
-        ${stepperHtml(it)}
+        <div class="cat-row-price">${priceHtml(it)}<span class="muted"> ליח׳</span></div>
+        ${oos ? '' : stepperHtml(it)}
       </div>
+      ${oos ? oosBarHtml() : ''}
       </div>
     </div>`;
 }
