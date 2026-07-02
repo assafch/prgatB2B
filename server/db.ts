@@ -217,6 +217,13 @@ CREATE TABLE IF NOT EXISTS customer_pricing (
   PRIMARY KEY (custname, partname)
 );
 
+CREATE TABLE IF NOT EXISTS customer_discounts (
+  custname TEXT PRIMARY KEY,
+  percent REAL NOT NULL,
+  source TEXT NOT NULL DEFAULT 'orders',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS customer_policies (
   custname TEXT PRIMARY KEY,
   kind TEXT NOT NULL DEFAULT 'auto',

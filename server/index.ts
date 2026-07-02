@@ -1353,8 +1353,9 @@ const SETTABLE = new Set([
   'priority_receipt_cc_paymentcode',
   'priority_receipt_terminal',
   'priority_receipts_test_custname',
+  'discount_pricing_enabled',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled']);
 
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
   res.json({ settings: getAllSettings() });
