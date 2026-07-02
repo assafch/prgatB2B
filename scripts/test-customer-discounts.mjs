@@ -1,6 +1,6 @@
 // Unit checks for the customer-discount engine. Run: node scripts/test-customer-discounts.mjs
 import assert from 'node:assert/strict';
-import { applyDiscount, deriveDominantPercent } from '../dist/server/discounts.js';
+import { applyDiscount, deriveDominantPercent, applyDerivedDiscount } from '../dist/server/discounts.js';
 
 // applyDiscount — rounding and guard rails
 assert.equal(applyDiscount(14.5, 15), 12.33);   // 14.5 × 0.85 = 12.325 → 12.33
@@ -52,3 +52,36 @@ assert.equal(getProduct('TEST-D1', 'C-15').list_price, 14.5);     // base always
 assert.equal(getProduct('TEST-D1', 'NOBODY').price, 14.5);        // no discount row → base
 setSettingBool('discount_pricing_enabled', false);
 console.log('catalog discount integration: ALL PASS');
+
+// applyDerivedDiscount — upsert / revocation / hiccup-guard / manual-protection semantics
+const db5 = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));
+
+// upsert: fresh customer, valid dominant percent → row created, resolves to it
+db5.prepare("DELETE FROM customer_discounts WHERE custname = 'AD-UPSERT'").run();
+assert.equal(applyDerivedDiscount('AD-UPSERT', [{ percent: 10 }, { percent: 10 }]), 10);
+assert.equal(resolveDiscountPercent('AD-UPSERT'), 10);
+
+// revocation: real recent lines exist but none carries a valid discount → 'orders' row deleted
+db5.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('AD-REVOKE','15','orders')").run();
+assert.equal(applyDerivedDiscount('AD-REVOKE', [{ percent: 0 }, { percent: 0 }]), null);
+assert.equal(resolveDiscountPercent('AD-REVOKE'), null);
+
+// hiccup guard: empty lines (no orders / API hiccup) → existing 'orders' row left untouched
+db5.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('AD-HICCUP','15','orders')").run();
+assert.equal(applyDerivedDiscount('AD-HICCUP', []), null);
+assert.equal(resolveDiscountPercent('AD-HICCUP'), 15);
+
+// manual protection: a 'manual' row must never be overwritten or deleted by derived sync
+db5.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('AD-MANUAL','7.5','manual')").run();
+applyDerivedDiscount('AD-MANUAL', [{ percent: 10 }]);
+assert.equal(resolveDiscountPercent('AD-MANUAL'), 7.5);
+const manualRow = db5.prepare("SELECT percent, source FROM customer_discounts WHERE custname = 'AD-MANUAL'").get();
+assert.equal(manualRow.source, 'manual');
+assert.equal(manualRow.percent, 7.5);
+
+// manual zero: a pinned 'manual' 0 row resolves to "no discount" (isValidPercent rejects 0)
+db5.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('AD-MANUAL-ZERO','0','manual')").run();
+assert.equal(resolveDiscountPercent('AD-MANUAL-ZERO'), null);
+
+db5.close();
+console.log('applyDerivedDiscount: ALL PASS');

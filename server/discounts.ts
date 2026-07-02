@@ -43,24 +43,41 @@ export function resolveDiscountPercent(custname: string | null): number | null {
   return row && isValidPercent(row.percent) ? row.percent : null;
 }
 
+/** Apply Priority-derived order lines to the customer's cached discount. Pure DB op, kept
+ *  separate from the fetch so it's directly testable without a live Priority connection.
+ *  - lines non-empty + a valid dominant percent → upsert an 'orders' row.
+ *  - lines non-empty + NO valid dominant percent → the office revoked the discount (real,
+ *    recent lines exist and none carries one) → delete the cached 'orders' row.
+ *  - lines EMPTY (no orders yet / API hiccup / thrown error upstream) → leave the row
+ *    untouched; we can't tell "no discount" from "couldn't check", so we don't guess.
+ *  Either way, a 'manual' admin override is never touched (the upsert's WHERE guard and
+ *  the delete's source filter both exclude it) — sync only ever owns 'orders' rows.
+ *  Returns the derived percent (not the final resolved value — callers combine with
+ *  resolveDiscountPercent as needed). */
+export function applyDerivedDiscount(custname: string, lines: Array<{ percent: number }>): number | null {
+  const pct = deriveDominantPercent(lines);
+  if (pct != null) {
+    db.prepare(
+      `INSERT INTO customer_discounts (custname, percent, source, updated_at) VALUES (?, ?, 'orders', datetime('now'))
+       ON CONFLICT(custname) DO UPDATE SET percent = excluded.percent, source = 'orders', updated_at = datetime('now')
+       WHERE customer_discounts.source != 'manual'`
+    ).run(custname, pct);
+  } else if (lines.length > 0) {
+    db.prepare("DELETE FROM customer_discounts WHERE custname = ? AND source = 'orders'").run(custname);
+  }
+  return pct;
+}
+
 /** Fetch recent order lines and store the dominant percent. A 'manual' admin override
  *  is never overwritten by sync (delete the row or save a new manual value to change it).
- *  Derived-null does NOT delete an existing 'orders' row — a Priority hiccup returning
- *  zero orders must not strip everyone's discount. */
+ *  See applyDerivedDiscount for the revocation vs. hiccup semantics of the fetched lines. */
 export async function refreshCustomerDiscounts(custname: string): Promise<number | null> {
   const config = getPriorityConfig();
   if (!config) throw new Error('Priority not configured');
   const manual = db.prepare("SELECT 1 FROM customer_discounts WHERE custname = ? AND source = 'manual'").get(custname);
   if (manual) return resolveDiscountPercent(custname);
   const lines = await getCustomerRecentDiscountLines(config, custname);
-  const pct = deriveDominantPercent(lines);
-  if (pct != null) {
-    db.prepare(
-      `INSERT INTO customer_discounts (custname, percent, source, updated_at) VALUES (?, ?, 'orders', datetime('now'))
-       ON CONFLICT(custname) DO UPDATE SET percent = excluded.percent, source = 'orders', updated_at = datetime('now')`
-    ).run(custname, pct);
-  }
-  return pct ?? resolveDiscountPercent(custname);
+  return applyDerivedDiscount(custname, lines) ?? resolveDiscountPercent(custname);
 }
 
 /** Daily sweep: refresh every company that has a portal login. Per-customer failures

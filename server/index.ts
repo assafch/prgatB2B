@@ -1452,7 +1452,7 @@ app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, r
       db.prepare("DELETE FROM customer_discounts WHERE custname = ? AND source = 'manual'").run(req.params.custname);
     } else {
       const pct = Number(raw);
-      if (!isFinite(pct) || pct <= 0 || pct > 60) { res.status(400).json({ error: 'אחוז הנחה חייב להיות בין 0 ל-60' }); return; }
+      if (!isFinite(pct) || pct < 0 || pct > 60) { res.status(400).json({ error: 'אחוז הנחה חייב להיות בין 0 ל-60' }); return; }
       db.prepare(
         `INSERT INTO customer_discounts (custname, percent, source, updated_at) VALUES (?, ?, 'manual', datetime('now'))
          ON CONFLICT(custname) DO UPDATE SET percent = excluded.percent, source = 'manual', updated_at = datetime('now')`
