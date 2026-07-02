@@ -19,3 +19,19 @@ assert.equal(deriveDominantPercent([]), null);
 assert.equal(deriveDominantPercent([{ percent: 90 }]), null);                  // out of range
 assert.equal(deriveDominantPercent([{ percent: 15 }, { percent: 10 }]), 15);   // tie → first-seen (newest lines first)
 console.log('discount engine: ALL PASS');
+
+// DB-backed resolve (runs against the temp DATA_DIR the runner sets)
+import { resolveDiscountPercent } from '../dist/server/discounts.js';
+import Database from 'better-sqlite3';
+import path from 'node:path';
+const db = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));
+db.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('C-15','15','orders')").run();
+db.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('C-MANUAL','7.5','manual')").run();
+db.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('C-BAD','95','orders')").run();
+db.close();
+assert.equal(resolveDiscountPercent('C-15'), 15);
+assert.equal(resolveDiscountPercent('C-MANUAL'), 7.5);
+assert.equal(resolveDiscountPercent('C-BAD'), null);    // out-of-range stored value is ignored
+assert.equal(resolveDiscountPercent('NOBODY'), null);
+assert.equal(resolveDiscountPercent(null), null);
+console.log('resolveDiscountPercent: ALL PASS');

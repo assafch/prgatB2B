@@ -210,6 +210,32 @@ export async function getCustomerLastPrices(
   return map;
 }
 
+/** Line-level discount PERCENTs from the customer's most recent orders, newest first.
+ *  On this tenant the per-customer discount is applied as a flat PERCENT per line
+ *  (PRICE == BASEPLPRICE) and there is no API-readable master — recent orders ARE
+ *  the authoritative record of what the office actually grants this customer. */
+export async function getCustomerRecentDiscountLines(
+  config: PriorityConfig,
+  custname: string,
+  limit = 10
+): Promise<Array<{ percent: number }>> {
+  const safe = custname.replace(/'/g, "''");
+  const endpoint =
+    `ORDERS?$filter=CUSTNAME eq '${safe}'&$orderby=CURDATE desc&$top=${limit}` +
+    `&$expand=ORDERITEMS_SUBFORM($select=PARTNAME,PERCENT)` +
+    `&$select=ORDNAME,CUSTNAME,CURDATE`;
+  const result = await priorityRequest(config, endpoint);
+  const orders = (result.value || []) as Array<Record<string, unknown>>;
+  const out: Array<{ percent: number }> = [];
+  for (const order of orders) {
+    for (const ln of (order.ORDERITEMS_SUBFORM || []) as Array<Record<string, unknown>>) {
+      const percent = Number(ln.PERCENT);
+      if (isFinite(percent)) out.push({ percent });
+    }
+  }
+  return out;
+}
+
 export async function listOrdersForCustomer(
   config: PriorityConfig,
   custname: string
