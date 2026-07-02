@@ -14,6 +14,13 @@ import {
   listProductImages,
 } from './priority.js';
 import { UPLOADS_DIR } from './products.js';
+import { resolveDiscountPercent, applyDiscount } from './discounts.js';
+
+/** Effective selling price for this customer: base list price minus their flat
+ *  discount (flag-gated). Resolve the percent ONCE per request, not per row. */
+function effectivePrice(listPrice: number | null, pct: number | null): number | null {
+  return listPrice != null ? applyDiscount(listPrice, pct) : null;
+}
 
 export interface CatalogRow {
   partname: string;
@@ -251,6 +258,7 @@ export function queryCatalog(
   // מחירון price. Flip the 'customer_pricing_enabled' setting to re-enable the
   // per-customer override later.
   const usePersonal = getSettingBool('customer_pricing_enabled', false);
+  const discountPct = getSettingBool('discount_pricing_enabled', false) ? resolveDiscountPercent(custname) : null;
 
   const conds: string[] = ['c.active = 1', 'c.b2b_visible = 1'];
   const params: unknown[] = []; // WHERE params
@@ -335,7 +343,7 @@ export function queryCatalog(
     min_qty: r.b2b_min_qty ?? r.box_size,
     featured: r.b2b_featured,
     description: r.b2b_description,
-    price: usePersonal ? r.personal_price ?? r.list_price : r.list_price,
+    price: usePersonal ? r.personal_price ?? r.list_price : effectivePrice(r.list_price, discountPct),
     outOfStock: isOutOfStock(r),
   }));
 
@@ -378,6 +386,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
   if (!row) return null;
   if (!row.active || !row.b2b_visible) return null;
   const usePersonal = getSettingBool('customer_pricing_enabled', false);
+  const discountPct = getSettingBool('discount_pricing_enabled', false) ? resolveDiscountPercent(custname) : null;
   return {
     partname: row.partname,
     partdes: row.b2b_partdes_override || row.partdes,
@@ -390,7 +399,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     min_qty: row.b2b_min_qty ?? row.box_size,
     featured: row.b2b_featured,
     description: row.b2b_description,
-    price: usePersonal ? row.personal_price ?? row.list_price : row.list_price,
+    price: usePersonal ? row.personal_price ?? row.list_price : effectivePrice(row.list_price, discountPct),
     outOfStock: isOutOfStock(row),
   };
 }

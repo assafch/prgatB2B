@@ -35,3 +35,20 @@ assert.equal(resolveDiscountPercent('C-BAD'), null);    // out-of-range stored v
 assert.equal(resolveDiscountPercent('NOBODY'), null);
 assert.equal(resolveDiscountPercent(null), null);
 console.log('resolveDiscountPercent: ALL PASS');
+
+// Catalog integration: flag ON + percent stored → price is discounted, list_price untouched
+import { getProduct } from '../dist/server/catalog.js';
+import { setSettingBool } from '../dist/server/db.js';
+const db4 = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));
+db4.prepare(`INSERT OR REPLACE INTO catalog_cache (partname, partdes, list_price, active, b2b_visible, box_size)
+             VALUES ('TEST-D1','מוצר בדיקה',14.5,1,1,1)`).run();
+db4.prepare("INSERT OR REPLACE INTO customer_discounts (custname, percent, source) VALUES ('C-15','15','orders')").run();
+db4.close();
+setSettingBool('discount_pricing_enabled', false);
+assert.equal(getProduct('TEST-D1', 'C-15').price, 14.5);          // flag off → base price
+setSettingBool('discount_pricing_enabled', true);
+assert.equal(getProduct('TEST-D1', 'C-15').price, 12.33);         // flag on → discounted
+assert.equal(getProduct('TEST-D1', 'C-15').list_price, 14.5);     // base always intact
+assert.equal(getProduct('TEST-D1', 'NOBODY').price, 14.5);        // no discount row → base
+setSettingBool('discount_pricing_enabled', false);
+console.log('catalog discount integration: ALL PASS');
