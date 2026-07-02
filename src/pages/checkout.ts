@@ -14,7 +14,7 @@ interface CartLine {
 }
 interface CartResp { lines: CartLine[]; total: number }
 interface HomeData {
-  features: { payments: boolean };
+  features: { payments: boolean; discountPricing?: boolean };
   balance: { obligo: number | null; creditLimit: number | null };
   priorityOk: boolean;
   paymentPolicy?: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
@@ -113,6 +113,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         </div>`
         )
         .join('')}
+      ${home?.features?.discountPricing ? '<p class="muted" style="font-size:0.78rem;margin:0.2rem 0 0.5rem">המחירים כוללים את ההנחה הקבועה שלך.</p>' : ''}
       <div style="display:flex;justify-content:space-between;margin-top:0.75rem;font-weight:900;font-size:1.2rem">
         <span>סה״כ</span><span style="color:var(--brand)">${formatMoney(cart.total)}</span>
       </div>

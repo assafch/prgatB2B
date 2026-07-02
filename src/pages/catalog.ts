@@ -11,6 +11,7 @@ interface CatalogItem {
   family_desc: string | null;
   barcode: string | null;
   price: number | null;
+  list_price: number | null;
   image_url: string | null;
   box_size: number;
   outOfStock?: boolean; // "אזל מהמלאי" — grayed, cannot be added
@@ -522,7 +523,11 @@ function appendGrouped(grid: HTMLElement, items: CatalogItem[]): void {
 }
 
 function priceHtml(it: CatalogItem): string {
-  return it.price != null ? `₪${it.price.toFixed(2)}` : '<span class="muted">צור קשר</span>';
+  if (it.price == null) return '<span class="muted">צור קשר</span>';
+  const discounted = it.list_price != null && it.list_price - it.price > 0.005;
+  return discounted
+    ? `₪${it.price.toFixed(2)}<s class="price-was">₪${it.list_price!.toFixed(2)}</s>`
+    : `₪${it.price.toFixed(2)}`;
 }
 
 function stepperHtml(it: CatalogItem): string {

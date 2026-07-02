@@ -40,7 +40,7 @@ export interface HomeData {
   suggestions: ReorderSuggestion[];
   promotions: HomePromo[];
   /** server-owned feature flags so the client never shows dead CTAs */
-  features: { payments: boolean; checkPayment: boolean };
+  features: { payments: boolean; checkPayment: boolean; discountPricing: boolean };
   /** admin-controlled customer announcement (plain text, rendered escaped) */
   banner: { text: string } | null;
   /** admin-controlled maintenance mode — client blocks ordering + shows a notice */
@@ -133,6 +133,7 @@ export async function getHomeData(
       // Admin-toggleable (settings table), with the original env/default as fallback.
       payments: getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true'),
       checkPayment: getSettingBool('check_payment_enabled', true),
+      discountPricing: getSettingBool('discount_pricing_enabled', false),
     },
     banner: getSettingBool('announcement_enabled', false)
       ? { text: getSetting('announcement_text') || '' }

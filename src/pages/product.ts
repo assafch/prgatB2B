@@ -37,7 +37,11 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
           ${p.barcode ? `<div class="muted">ברקוד: ${escapeHtml(p.barcode)}</div>` : ''}
           ${p.family ? `<div class="muted">משפחה: ${escapeHtml(p.family_desc || p.family)}</div>` : ''}
           <div style="margin:1rem 0;font-size:1.5rem;font-weight:700;color:var(--brand)">
-            ${p.price != null ? `₪${p.price.toFixed(2)}` : 'צור קשר למחיר'}
+            ${p.price != null
+              ? `₪${p.price.toFixed(2)}${p.list_price != null && p.list_price - p.price > 0.005
+                  ? `<s class="price-was">₪${p.list_price.toFixed(2)}</s> <span class="badge ok" style="font-size:0.72rem">הנחה ${Math.round((1 - p.price / p.list_price) * 100)}%</span>`
+                  : ''}`
+              : 'צור קשר למחיר'}
             ${oos ? '<div style="margin-top:0.4rem">' + oosBadge() + '</div>' : ''}
           </div>
           <div class="muted" style="margin-bottom:0.5rem">ארגז: ${p.box_size} יחידות</div>
