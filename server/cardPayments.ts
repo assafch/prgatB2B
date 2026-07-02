@@ -132,16 +132,33 @@ async function createPspIntent(opts: {
  *  to RECON_WINDOW so an already-reconciled payment stops deflating the payable cap.
  *  Only counts debt kinds (not order_payment) so prepays don't wrongly deflate the cap. */
 const RECON_WINDOW = '-3 days';
+// A hosted-page intent that was never completed only deflates the payable cap for
+// this long. Beyond it the page link is long dead (PSP pages expire well under an
+// hour) — without this bound one declined/abandoned attempt would zero the cap for
+// the whole RECON_WINDOW and lock the customer out of card payment.
+const PENDING_INTENT_TTL = '-2 hours';
 export function unreconciledCardTotal(custname: string): number {
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(amount), 0) AS s FROM card_payments
-       WHERE custname = ? AND status IN ('pending', 'paid')
-         AND kind IN ('debt', 'debt_partial')
-         AND created_at >= datetime('now', ?)`
+       WHERE custname = ? AND kind IN ('debt', 'debt_partial')
+         AND ((status = 'paid' AND created_at >= datetime('now', ?))
+           OR (status = 'pending' AND created_at >= datetime('now', ?)))`
     )
-    .get(custname, RECON_WINDOW) as { s: number };
+    .get(custname, RECON_WINDOW, PENDING_INTENT_TTL) as { s: number };
   return round2(row.s || 0);
+}
+
+/** Sweep: mark hosted-page intents that were never completed as 'expired' so they
+ *  stop counting as live payment artifacts (order sweeps, admin views). A late PSP
+ *  charge against an expired intent is still recorded — confirmCard transitions any
+ *  non-paid status to 'paid'. */
+export function expireStaleCardIntents(): number {
+  const r = db
+    .prepare(`UPDATE card_payments SET status = 'expired' WHERE status = 'pending' AND created_at < datetime('now', ?)`)
+    .run(PENDING_INTENT_TTL);
+  if (r.changes > 0) console.log(`[card] expired ${r.changes} stale pending intent(s)`);
+  return r.changes;
 }
 
 /** Confirmed (paid) debt card payments in the recon window — used by the open-debt
@@ -370,13 +387,21 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
     // findTransaction only returns records carrying our ref; still verify amount.
     const amountOk = tx.amount == null || Math.abs(tx.amount - row.amount) <= 0.01;
     if (tx.paid && tx.refFound && amountOk) {
+      // status != 'paid' (not just 'pending'): a charge completed after the intent
+      // was marked failed/expired must still be recorded — money moved.
       db.prepare(
         `UPDATE card_payments SET status = 'paid', confirmation_code = ?, four_digits = ?, provider = 'tranzila',
            tranzila_index = COALESCE(tranzila_index, ?), paid_at = datetime('now')
-         WHERE id = ? AND status = 'pending'`
+         WHERE id = ? AND status != 'paid'`
       ).run(tx.confirmationCode, tx.fourDigits, tx.index, id);
       bustFinanceCache(row.custname);
       return returnPaidCard(id);
+    }
+    // An attempt carrying our ref exists and none of them is paid — a definitive
+    // decline. Freeing the row stops it deflating the payable cap for 2 hours.
+    if (tx.refFound && !tx.paid && row.status === 'pending') {
+      db.prepare(`UPDATE card_payments SET status = 'failed' WHERE id = ? AND status = 'pending'`).run(id);
+      return getCardAny(id);
     }
     return row;
   }
@@ -394,13 +419,22 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
     if (!tx) return row;
     const amountOk = tx.amount == null || Math.abs(tx.amount - row.amount) <= 0.01;
     if (tx.paid && tx.refFound && amountOk) {
+      // status != 'paid' (not just 'pending'): a charge completed after the intent
+      // was marked failed/expired must still be recorded — money moved.
       db.prepare(
         `UPDATE card_payments SET status = 'paid', confirmation_code = ?, four_digits = ?, provider = 'payplus',
            payplus_ref = COALESCE(?, payplus_ref), paid_at = datetime('now')
-         WHERE id = ? AND status = 'pending'`
+         WHERE id = ? AND status != 'paid'`
       ).run(tx.confirmationCode, tx.fourDigits, tx.transactionUid, id);
       bustFinanceCache(row.custname);
       return returnPaidCard(id);
+    }
+    // Attempts carrying our ref exist and none is paid (findTransaction prefers a
+    // paid row when one exists) — a definitive decline. Freeing the row stops it
+    // deflating the payable cap for 2 hours.
+    if (tx.refFound && !tx.paid && row.status === 'pending') {
+      db.prepare(`UPDATE card_payments SET status = 'failed' WHERE id = ? AND status = 'pending'`).run(id);
+      return getCardAny(id);
     }
     return row;
   }
@@ -419,7 +453,7 @@ export async function confirmCard(id: string): Promise<CardRow | null> {
   if (tx.paid && refOk && amountOk) {
     db.prepare(
       `UPDATE card_payments SET status = 'paid', confirmation_code = ?, four_digits = ?, provider = ?, paid_at = datetime('now')
-       WHERE id = ? AND status = 'pending'`
+       WHERE id = ? AND status != 'paid'`
     ).run(tx.confirmationCode, tx.fourDigits, tx.provider, id);
     bustFinanceCache(row.custname);
     return returnPaidCard(id);

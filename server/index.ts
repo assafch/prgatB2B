@@ -11,7 +11,7 @@ import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSetti
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus, updateCustomerDetails, deleteCustomerUser } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
-import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider } from './cardPayments.js';
+import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider, expireStaleCardIntents } from './cardPayments.js';
 import * as payplus from './payplus.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
@@ -1054,6 +1054,10 @@ app.post('/api/payments/card/intent', requireOwner, blockIfMaintenance, cardPayL
 
 // Pay a held (pending_payment) order by card — returns the PSP hosted-page URL.
 app.post('/api/orders/:id/pay/card', requireCustomer, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+  if (!paymentsLive()) {
+    res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
+    return;
+  }
   try {
     const intent = await createCardOrderIntent(req.user!.id, req.user!.custname!, Number(req.params.id), undefined, appBaseUrl(req));
     res.json(intent);
@@ -1084,7 +1088,9 @@ app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, re
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  if (row.status === 'pending') row = (await confirmCard(row.id)) || row;
+  // Re-confirm 'failed' too: a decline followed by a successful retry on the same
+  // hosted page must resolve to paid, not stick on the stale failure.
+  if (row.status === 'pending' || row.status === 'failed') row = (await confirmCard(row.id)) || row;
   res.json({ id: row.id, status: row.status, amount: row.amount, confirmationCode: row.confirmation_code, fourDigits: row.four_digits, provider: row.provider });
 }));
 
@@ -1617,6 +1623,9 @@ async function startup() {
   // Abandoned held orders (pending_payment, never linked): sweep at boot and hourly.
   sweepPendingOrders();
   setInterval(() => sweepPendingOrders(), 3600_000).unref();
+  // Hosted-page card intents that were never completed: expire at boot + every 10 min.
+  expireStaleCardIntents();
+  setInterval(() => expireStaleCardIntents(), 10 * 60_000).unref();
   // Priority receipts: create/retry pending rows at boot and every 5 min.
   sweepPendingReceipts().catch(() => {});
   setInterval(() => { sweepPendingReceipts().catch(() => {}); }, 5 * 60_000).unref();

@@ -141,7 +141,26 @@ export class OrderError extends Error {
   }
 }
 
+// One submit per user at a time. Without this, a double-tap or two devices on the
+// same login both read the same cart and both POST to Priority — two ERP orders.
+// In-process is sufficient: the deploy is a single instance (SQLite constraint).
+const inFlightSubmits = new Set<number>();
+
 export async function submitOrder(
+  userId: number,
+  custname: string,
+  details?: string
+): Promise<SubmitResult> {
+  if (inFlightSubmits.has(userId)) throw new OrderError('ההזמנה כבר נשלחת — המתינו רגע');
+  inFlightSubmits.add(userId);
+  try {
+    return await submitOrderInner(userId, custname, details);
+  } finally {
+    inFlightSubmits.delete(userId);
+  }
+}
+
+async function submitOrderInner(
   userId: number,
   custname: string,
   details?: string
@@ -270,6 +289,23 @@ export async function submitOrder(
       `B2B-${localOrderId}`
     );
   } catch (err) {
+    // The POST may have reached Priority even though the response was lost (timeout /
+    // network blip / crash mid-flight). Check by our BOOKNUM reference before declaring
+    // failure — marking 'failed' tells the customer to retry, which would create a
+    // duplicate ERP order. Mirrors resendApprovedOrder's idempotency lookup.
+    try {
+      const existing = await findOrderByBookNum(config, `B2B-${localOrderId}`);
+      if (existing) {
+        console.log(`[orders] submit: response lost but Priority order ${existing} exists for B2B-${localOrderId} — adopting`);
+        db.prepare(
+          `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now') WHERE id = ?`
+        ).run(existing, localOrderId);
+        clearCart(userId);
+        return { orderId: localOrderId, ordname: existing, total, lines };
+      }
+    } catch (lookupErr) {
+      console.warn(`[orders] submit: BOOKNUM recovery lookup failed for B2B-${localOrderId}:`, lookupErr);
+    }
     const msg = err instanceof Error ? err.message : String(err);
     db.prepare(
       `UPDATE orders_local SET status = 'failed', error = ? WHERE id = ?`
@@ -364,11 +400,12 @@ export async function sendHeldOrderToPriority(orderId: number): Promise<string> 
 }
 
 /** Approve a held (pending_payment) order after its payment confirmed: mark approved,
- *  link the payment, send to Priority, notify. Idempotent. */
-export async function approveOrder(orderId: number, kind: 'card' | 'check', paymentId: string): Promise<void> {
+ *  link the payment, send to Priority, notify. Idempotent. Returns true when THIS
+ *  call claimed the order (the payment is now the one linked to it). */
+export async function approveOrder(orderId: number, kind: 'card' | 'check', paymentId: string): Promise<boolean> {
   const order = db.prepare(`SELECT id, user_id, status FROM orders_local WHERE id = ?`).get(orderId) as
     | { id: number; user_id: number; status: string } | undefined;
-  if (!order || order.status !== 'pending_payment') return;
+  if (!order || order.status !== 'pending_payment') return false;
   // Atomically CLAIM the order (pending_payment → submitting) so a concurrent/duplicate
   // confirm cannot double-send the same order to Priority — only the caller whose UPDATE
   // actually flips the row proceeds.
@@ -376,7 +413,7 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
     `UPDATE orders_local SET status = 'submitting', payment_status = 'approved', linked_payment_kind = ?, linked_payment_id = ?, approved_at = datetime('now')
      WHERE id = ? AND status = 'pending_payment'`
   ).run(kind, paymentId, orderId);
-  if (claimed.changes !== 1) return; // another confirm already claimed it
+  if (claimed.changes !== 1) return false; // another confirm already claimed it
   let ordname: string;
   try {
     ordname = await sendHeldOrderToPriority(orderId);
@@ -384,7 +421,7 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
     const msg = err instanceof Error ? err.message : String(err);
     // Payment IS taken — keep payment_status='approved' so it's recoverable (admin resend, Phase 3b).
     db.prepare(`UPDATE orders_local SET status = 'failed', error = ? WHERE id = ?`).run(msg, orderId);
-    return;
+    return true;
   }
   db.prepare(
     `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now') WHERE id = ?`
@@ -394,6 +431,7 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
   } catch (err) {
     console.warn('[orders] notifyUser failed:', err);
   }
+  return true;
 }
 
 /** Link an already-submitted cheque to a held order and approve it (cheque = approve
@@ -416,7 +454,14 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
     .prepare('UPDATE payment_checks SET order_id = ? WHERE id = ? AND user_id = ? AND order_id IS NULL')
     .run(String(orderId), checkId, userId);
   if (linked.changes !== 1) throw new OrderError('הצ׳ק כבר משויך להזמנה');
-  await approveOrder(orderId, 'check', checkId);
+  const claimed = await approveOrder(orderId, 'check', checkId);
+  if (!claimed) {
+    // Order was settled by another payment in the meantime (e.g. a card confirm won
+    // the race). Release the cheque so it isn't burned against an already-paid order —
+    // it remains a normal debt cheque.
+    db.prepare('UPDATE payment_checks SET order_id = NULL WHERE id = ? AND order_id = ?').run(checkId, String(orderId));
+    throw new OrderError('ההזמנה כבר שולמה — הצ׳ק נשמר כתשלום על חשבון החוב');
+  }
   return true;
 }
 
