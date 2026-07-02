@@ -77,7 +77,11 @@ export async function refreshCustomerDiscounts(custname: string): Promise<number
   const manual = db.prepare("SELECT 1 FROM customer_discounts WHERE custname = ? AND source = 'manual'").get(custname);
   if (manual) return resolveDiscountPercent(custname);
   const lines = await getCustomerRecentDiscountLines(config, custname);
-  return applyDerivedDiscount(custname, lines) ?? resolveDiscountPercent(custname);
+  applyDerivedDiscount(custname, lines);
+  // Report the STORED value, not the derived one: if a manual override landed while
+  // the fetch was in flight, the write was skipped (WHERE guard) and the derived
+  // percent was never persisted — echoing it would show the admin a phantom value.
+  return resolveDiscountPercent(custname);
 }
 
 /** Daily sweep: refresh every company that has a portal login. Per-customer failures
