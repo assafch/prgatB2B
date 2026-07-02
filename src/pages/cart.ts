@@ -141,6 +141,17 @@ async function load(shell: HTMLElement): Promise<void> {
 
   bindSwipe(shell);
 
+  // Non-gesture fallback for unavailable/OOS lines (which have no stepper): a
+  // focusable button that removes just that line, so a blocked checkout can be
+  // cleared without emptying the whole cart or relying on the swipe gesture.
+  shell.querySelectorAll<HTMLButtonElement>('.cart-line-remove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const part = btn.dataset.remove!;
+      const card = btn.closest<HTMLElement>('.cart-line');
+      void deleteLineWithUndo(shell, part, card?.dataset.name || part, Number(card?.dataset.qty) || 0);
+    });
+  });
+
   shell.querySelector('#clear')?.addEventListener('click', async () => {
     if (!(await confirmDialog('לרוקן את כל הסל?', 'רוקן', 'ביטול'))) return;
     await api.del('/api/cart');
@@ -181,7 +192,8 @@ function lineRow(l: CartLine): string {
           ${
             l.available
               ? `<div class="cart-stepper-compact">${qtyStepper(l.partname, l.quantity, 1)}</div><span class="cart-line-units">${l.quantity} יח׳</span>`
-              : `<span class="cart-line-unavail-note">${l.outOfStock ? OOS_LABEL : 'לא זמין יותר'} — החליקו להסרה</span>`
+              : `<span class="cart-line-unavail-note">${l.outOfStock ? OOS_LABEL : 'לא זמין יותר'}</span>
+                 <button type="button" class="cart-line-remove" data-remove="${escapeAttr(l.partname)}">הסר מהסל</button>`
           }
         </div>
       </div>

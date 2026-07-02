@@ -453,6 +453,8 @@ input:focus, select:focus, textarea:focus {
 .cart-line-bottom { display: flex; align-items: center; gap: 8px; margin-top: 7px; min-height: 36px; }
 .cart-line-units { font-size: 10.5px; color: #6b7280; }
 .cart-line-unavail-note { font-size: 11px; color: var(--err); font-weight: 700; }
+.cart-line-remove { margin-inline-start: auto; min-height: 34px; padding: 0 12px; font-size: 12px; font-weight: 700; color: var(--err); background: none; border: 1px solid #f0c9c5; border-radius: 9px; }
+.cart-line-remove:hover { background: #fdf2f1; }
 /* Unavailable (deactivated or "אזל מהמלאי") cart line — same muted OOS palette as
    the catalog, no stepper (nothing to adjust); swipe or shrink-to-zero to remove. */
 .cart-line-unavail { background: #f4f5f7; border-color: #e4e7ec; }
@@ -643,8 +645,10 @@ input:focus, select:focus, textarea:focus {
 .app-toast.show { opacity: 1; transform: translateY(0); }
 .app-toast.ok { background: #166534; }
 .app-toast.error { background: #b91c1c; }
-.app-toast.has-action { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
-.app-toast .toast-action { flex: none; background: none; border: 1px solid rgba(255,255,255,0.55); color: #fff; font-weight: 800; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; }
+/* Only the Undo button is interactive — keep the pill itself click-through so the
+   centered toast can't swallow taps on the sticky checkout CTA underneath it. */
+.app-toast.has-action { display: flex; align-items: center; gap: 10px; }
+.app-toast .toast-action { pointer-events: auto; flex: none; background: none; border: 1px solid rgba(255,255,255,0.55); color: #fff; font-weight: 800; font-size: 0.82rem; padding: 4px 10px; border-radius: 8px; }
 .app-toast .toast-action:hover { background: rgba(255,255,255,0.15); }
 
 /* ---- Bottom sheet / confirm ---- */
