@@ -104,11 +104,25 @@ export function updateCustomerDetails(id: number, custname: string, custDesc: st
   return { ok: true };
 }
 
-/** Delete a customer login. Sessions and related data cascade via FK. Refuses admins. */
+/** Delete a customer login. Sessions/cart/push cascade via FK. Refuses admins, and
+ *  refuses users with order or payment history: orders_local has NO cascade (the
+ *  delete would fail on the FK), while card_payments/payment_checks DO cascade — a
+ *  delete would silently erase real payment records out of the admin recon views
+ *  and the double-pay caps. Disable the login instead (sessions die on next request). */
 export function deleteCustomerUser(id: number): { ok: true } | { ok: false; error: string } {
   const u = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string } | undefined;
   if (!u) return { ok: false, error: 'המשתמש לא נמצא' };
   if (u.role === 'admin') return { ok: false, error: 'לא ניתן למחוק מנהל' };
+  const count = (sql: string) => (db.prepare(sql).get(id) as { n: number }).n;
+  const orders = count('SELECT COUNT(*) AS n FROM orders_local WHERE user_id = ?');
+  const cards = count('SELECT COUNT(*) AS n FROM card_payments WHERE user_id = ?');
+  const checks = count('SELECT COUNT(*) AS n FROM payment_checks WHERE user_id = ?');
+  if (orders || cards || checks) {
+    return {
+      ok: false,
+      error: 'למשתמש יש היסטוריית הזמנות או תשלומים — לא ניתן למחוק. השביתו את המשתמש במקום (הגישה נחסמת מיידית)',
+    };
+  }
   db.prepare("DELETE FROM users WHERE id = ? AND role = 'customer'").run(id);
   return { ok: true };
 }

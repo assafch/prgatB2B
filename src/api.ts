@@ -55,6 +55,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     if (res.status === 401 && !path.startsWith('/api/auth/')) {
       const here = location.hash;
       if (here && here !== '#login') sessionStorage.setItem('prgat_post_login_hash', here);
+      // The router must drop its cached identity BEFORE navigating — otherwise
+      // route() sees the stale user and bounces '#login' straight back to '#home',
+      // which 401s again: an infinite flicker loop with no way to log in.
+      window.dispatchEvent(new Event('prgat:auth-expired'));
       location.hash = '#login';
     }
     const msg =

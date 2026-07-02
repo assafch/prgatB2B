@@ -152,7 +152,9 @@ app.use((_req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-DNS-Prefetch-Control', 'off');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+  // camera=(self): the cheque scanner + barcode scanner use getUserMedia on our own
+  // origin — an empty allowlist would reject it even same-origin (prod-only outage).
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=()');
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     res.setHeader(
@@ -582,9 +584,18 @@ app.post('/api/leads', publicLimiter, (req, res) => {
   res.json({ id });
 });
 
+// Staff 'orderer' logins never see company finance — the client hides it, but the
+// JSON must not carry it either (requireOwner gates the finance routes; these two
+// customer-shared routes redact instead).
+const EMPTY_BALANCE = { openTotal: 0, openCount: 0, obligo: null, creditLimit: null };
+
 // ---------- Customer: home dashboard ----------
 app.get('/api/home', requireCustomer, homeLimiter, ah(async (req, res) => {
   const data = await getHomeData(req.user!.id, req.user!.custname!, req.user!.cust_desc);
+  if (req.user!.customer_role === 'orderer') {
+    data.balance = { ...EMPTY_BALANCE };
+    data.balanceOk = false;
+  }
   res.json(data);
 }));
 
@@ -826,17 +837,18 @@ app.post('/api/orders/:id/reorder', requireCustomer, (req: AuthedRequest, res) =
 
 app.get('/api/account', requireCustomer, financeLimiter, ah(async (req, res) => {
   const summary = await getAccountSummary(req.user!.custname!);
+  const isOrderer = req.user!.customer_role === 'orderer';
   res.json({
     // Local fallbacks (kept for backward-compat / when Priority is unreachable)
     custname: req.user!.custname,
     cust_desc: req.user!.cust_desc,
     email: req.user!.email,
     phone: req.user!.phone,
-    // Live Priority data
-    profile: summary.profile,
-    balance: summary.balance,
+    // Live Priority data — finance redacted for staff 'orderer' logins
+    profile: isOrderer && summary.profile ? { ...summary.profile, paymentTerms: null } : summary.profile,
+    balance: isOrderer ? { ...EMPTY_BALANCE } : summary.balance,
     priorityOk: summary.priorityOk,
-    balanceOk: summary.balanceOk,
+    balanceOk: isOrderer ? false : summary.balanceOk,
   });
 }));
 
@@ -1425,7 +1437,7 @@ app.get('/api/admin/customers/:custname', requireAdmin, ah(async (req: AuthedReq
 app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, res) => { patchCustomer(req.params.custname, (req.body || {}) as Record<string, unknown>); res.json({ ok: true }); });
 app.post('/api/admin/customers/:custname/reset-portal', requireAdmin, (req, res) => {
   const r = resetCustomerPortal(req.params.custname);
-  res.json({ ok: true, ...r });
+  res.status(r.ok ? 200 : 409).json(r);
 });
 
 

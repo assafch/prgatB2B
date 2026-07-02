@@ -226,6 +226,16 @@ window.addEventListener('hashchange', () => {
   });
 });
 
+// A request 401'd (session idled out / password reset): drop the cached identity
+// so route() actually shows the login screen instead of bouncing back to #home.
+window.addEventListener('prgat:auth-expired', () => {
+  state.me = null;
+  state.cartCount = 0;
+  // If we're already on #login, api.ts's hash assignment won't fire hashchange —
+  // re-route explicitly so the login form renders.
+  if (location.hash === '#login') void route();
+});
+
 // Re-check auth when the tab regains focus (the session may have idled out while
 // backgrounded). If the identity changed or the session died, re-route so the UI
 // reflects it immediately instead of waiting for the next tap to 401.

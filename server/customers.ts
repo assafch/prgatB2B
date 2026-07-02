@@ -104,14 +104,28 @@ export function batchUpdateCustomers(items: Array<Record<string, unknown>>): num
 
 /** Delete a company's PORTAL data (local orders + their lines via cascade, + any current
  *  cart) — for test-data cleanup. Does NOT touch users, Priority, or payment records. The
- *  derived "usual basket" clears automatically (it reads submitted orders). */
-export function resetCustomerPortal(custname: string): { orders: number; carts: number } {
+ *  derived "usual basket" clears automatically (it reads submitted orders).
+ *  Refuses when any order is entangled with a payment: paid-but-unsent orders would
+ *  strand real money, and orders that card/cheque rows point at anchor reconciliation. */
+export function resetCustomerPortal(custname: string): { ok: true; orders: number; carts: number } | { ok: false; error: string } {
+  const entangled = (db.prepare(
+    `SELECT COUNT(*) AS n FROM orders_local o
+     WHERE o.custname = ?
+       AND ((o.payment_status = 'approved' AND o.priority_ordname IS NULL)
+         OR EXISTS (SELECT 1 FROM card_payments cp
+                     WHERE cp.order_id = CAST(o.id AS TEXT) AND cp.status IN ('pending', 'paid'))
+         OR EXISTS (SELECT 1 FROM payment_checks pc
+                     WHERE pc.order_id = CAST(o.id AS TEXT) AND pc.status NOT IN ('cancelled', 'bounced')))`
+  ).get(custname) as { n: number }).n;
+  if (entangled > 0) {
+    return { ok: false, error: `לא ניתן לאפס — ${entangled} הזמנות מקושרות לתשלום (כרטיס/צ׳ק). טפלו בתשלומים תחילה` };
+  }
   const tx = db.transaction(() => {
     const carts = db.prepare('DELETE FROM cart_lines WHERE user_id IN (SELECT id FROM users WHERE custname = ?)').run(custname).changes;
     const orders = db.prepare('DELETE FROM orders_local WHERE custname = ?').run(custname).changes; // order_lines cascade
     return { orders, carts };
   });
-  return tx();
+  return { ok: true, ...tx() };
 }
 
 export async function getCustomerAdmin(custname: string): Promise<Record<string, unknown>> {
