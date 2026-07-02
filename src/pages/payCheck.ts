@@ -35,8 +35,10 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
   shell.innerHTML = `
     <div class="card">
       <h1 style="margin-top:0">תשלום בצ׳ק</h1>
-      ${orderId ? `<p style="font-weight:600;color:var(--ok);margin-top:0">תשלום צ׳ק להזמנה</p>` : ''}
-      <p class="muted" style="margin-top:-0.3rem">צלמו כל צ׳ק — נזהה אוטומטית את הסכום והתאריך. אפשר להוסיף כמה צ׳קים יחד.</p>
+      ${orderId ? `<p style="font-weight:600;color:var(--ok);margin-top:0">תשלום צ׳ק להזמנה<span id="pc-req"></span></p>` : ''}
+      <p class="muted" style="margin-top:-0.3rem">${orderId
+        ? 'צלמו צ׳ק אחד לפירעון מיידי (לא דחוי) בסכום ההזמנה לפחות.'
+        : 'צלמו כל צ׳ק — נזהה אוטומטית את הסכום והתאריך. אפשר להוסיף כמה צ׳קים יחד.'}</p>
       <div class="muted" style="font-size:0.82rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.7rem;margin-bottom:0.75rem">
         💡 צלמו את כל הצ׳ק במסגרת, ממוקד ומואר היטב — התמונה משמשת לפירעון הצ׳ק.
       </div>
@@ -55,6 +57,21 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
   const list = shell.querySelector('#pc-list') as HTMLElement;
   const footer = shell.querySelector('#pc-footer') as HTMLElement;
   const items: CheckItem[] = [];
+
+  // Order mode: the server accepts exactly ONE immediate cheque covering the order's
+  // required amount — fetch it so we can validate BEFORE the cheque is recorded.
+  let requiredAmount: number | null = null;
+  if (orderId) {
+    gal.multiple = false;
+    api
+      .get<{ payment_required_amount?: number }>(`/api/orders/${orderId}`)
+      .then((o) => {
+        requiredAmount = Number(o.payment_required_amount || 0) || null;
+        const el = shell.querySelector('#pc-req');
+        if (el && requiredAmount) el.textContent = ` · ₪${requiredAmount.toFixed(2)}`;
+      })
+      .catch(() => {});
+  }
 
   // Live guided scanner where supported (needs a camera + secure context); otherwise
   // fall back to the OS camera/file picker.
@@ -220,6 +237,10 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
   }
 
   async function addCheck(blob: Blob): Promise<void> {
+    if (orderId && items.length >= 1) {
+      toast('להזמנה נדרש צ׳ק אחד בלבד — הסירו את הקודם כדי להחליף', 'error');
+      return;
+    }
     const item: CheckItem = { draftId: null, previewUrl: URL.createObjectURL(blob), ai: null, aiAvailable: false };
     items.push(item);
     const card = document.createElement('div');
@@ -339,6 +360,22 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
       jobs.push({ card: cards[i], item, amount, date });
     }
     if (!jobs.length) return;
+    // Order mode: validate the server's rules BEFORE the cheque is recorded as a real
+    // payment — a post-dated or under-amount cheque would be confirmed (deposited!)
+    // and then fail the order link, leaving the order unpaid behind a success screen.
+    if (orderId) {
+      const j = jobs[0];
+      if (j.date > today()) {
+        msg.textContent = 'צ׳ק דחוי אינו תקף לתשלום הזמנה — נדרש צ׳ק לפירעון מיידי';
+        msg.className = 'error';
+        return;
+      }
+      if (requiredAmount && j.amount + 0.01 < requiredAmount) {
+        msg.textContent = `סכום הצ׳ק (₪${j.amount.toFixed(2)}) נמוך מסכום ההזמנה (₪${requiredAmount.toFixed(2)})`;
+        msg.className = 'error';
+        return;
+      }
+    }
     const btn = footer.querySelector('#pc-submit-all') as HTMLButtonElement;
     btn.disabled = true;
     msg.textContent = 'שולח…';
@@ -355,11 +392,8 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
         ok++;
         total += j.amount;
         if (orderId && ok === 1) {
-          try {
-            await api.post(`/api/orders/${orderId}/pay/check`, { checkId: j.item.draftId });
-            location.hash = '#order-pay/' + orderId;
-            return;
-          } catch (e) { toast('אישור התשלום להזמנה נכשל', 'error'); }
+          await linkCheckToOrder(orderId, j.item.draftId!);
+          return;
         }
       } catch {
         /* continue; report partial below */
@@ -382,5 +416,27 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
         <div style="margin-top:0.75rem"><a href="#home">חזרה לדף הבית</a></div>
       </div>`;
     toast(ok > 1 ? `${ok} צ׳קים נרשמו ✓` : 'הצ׳ק נרשם ✓', 'ok');
+  }
+
+  /** Order mode: the cheque is already recorded; link it to the order. On failure show
+   *  an honest "order NOT paid" screen — never the generic success view — with a retry
+   *  that reuses the SAME recorded cheque (re-photographing would duplicate the payment). */
+  async function linkCheckToOrder(oid: string, checkId: string): Promise<void> {
+    try {
+      await api.post(`/api/orders/${oid}/pay/check`, { checkId });
+      location.hash = '#order-pay/' + oid;
+    } catch (e) {
+      items.forEach((it) => URL.revokeObjectURL(it.previewUrl));
+      const emsg = e instanceof Error ? e.message : 'אישור התשלום להזמנה נכשל';
+      shell.innerHTML = `
+        <div class="empty-state">
+          <div class="es-icon">⚠️</div>
+          <div class="es-title">ההזמנה עדיין לא שולמה</div>
+          <div class="es-sub">${escapeHtml(emsg)}<br/>הצ׳ק נקלט במערכת, אך לא שויך להזמנה.</div>
+          <button class="es-cta" id="pc-retry-link" type="button">נסו לשייך שוב</button>
+          <div style="margin-top:0.75rem"><a href="#order-pay/${escapeHtml(oid)}">חזרה לתשלום ההזמנה</a> · <a href="#payments">התשלומים שלי</a></div>
+        </div>`;
+      (shell.querySelector('#pc-retry-link') as HTMLButtonElement).onclick = () => linkCheckToOrder(oid, checkId);
+    }
   }
 }
