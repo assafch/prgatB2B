@@ -154,16 +154,28 @@ export function unreconciledCardTotal(custname: string): number {
   return round2(row.s || 0);
 }
 
-/** Sweep: mark hosted-page intents that were never completed as 'expired' so they
- *  stop counting as live payment artifacts (order sweeps, admin views). A late PSP
- *  charge against an expired intent is still recorded — confirmCard transitions any
- *  non-paid status to 'paid'. */
-export function expireStaleCardIntents(): number {
-  const r = db
-    .prepare(`UPDATE card_payments SET status = 'expired' WHERE status = 'pending' AND created_at < datetime('now', ?)`)
-    .run(PENDING_INTENT_TTL);
-  if (r.changes > 0) console.log(`[card] expired ${r.changes} stale pending intent(s)`);
-  return r.changes;
+/** Sweep: resolve hosted-page intents that were never completed. Each stale row gets
+ *  a final authoritative PSP re-query (confirmCard) FIRST — a charge whose IPN and
+ *  return redirect were both lost (e.g. mid-deploy) must become 'paid', approve its
+ *  order, and stay protected from the order sweeps. Only rows the PSP does not show
+ *  as paid are marked 'expired'. */
+export async function expireStaleCardIntents(): Promise<number> {
+  const stale = db
+    .prepare(`SELECT id FROM card_payments WHERE status = 'pending' AND created_at < datetime('now', ?)`)
+    .all(PENDING_INTENT_TTL) as { id: string }[];
+  let expired = 0;
+  for (const row of stale) {
+    try {
+      const fresh = await confirmCard(row.id); // pays + approves order if the PSP says paid
+      if (fresh && fresh.status === 'paid') continue;
+    } catch {
+      /* PSP unreachable — fall through: the page is hours past its 30-min expiry */
+    }
+    const r = db.prepare(`UPDATE card_payments SET status = 'expired' WHERE id = ? AND status = 'pending'`).run(row.id);
+    expired += r.changes;
+  }
+  if (expired > 0) console.log(`[card] expired ${expired} stale pending intent(s)`);
+  return expired;
 }
 
 /** Confirmed (paid) debt card payments in the recon window — used by the open-debt

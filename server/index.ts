@@ -61,6 +61,7 @@ import {
   listStuckOrders,
   OrderError,
   payHeldOrderByCheck,
+  recoverStuckSubmittingOrders,
   reorderToCart,
   resendApprovedOrder,
   setCartLine,
@@ -595,6 +596,8 @@ app.get('/api/home', requireCustomer, homeLimiter, ah(async (req, res) => {
   if (req.user!.customer_role === 'orderer') {
     data.balance = { ...EMPTY_BALANCE };
     data.balanceOk = false;
+    // Keep blocksOnDebt (checkout must still explain the block) but not the amount.
+    if (data.paymentPolicy) data.paymentPolicy = { ...data.paymentPolicy, netDebt: 0 };
   }
   res.json(data);
 }));
@@ -1100,9 +1103,10 @@ app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, re
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  // Re-confirm 'failed' too: a decline followed by a successful retry on the same
-  // hosted page must resolve to paid, not stick on the stale failure.
-  if (row.status === 'pending' || row.status === 'failed') row = (await confirmCard(row.id)) || row;
+  // Re-confirm 'failed'/'expired' too: a decline followed by a successful retry on
+  // the same hosted page (or a charge whose IPN was lost while the intent aged out)
+  // must resolve to paid, not stick on the stale failure.
+  if (row.status === 'pending' || row.status === 'failed' || row.status === 'expired') row = (await confirmCard(row.id)) || row;
   res.json({ id: row.id, status: row.status, amount: row.amount, confirmationCode: row.confirmation_code, fourDigits: row.four_digits, provider: row.provider });
 }));
 
@@ -1635,9 +1639,13 @@ async function startup() {
   // Abandoned held orders (pending_payment, never linked): sweep at boot and hourly.
   sweepPendingOrders();
   setInterval(() => sweepPendingOrders(), 3600_000).unref();
-  // Hosted-page card intents that were never completed: expire at boot + every 10 min.
-  expireStaleCardIntents();
-  setInterval(() => expireStaleCardIntents(), 10 * 60_000).unref();
+  // Hosted-page card intents that were never completed: PSP-confirm then expire,
+  // at boot + every 10 min.
+  expireStaleCardIntents().catch((err) => console.warn('[card] expiry sweep failed:', err));
+  setInterval(() => { expireStaleCardIntents().catch((err) => console.warn('[card] expiry sweep failed:', err)); }, 10 * 60_000).unref();
+  // Orders stranded in 'submitting' by a crash/drain: resolve by BOOKNUM. The stuck
+  // set is captured synchronously here (before traffic) — resolution runs async.
+  recoverStuckSubmittingOrders().catch((err) => console.warn('[orders] boot recovery failed:', err));
   // Priority receipts: create/retry pending rows at boot and every 5 min.
   sweepPendingReceipts().catch(() => {});
   setInterval(() => { sweepPendingReceipts().catch(() => {}); }, 5 * 60_000).unref();
@@ -1670,10 +1678,13 @@ async function startup() {
       process.exit(0);
     });
     server.closeIdleConnections();
+    // Above the default 30s Priority timeout so normal in-flight ERP calls finish;
+    // anything longer (the rare 120s order POST) is resolved by the boot-time
+    // 'submitting' recovery instead of blocking the deploy.
     setTimeout(() => {
       console.warn('[prgatB2B] drain timeout — forcing exit');
       process.exit(0);
-    }, 15_000).unref();
+    }, 35_000).unref();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

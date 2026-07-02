@@ -190,9 +190,13 @@ export async function findTransaction(opts: {
   createdAt: string; // 'YYYY-MM-DD HH:MM:SS' (UTC, from sqlite)
 }): Promise<TranzilaTx | null> {
   const c = cfg();
+  // Prefer a PAID attempt carrying our ref (mirror payplus): multiple attempts share
+  // the ref (decline, then retry-success), and returning the declined one would let
+  // confirmCard mark a genuinely-paid intent 'failed'. The index hint points at ONE
+  // attempt — when that attempt isn't paid, fall through to the range scan too.
   if (opts.index && isFinite(Number(opts.index))) {
     const byIndex = await queryTransactions({ terminal_name: c.terminal, transaction_index: Number(opts.index) }, opts.ref);
-    const hit = byIndex.find((t) => t.refFound);
+    const hit = byIndex.find((t) => t.refFound && t.paid);
     if (hit) return hit;
   }
   const created = new Date(opts.createdAt.replace(' ', 'T') + 'Z');
@@ -206,5 +210,5 @@ export async function findTransaction(opts: {
     },
     opts.ref
   );
-  return inRange.find((t) => t.refFound) ?? null;
+  return inRange.find((t) => t.refFound && t.paid) ?? inRange.find((t) => t.refFound) ?? null;
 }

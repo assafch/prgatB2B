@@ -258,7 +258,20 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
       item.ai = r.ai;
       item.aiAvailable = r.aiAvailable;
     } catch (ex) {
-      card.innerHTML = `<div class="error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
+      // Keep the item in place (submitAll skips draftId-less rows and the items[i] ↔
+      // DOM-card index pairing must hold), but give the error card a remove control —
+      // without one, the order-mode single-cheque cap dead-ends the flow (no way to
+      // photograph a replacement).
+      card.innerHTML = `
+        <div class="error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>
+        <button class="ghost pc-err-remove" type="button" style="margin-top:0.5rem;width:100%">הסר ונסו שוב ✕</button>`;
+      (card.querySelector('.pc-err-remove') as HTMLButtonElement).onclick = () => {
+        URL.revokeObjectURL(item.previewUrl);
+        const idx = items.indexOf(item);
+        if (idx >= 0) items.splice(idx, 1);
+        card.remove();
+        renderFooter();
+      };
       return;
     }
     renderCard(card, item);
@@ -370,6 +383,16 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
         msg.className = 'error';
         return;
       }
+      // The render-time fetch may have failed silently — re-fetch here so the amount
+      // check actually arms before the cheque is recorded as a real payment.
+      if (requiredAmount == null) {
+        try {
+          const o = await api.get<{ payment_required_amount?: number }>(`/api/orders/${orderId}`);
+          requiredAmount = Number(o.payment_required_amount || 0) || null;
+        } catch {
+          /* still unknown — the server enforces the same rule at link time */
+        }
+      }
       if (requiredAmount && j.amount + 0.01 < requiredAmount) {
         msg.textContent = `סכום הצ׳ק (₪${j.amount.toFixed(2)}) נמוך מסכום ההזמנה (₪${requiredAmount.toFixed(2)})`;
         msg.className = 'error';
@@ -426,6 +449,18 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
       await api.post(`/api/orders/${oid}/pay/check`, { checkId });
       location.hash = '#order-pay/' + oid;
     } catch (e) {
+      // The order may in fact be settled (lost success response, or another payment
+      // won) — check before showing a false "not paid" screen; #order-pay renders
+      // the true settled state.
+      try {
+        const o = await api.get<{ status?: string }>(`/api/orders/${oid}`);
+        if (o.status && o.status !== 'pending_payment') {
+          location.hash = '#order-pay/' + oid;
+          return;
+        }
+      } catch {
+        /* fall through to the failure screen */
+      }
       items.forEach((it) => URL.revokeObjectURL(it.previewUrl));
       const emsg = e instanceof Error ? e.message : 'אישור התשלום להזמנה נכשל';
       shell.innerHTML = `

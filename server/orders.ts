@@ -294,7 +294,12 @@ async function submitOrderInner(
     // failure — marking 'failed' tells the customer to retry, which would create a
     // duplicate ERP order. Mirrors resendApprovedOrder's idempotency lookup.
     try {
-      const existing = await findOrderByBookNum(config, `B2B-${localOrderId}`);
+      // A client-side abort doesn't stop Priority from committing moments later —
+      // give it a beat before looking, or we'd miss the order and invite a retry-dup.
+      if (err instanceof Error && err.message.startsWith('Priority API timeout')) {
+        await new Promise((r) => setTimeout(r, 15_000));
+      }
+      const existing = await findOrderByBookNum(config, `B2B-${localOrderId}`, custname);
       if (existing) {
         console.log(`[orders] submit: response lost but Priority order ${existing} exists for B2B-${localOrderId} — adopting`);
         db.prepare(
@@ -437,9 +442,12 @@ export async function approveOrder(orderId: number, kind: 'card' | 'check', paym
 /** Link an already-submitted cheque to a held order and approve it (cheque = approve
  *  at submit, decision #2). */
 export async function payHeldOrderByCheck(userId: number, custname: string, orderId: number, checkId: string): Promise<boolean> {
-  const order = db.prepare(`SELECT id, status, custname, user_id, payment_required_amount FROM orders_local WHERE id = ?`).get(orderId) as
-    | { id: number; status: string; custname: string; user_id: number; payment_required_amount: number | null } | undefined;
+  const order = db.prepare(`SELECT id, status, custname, user_id, payment_required_amount, linked_payment_id FROM orders_local WHERE id = ?`).get(orderId) as
+    | { id: number; status: string; custname: string; user_id: number; payment_required_amount: number | null; linked_payment_id: string | null } | undefined;
   if (!order || order.user_id !== userId || order.custname !== custname) throw new OrderError('ההזמנה לא נמצאה');
+  // Idempotent: THIS cheque already settled the order (a retry after the success
+  // response was lost must not be told "not awaiting payment").
+  if (order.linked_payment_id === checkId) return true;
   if (order.status !== 'pending_payment') throw new OrderError('ההזמנה אינה ממתינה לתשלום');
   const chk = getCheckForUser(userId, checkId) as { status?: string; amount?: number; is_postdated?: number } | null;
   if (!chk || chk.status !== 'submitted') throw new OrderError('הצ׳ק לא נמצא או טרם אושר');
@@ -514,7 +522,7 @@ export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolea
     const config = getPriorityConfig();
     if (config) {
       try {
-        const existing = await findOrderByBookNum(config, `B2B-${orderId}`);
+        const existing = await findOrderByBookNum(config, `B2B-${orderId}`, order.custname);
         if (existing) {
           console.log(`[orders] resend: found existing Priority order ${existing} for B2B-${orderId} — adopting (no re-create)`);
           db.prepare(
@@ -533,6 +541,39 @@ export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolea
     return { ok: true, ordname };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Boot-time recovery: any order still in 'submitting' means the process died (or was
+ *  drained) mid-POST — the ERP may or may not hold the order. Resolve each by BOOKNUM:
+ *  found → adopt as submitted; not found → mark failed (held orders keep
+ *  payment_status='approved' so they land in the admin resend queue). Runs at boot
+ *  only, before traffic — a live process never leaves rows in this state at rest. */
+export async function recoverStuckSubmittingOrders(): Promise<void> {
+  const stuck = db.prepare(
+    `SELECT id, custname FROM orders_local WHERE status = 'submitting'`
+  ).all() as { id: number; custname: string }[];
+  if (!stuck.length) return;
+  const config = getPriorityConfig();
+  console.warn(`[orders] boot recovery: ${stuck.length} order(s) stuck in 'submitting'`);
+  for (const o of stuck) {
+    try {
+      const existing = config ? await findOrderByBookNum(config, `B2B-${o.id}`, o.custname) : null;
+      if (existing) {
+        db.prepare(
+          `UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now'), error = NULL WHERE id = ? AND status = 'submitting'`
+        ).run(existing, o.id);
+        console.log(`[orders] boot recovery: order ${o.id} adopted Priority ${existing}`);
+      } else {
+        db.prepare(
+          `UPDATE orders_local SET status = 'failed', error = 'process interrupted mid-submit; no ERP order found' WHERE id = ? AND status = 'submitting'`
+        ).run(o.id);
+        console.warn(`[orders] boot recovery: order ${o.id} marked failed (no ERP order for B2B-${o.id})`);
+      }
+    } catch (err) {
+      // Priority unreachable — leave the row for the next boot rather than guessing.
+      console.warn(`[orders] boot recovery: could not resolve order ${o.id}:`, err instanceof Error ? err.message : err);
+    }
   }
 }
 

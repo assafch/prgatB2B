@@ -45,7 +45,8 @@ export async function priorityRequest(
   config: PriorityConfig,
   endpoint: string,
   method = 'GET',
-  body: unknown = null
+  body: unknown = null,
+  timeoutMs = 30_000
 ): Promise<Record<string, unknown>> {
   const url = `${config.baseUrl}/${config.company}/${endpoint}`;
   const authHeader = 'Basic ' + Buffer.from(`${config.pat}:PAT`).toString('base64');
@@ -62,7 +63,9 @@ export async function priorityRequest(
   console.log(`[Priority] ${method} ${url}`);
   // Bound every ERP call: a hung Priority connection would otherwise stall order
   // submit / first home load for minutes and wedge the finance-cache refresh.
-  options.signal = AbortSignal.timeout(30_000);
+  // Mutating calls pass a larger budget — aborting a slow-but-working ORDER POST
+  // client-side doesn't stop Priority from committing it (duplicate risk).
+  options.signal = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, options);
@@ -239,24 +242,30 @@ export async function createOrder(
   };
   if (details) body.DETAILS = details;
   if (bookNum) body.BOOKNUM = bookNum;
-  const result = await priorityRequest(config, 'ORDERS', 'POST', body);
+  // 120s (not the default 30s): an aborted-but-committed ORDER POST is a duplicate
+  // waiting to happen; give a slow ERP room to answer before we go down that path.
+  const result = await priorityRequest(config, 'ORDERS', 'POST', body, 120_000);
   const ordname = (result.ORDNAME as string) || '';
   if (!ordname) throw new Error('Priority did not return ORDNAME');
   return ordname;
 }
 
 /** Look up an existing Priority order by its internal BOOKNUM reference (e.g. "B2B-42").
- *  Returns the ORDNAME if an order is found, or null if none exists.
- *  Used by resendApprovedOrder to detect orders that were created at Priority but whose
- *  response was lost — so we can adopt the existing order instead of creating a duplicate. */
+ *  Returns the ORDNAME if an order is found, or null if none exists. Used by the
+ *  lost-response recovery paths to adopt an existing order instead of duplicating it.
+ *  ALWAYS cross-check CUSTNAME when known: orders_local ids can be reused after an
+ *  admin reset (INTEGER PRIMARY KEY rowid reuse), so a bare BOOKNUM hit may belong
+ *  to a different customer's old order — adopting it would silently drop the order. */
 export async function findOrderByBookNum(
   config: PriorityConfig,
-  bookNum: string
+  bookNum: string,
+  custname?: string
 ): Promise<string | null> {
   const safe = bookNum.replace(/'/g, "''");
+  const custFilter = custname ? ` and CUSTNAME eq '${custname.replace(/'/g, "''")}'` : '';
   const result = await priorityRequest(
     config,
-    `ORDERS?$filter=BOOKNUM eq '${safe}'&$top=1&$select=ORDNAME,BOOKNUM`
+    `ORDERS?$filter=BOOKNUM eq '${safe}'${custFilter}&$top=1&$select=ORDNAME,BOOKNUM,CUSTNAME`
   );
   const rows = (result.value || []) as Array<Record<string, unknown>>;
   if (rows.length === 0) return null;
