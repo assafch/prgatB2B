@@ -116,7 +116,7 @@ function chequeRowHtml(ch: AdminCheck): string {
   const dateLabel = ch.checkDate ? escapeHtml(formatDate(ch.checkDate)) : '—';
   return `
     <div class="chq-row${isExpanded ? ' expanded' : ''}" data-id="${escapeAttr(ch.id)}">
-      <img class="chq-thumb" loading="lazy" src="${imgUrl}" alt=""/>
+      <img class="chq-thumb" loading="lazy" src="${imgUrl}" alt="" onerror="this.style.visibility='hidden'"/>
       <div class="chq-row-main">
         <div class="chq-row-name">${escapeHtml(ch.custname)} <span class="money">${ch.amount != null ? formatMoney(ch.amount) : '—'}</span></div>
         <div class="chq-row-meta">${bankLabel} · ${dateLabel}${ch.isPostdated ? ' <span class="badge warn">דחוי</span>' : ''}</div>
@@ -131,7 +131,7 @@ function chequeExpandHtml(ch: AdminCheck): string {
   return `
     <div class="chq-expand" data-expand="${escapeAttr(ch.id)}">
       <a class="chq-photo-link" href="${imgUrl}" target="_blank" rel="noopener">
-        <img class="chq-photo-lg" loading="lazy" src="${imgUrl}" alt=""/>
+        <img class="chq-photo-lg" loading="lazy" src="${imgUrl}" alt="" onerror="this.style.visibility='hidden'"/>
       </a>
       <div class="chq-match-wrap">${matchStripHtml({ kind: 'loading' })}</div>
       <div class="chq-actions">

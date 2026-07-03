@@ -48,7 +48,8 @@ function sparkline(values: number[]): string {
   if (values.length < 2) return '<div class="muted" style="font-size:11px">אין מספיק נתונים</div>';
   const w = 220, h = 74, max = Math.max(...values, 1), min = Math.min(...values, 0);
   const pts = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * (w - 8) + 4;
+    // RTL: newest month renders leftmost, matching the flex label row below.
+    const x = w - ((i / (values.length - 1)) * (w - 8) + 4);
     const y = h - 6 - ((v - min) / (max - min || 1)) * (h - 12);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
