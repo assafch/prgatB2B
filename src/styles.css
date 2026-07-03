@@ -896,3 +896,30 @@ tr.row-dirty { background: #fffbe6; }
 @media (min-width: 1024px) { .adm-fab { bottom: 24px; } }
 .adm-danger { margin-top: auto; border-top: 1px dashed #f1d5d5; padding-top: 10px; }
 .adm-danger summary { font-size: 11.5px; font-weight: 700; color: var(--err); cursor: pointer; }
+
+/* Customers board */
+.adm-search { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; min-width: 220px; }
+.cust-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 0.8fr 0.4fr; gap: 8px; align-items: center; padding: 13px 16px; font-size: 13px; border-bottom: 1px solid #f1f3f6; }
+.cust-grid-head { background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 800; color: var(--muted); padding: 10px 16px; }
+.cust-row { cursor: pointer; }
+.cust-row:hover { background: #f7faff; }
+.cust-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabnum { font-variant-numeric: tabular-nums; }
+.money.debt { color: var(--err); }
+.cust-chev { color: #9aa1ab; text-align: left; }
+.cust-pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.pill-cash { background: #fff8f0; color: var(--warn); }
+.pill-net { background: #eef2f8; color: var(--brand); }
+.pill-src { background: #f1f3f6; color: #5b6573; font-size: 10.5px; }
+.adm-currency { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 9px; padding: 7px 12px; }
+.adm-currency i { font-style: normal; color: var(--muted); font-size: 12px; }
+.adm-currency input { border: none; outline: none; width: 110px; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0; }
+.adm-toggle-line { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+.dr-user-row { display: flex; align-items: center; gap: 8px; border: 1px solid #f1f3f6; border-radius: 9px; padding: 9px 12px; margin-bottom: 6px; font-size: 12.5px; }
+.dr-user-row b { font-weight: 700; }
+.dr-user-row span { margin-inline-start: auto; }
+@media (max-width: 1023px) {
+  .cust-grid { grid-template-columns: 2fr 1fr 0.4fr; }
+  .cust-grid > :nth-child(2), .cust-grid > :nth-child(3), .cust-grid > :nth-child(5) { display: none; }
+  .cust-grid-head { display: none; }
+}
