@@ -773,6 +773,10 @@ tr.row-dirty { background: #fffbe6; }
 .sec-head a { font-size: 0.85rem; font-weight: 600; }
 
 /* ===== Admin Control Center (Stage 8) ===== */
+/* The admin chrome is full-bleed: opt out of the customer .app-shell cage.
+   :has() is fine here — the admin is used on current Chrome/Safari only. */
+.app-shell:has(> .admin-layout) { max-width: none; padding: 0; margin: 0; }
+
 /* Layout: sidebar is desktop-only; mobile gets a navy head + bottom nav. */
 .admin-layout { display: flex; min-height: 100dvh; background: var(--bg); }
 .admin-main { flex: 1; min-width: 0; padding: 20px 24px calc(84px + env(safe-area-inset-bottom)); }
