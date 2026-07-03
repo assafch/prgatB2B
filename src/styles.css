@@ -923,3 +923,15 @@ tr.row-dirty { background: #fffbe6; }
   .cust-grid > :nth-child(2), .cust-grid > :nth-child(3), .cust-grid > :nth-child(5) { display: none; }
   .cust-grid-head { display: none; }
 }
+
+/* Promotions + leads boards (Stage 8b) — quiet rows, same list+drawer template. */
+.promo-row, .lead-row { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; border-bottom: 1px solid #f1f3f6; }
+.promo-row:hover, .lead-row:hover { background: #f7faff; }
+.promo-row:last-child, .lead-row:last-child { border-bottom: none; }
+.promo-row-main, .lead-row-main { flex: 1; min-width: 0; }
+.promo-row-name, .lead-row-name { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.promo-row-desc, .lead-row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-row-date { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.pill-on { background: #f1faf4; color: var(--ok); }
+.pill-off { background: #f1f3f6; color: var(--muted); }
+.pill-new { background: #fdece9; color: var(--coral-lo); }
