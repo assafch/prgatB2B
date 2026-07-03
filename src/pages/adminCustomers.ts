@@ -122,7 +122,7 @@ async function openCustomerDrawer(custname: string, shell: HTMLElement): Promise
     <div>
       <div class="adm-sect-label">הנחת לקוח</div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="adm-currency"><input id="dr-disc" type="number" min="0" max="99" step="0.5" style="width:64px" value="${d.discount?.percent ?? ''}" placeholder="—"/><i>%</i></span>
+        <span class="adm-currency"><input id="dr-disc" type="number" min="0" max="60" step="0.5" style="width:64px" value="${d.discount?.percent ?? ''}" placeholder="—"/><i>%</i></span>
         ${d.discount?.source ? `<span class="cust-pill pill-src">${d.discount.source === 'manual' ? 'ידני' : 'אוטו׳ מהזמנות'}</span>` : ''}
         <button type="button" id="dr-disc-refresh" class="adm-btn-ghost" style="padding:5px 10px">↻ משוך מהזמנות</button>
       </div>
@@ -169,10 +169,13 @@ async function openCustomerDrawer(custname: string, shell: HTMLElement): Promise
   (foot.querySelector('.save') as HTMLButtonElement).onclick = async () => {
     const thrRaw = (body.querySelector('#dr-thr') as HTMLInputElement).value.trim();
     pending.open_debt_threshold = thrRaw === '' ? null : Number(thrRaw);
+    const discRaw = (body.querySelector('#dr-disc') as HTMLInputElement).value.trim();
+    const newPct = discRaw === '' ? null : Number(discRaw);
+    if (newPct != null && (Number.isNaN(newPct) || newPct < 0 || newPct > 60)) {
+      toast('הנחה חייבת להיות בין 0 ל-60%', 'error'); return;
+    }
     try {
       await api.post('/api/admin/customers/batch', { items: [{ custname: d.custname, ...pending }] });
-      const discRaw = (body.querySelector('#dr-disc') as HTMLInputElement).value.trim();
-      const newPct = discRaw === '' ? null : Number(discRaw);
       if (newPct !== (d.discount?.percent ?? null)) {
         await api.patch(`/api/admin/customers/${encodeURIComponent(d.custname)}`, { discount_percent: newPct });
       }

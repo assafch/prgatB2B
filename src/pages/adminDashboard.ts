@@ -62,10 +62,10 @@ function sparkline(values: number[]): string {
 
 const ACT_ICON: Record<Activity['kind'], string> = { order: '🛒', check: '🧾', card: '💳', lead: '✦' };
 const ACT_LABEL: Record<Activity['kind'], (a: Activity) => string> = {
-  order: a => `הזמנה #${a.ref} · ${a.label}`,
-  check: a => `צ׳ק · ${a.label}`,
-  card: a => `תשלום בכרטיס · ${a.label}`,
-  lead: a => `ליד חדש · ${a.label}`,
+  order: a => `הזמנה #${escapeHtml(a.ref)} · ${escapeHtml(a.label)}`,
+  check: a => `צ׳ק · ${escapeHtml(a.label)}`,
+  card: a => `תשלום בכרטיס · ${escapeHtml(a.label)}`,
+  lead: a => `ליד חדש · ${escapeHtml(a.label)}`,
 };
 
 function when(at: string): string {
