@@ -9,15 +9,7 @@ import { renderAdminCustomers } from './adminCustomers.js';
 import { renderCustomerCard } from './adminCustomerCard.js';
 import { renderAdminChrome } from './adminShell.js';
 import { renderAdminOrders } from './adminOrders.js';
-
-interface Stats {
-  users: number;
-  orders: number;
-  orders_submitted: number;
-  leads: number;
-  invites_pending: number;
-  products: number;
-}
+import { renderAdminDashboard } from './adminDashboard.js';
 
 interface Customer {
   CUSTNAME: string;
@@ -49,7 +41,7 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
   const tab = hash === '#admin' ? '#admin/dashboard' : hash;
   const c = renderAdminChrome(shell, tab);
 
-  if (tab === '#admin/dashboard') await renderDashboard(c);
+  if (tab === '#admin/dashboard') await renderAdminDashboard(c);
   else if (tab === '#admin/analytics') await renderAnalyticsAdmin(c);
   else if (tab === '#admin/products') await renderAdminProducts(c);
   else if (tab === '#admin/catalog') await renderCatalogAdmin(c);
@@ -62,7 +54,7 @@ export async function renderAdmin(shell: HTMLElement, hash: string): Promise<voi
   else if (tab === '#admin/payments') await renderPaymentsAdmin(c);
   else if (tab === '#admin/leads') await renderLeadsAdmin(c);
   else if (tab === '#admin/settings') await renderSettingsAdmin(c);
-  else await renderDashboard(c);                                        // unknown #admin/* → dashboard
+  else await renderAdminDashboard(c);                                   // unknown #admin/* → dashboard
 }
 
 interface AdminCheck {
@@ -137,33 +129,6 @@ async function renderPaymentsAdmin(c: HTMLElement): Promise<void> {
       }
     });
   });
-}
-
-async function renderDashboard(c: HTMLElement): Promise<void> {
-  c.innerHTML = `<div class="muted">טוען…</div>`;
-  try {
-    const s = await api.get<Stats>('/api/admin/dashboard');
-    c.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem">
-        ${tile('לקוחות רשומים', s.users)}
-        ${tile('הזמנות', s.orders)}
-        ${tile('נשלחו ל-Priority', s.orders_submitted)}
-        ${tile('לידים חדשים', s.leads)}
-        ${tile('הזמנות פתוחות', s.invites_pending)}
-        ${tile('מוצרים בקטלוג', s.products)}
-      </div>
-    `;
-  } catch (ex) {
-    c.innerHTML = `<div class="card error">${ex instanceof Error ? ex.message : ex}</div>`;
-  }
-}
-
-function tile(label: string, value: number): string {
-  return `
-    <div class="card" style="text-align:center">
-      <div class="muted" style="font-size:0.85rem">${label}</div>
-      <div style="font-size:2rem;font-weight:700;color:var(--brand)">${value}</div>
-    </div>`;
 }
 
 async function renderCatalogAdmin(c: HTMLElement): Promise<void> {
