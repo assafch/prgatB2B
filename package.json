@@ -23,7 +23,7 @@
     "@types/papaparse": "^5.5.2",
     "@types/web-push": "^3.6.4",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.5.0",
+    "better-sqlite3": "^12.11.1",
     "cookie": "^1.0.2",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
