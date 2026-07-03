@@ -151,6 +151,56 @@ function onSheetKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') closeSheet();
 }
 
+// ---- Admin drawer — the "רשימה + מגירה" editing pattern (Stage 8b). ----
+// Desktop: 380px side panel. Mobile: the same content inside the bottom sheet.
+let activeDrawer: { close: () => void } | null = null;
+
+export function openDrawer(
+  content: HTMLElement,
+  opts: { title: string; sub?: string; onClose?: () => void }
+): { close: () => void } {
+  activeDrawer?.close();
+
+  const head = document.createElement('div');
+  head.className = 'adm-drawer-head';
+  head.innerHTML = `<div><b>${opts.title}</b>${opts.sub ? `<small>${opts.sub}</small>` : ''}</div>
+    <button type="button" class="adm-drawer-x" aria-label="סגירה">✕</button>`;
+
+  if (!window.matchMedia('(min-width: 1024px)').matches) {
+    const wrap = document.createElement('div');
+    wrap.append(head, content);
+    const sheet = openSheet(wrap, { onClose: opts.onClose, label: opts.title });
+    (head.querySelector('.adm-drawer-x') as HTMLButtonElement).onclick = () => sheet.close();
+    activeDrawer = sheet;
+    return sheet;
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'adm-drawer-backdrop';
+  const panel = document.createElement('aside');
+  panel.className = 'adm-drawer';
+  panel.append(head, content);
+  document.body.append(backdrop, panel);
+  requestAnimationFrame(() => panel.classList.add('open')); // slide — the one allowed animation
+
+  const close = (): void => {
+    if (activeDrawer?.close !== close) return; // already superseded
+    activeDrawer = null;
+    panel.classList.remove('open');
+    window.removeEventListener('keydown', onKey);
+    window.removeEventListener('hashchange', close);
+    setTimeout(() => { panel.remove(); backdrop.remove(); }, 200);
+    opts.onClose?.();
+  };
+  const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
+  backdrop.addEventListener('click', close);
+  (head.querySelector('.adm-drawer-x') as HTMLButtonElement).onclick = close;
+  window.addEventListener('keydown', onKey);
+  window.addEventListener('hashchange', close);
+  activeDrawer = { close };
+  return activeDrawer;
+}
+
 // Tiny haptic tick so one-hand add/pay actions feel real. No-op where unsupported.
 export function buzz(ms = 10): void {
   try {

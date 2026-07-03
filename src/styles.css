@@ -871,3 +871,28 @@ tr.row-dirty { background: #fffbe6; }
 .stuck-head .money { margin-inline-start: auto; font-size: 15px; }
 .stuck-error { background: #fef2f2; border: 1px solid #fbdcdc; border-radius: 9px; padding: 7px 11px; font-size: 11.5px; font-weight: 600; color: var(--err); margin-top: 8px; }
 .stuck-actions { display: flex; gap: 8px; margin-top: 9px; }
+
+/* List + drawer editing pattern */
+.adm-drawer-backdrop { position: fixed; inset: 0; background: rgba(16, 24, 40, 0.25); z-index: 60; }
+.adm-drawer { position: fixed; top: 0; left: 0; height: 100dvh; width: min(380px, 95vw); background: #fff; border-inline-start: 1px solid var(--border); box-shadow: -12px 0 28px rgba(16, 24, 40, 0.10); z-index: 61; display: flex; flex-direction: column; overflow-y: auto; transform: translateX(-100%); transition: transform 0.2s ease; }
+.adm-drawer.open { transform: translateX(0); }
+.adm-drawer-head { display: flex; align-items: flex-start; gap: 8px; padding: 16px 18px; border-bottom: 1px solid #f1f3f6; }
+.adm-drawer-head b { font-size: 16px; font-weight: 700; display: block; }
+.adm-drawer-head small { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.adm-drawer-x { margin-inline-start: auto; background: none; border: none; color: #9aa1ab; font-size: 16px; cursor: pointer; }
+.adm-drawer-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.adm-drawer-foot { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid #f1f3f6; position: sticky; bottom: 0; background: #fff; }
+.adm-drawer-foot .save { flex: 2; background: var(--navy); color: #fff; font-weight: 700; font-size: 13.5px; padding: 12px 0; border: none; border-radius: 10px; }
+.adm-drawer-foot .cancel { flex: 1; background: #fff; color: #5b6573; font-weight: 700; font-size: 13.5px; border: 1.5px solid var(--border); border-radius: 10px; }
+.adm-sect-label { font-size: 11px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
+.adm-seg { display: flex; gap: 6px; }
+.adm-seg button { flex: 1; border: 1.5px solid var(--border); background: #fff; color: #5b6573; font-weight: 700; font-size: 12px; padding: 8px 0; border-radius: 9px; }
+.adm-seg button.sel { border: 2px solid var(--brand); background: #f7faff; color: var(--brand); font-weight: 800; }
+.adm-toggle { position: relative; width: 34px; height: 20px; flex: none; border-radius: 999px; background: #d9dee5; border: none; transition: background 0.15s; }
+.adm-toggle::after { content: ''; position: absolute; top: 2px; inset-inline-start: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.adm-toggle.on { background: var(--brand); }
+.adm-toggle.on::after { transform: translateX(-14px); }
+.adm-fab { position: fixed; bottom: calc(84px + env(safe-area-inset-bottom)); inset-inline-end: 18px; width: 44px; height: 44px; border-radius: 50%; background: var(--navy); color: #fff; font-size: 22px; border: none; box-shadow: 0 4px 14px rgba(4, 22, 70, 0.35); z-index: 45; }
+@media (min-width: 1024px) { .adm-fab { bottom: 24px; } }
+.adm-danger { margin-top: auto; border-top: 1px dashed #f1d5d5; padding-top: 10px; }
+.adm-danger summary { font-size: 11.5px; font-weight: 700; color: var(--err); cursor: pointer; }
