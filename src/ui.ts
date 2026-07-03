@@ -163,22 +163,31 @@ export function openDrawer(
 
   const head = document.createElement('div');
   head.className = 'adm-drawer-head';
-  head.innerHTML = `<div><b>${opts.title}</b>${opts.sub ? `<small>${opts.sub}</small>` : ''}</div>
+  /* sub is trusted HTML (callers embed links); title is escaped. */
+  head.innerHTML = `<div><b>${escapeHtml(opts.title)}</b>${opts.sub ? `<small>${opts.sub}</small>` : ''}</div>
     <button type="button" class="adm-drawer-x" aria-label="סגירה">✕</button>`;
 
   if (!window.matchMedia('(min-width: 1024px)').matches) {
     const wrap = document.createElement('div');
     wrap.append(head, content);
-    const sheet = openSheet(wrap, { onClose: opts.onClose, label: opts.title });
+    const handle = { close: () => { /* replaced below */ } };
+    const sheet = openSheet(wrap, {
+      label: opts.title,
+      onClose: () => { if (activeDrawer === handle) activeDrawer = null; opts.onClose?.(); },
+    });
+    handle.close = () => { if (activeDrawer === handle) sheet.close(); };
     (head.querySelector('.adm-drawer-x') as HTMLButtonElement).onclick = () => sheet.close();
-    activeDrawer = sheet;
-    return sheet;
+    activeDrawer = handle;
+    return handle;
   }
 
   const backdrop = document.createElement('div');
   backdrop.className = 'adm-drawer-backdrop';
   const panel = document.createElement('aside');
   panel.className = 'adm-drawer';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-label', opts.title); // setAttribute takes the raw string as-is; no HTML entities to escape here
   panel.append(head, content);
   document.body.append(backdrop, panel);
   requestAnimationFrame(() => panel.classList.add('open')); // slide — the one allowed animation
