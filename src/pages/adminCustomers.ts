@@ -149,7 +149,7 @@ async function openCustomerDrawer(custname: string, shell: HTMLElement): Promise
 
   const drawer = openDrawer(body, {
     title: d.cust_desc || d.custname,
-    sub: `לקוח ${d.custname} · ${d.finance.priorityOk ? 'Priority ✓' : 'Priority —'} · חוב ${d.finance.openTotal != null ? nis(d.finance.openTotal) : '—'} · <a href="#admin/customers/${encodeURIComponent(d.custname)}">כרטיס מלא ←</a>`,
+    sub: `לקוח ${escapeHtml(d.custname)} · ${d.finance.priorityOk ? 'Priority ✓' : 'Priority —'} · חוב ${d.finance.openTotal != null ? nis(d.finance.openTotal) : '—'} · <a href="#admin/customers/${encodeURIComponent(d.custname)}">כרטיס מלא ←</a>`,
   });
 
   body.querySelectorAll<HTMLButtonElement>('#dr-kind button').forEach(b => {
