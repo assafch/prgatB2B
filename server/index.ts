@@ -69,6 +69,7 @@ import {
   sweepPendingOrders,
 } from './orders.js';
 import { sweepPendingReceipts, listFailedReceipts, failedReceiptCount } from './priorityReceipts.js';
+import { getOpsQueues, getRecentActivity } from './opsQueue.js';
 import { acceptInvite, createInvite, getInvite, listInvites } from './invites.js';
 import { createLead, listLeads, updateLeadStatus } from './leads.js';
 import { getPriorityConfig, listCustomers } from './priority.js';
@@ -1595,6 +1596,34 @@ app.delete('/api/admin/products/:partname/image', requireAdmin, (req, res) => {
 
 app.get('/api/admin/orders/stuck', requireAdmin, (req, res) => { res.json({ orders: listStuckOrders() }); });
 app.get('/api/admin/receipts/failed', requireAdmin, (req, res) => { res.json({ count: failedReceiptCount(), receipts: listFailedReceipts() }); });
+
+app.get('/api/admin/ops-queue', requireAdmin, (_req, res) => {
+  res.json({ queues: getOpsQueues(), activity: getRecentActivity(8) });
+});
+
+// Give up-for-good receipts (attempts >= 20) one more round: reset attempts, sweep now.
+app.post('/api/admin/receipts/retry', requireAdmin, ah(async (_req, res) => {
+  db.prepare(`UPDATE priority_receipts SET attempts = 0 WHERE status = 'failed'`).run();
+  await sweepPendingReceipts();
+  res.json({ ok: true, remaining: failedReceiptCount() });
+}));
+
+// Admin order list for the orders screen. scope=open → not yet in Priority.
+app.get('/api/admin/orders', requireAdmin, (req, res) => {
+  const scope = req.query.scope === 'open' ? 'open' : 'all';
+  const where = scope === 'open' ? 'WHERE priority_ordname IS NULL' : '';
+  const orders = db.prepare(
+    `SELECT id, custname, status, payment_status, total, payment_required_amount, priority_ordname, error, created_at
+       FROM orders_local ${where} ORDER BY created_at DESC LIMIT 200`
+  ).all();
+  res.json({ orders });
+});
+
+// Open (unreconciled) Priority invoices for one customer — cheque-approval match hints.
+// Read-only; served from the finance cache when warm.
+app.get('/api/admin/customers/:custname/unpaid-invoices', requireAdmin, ah(async (req, res) => {
+  res.json({ invoices: await getUnpaidInvoices(String(req.params.custname)) });
+}));
 app.post('/api/admin/orders/:id/resend', requireAdmin, ah(async (req, res) => {
   const r = await resendApprovedOrder(Number(req.params.id));
   res.status(r.ok ? 200 : 400).json(r);
