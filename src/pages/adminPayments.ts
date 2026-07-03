@@ -205,8 +205,8 @@ function wireChecksTab(shell: HTMLElement, body: HTMLElement, submitted: AdminCh
     }
   });
   (expandEl.querySelector('.chq-reject') as HTMLButtonElement).addEventListener('click', async (e) => {
-    if (!(await confirmDialog('לדחות את הצ׳ק? הלקוח יראה אותו כבוטל.'))) return;
     const btn = e.currentTarget as HTMLButtonElement;
+    if (!(await confirmDialog('לדחות את הצ׳ק? הלקוח יראה אותו כבוטל.'))) return;
     btn.disabled = true;
     try {
       await api.patch(`/api/admin/payments/${encodeURIComponent(expanded.id)}`, { status: 'cancelled' });
