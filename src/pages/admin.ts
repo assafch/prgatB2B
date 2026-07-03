@@ -7,6 +7,8 @@ import { renderAnalyticsAdmin } from './adminAnalytics.js';
 import { renderPromotionsAdmin } from './adminPromotions.js';
 import { renderAdminCustomers } from './adminCustomers.js';
 import { renderCustomerCard } from './adminCustomerCard.js';
+import { renderAdminChrome } from './adminShell.js';
+import { renderAdminOrders } from './adminOrders.js';
 
 interface Stats {
   users: number;
@@ -45,38 +47,22 @@ interface Lead {
 
 export async function renderAdmin(shell: HTMLElement, hash: string): Promise<void> {
   const tab = hash === '#admin' ? '#admin/dashboard' : hash;
-  shell.innerHTML = `
-    <div class="card" style="margin-bottom:0.75rem">
-      <nav style="display:flex;gap:0.5rem;flex-wrap:wrap">
-        <a href="#admin/dashboard" class="${tab === '#admin/dashboard' ? 'active' : ''}">לוח בקרה</a>
-        <a href="#admin/analytics" class="${tab === '#admin/analytics' ? 'active' : ''}">דוחות</a>
-        <a href="#admin/products" class="${tab === '#admin/products' ? 'active' : ''}">ניהול מוצרים</a>
-        <a href="#admin/catalog" class="${tab === '#admin/catalog' ? 'active' : ''}">סנכרון Priority</a>
-        <a href="#admin/users" class="${tab === '#admin/users' ? 'active' : ''}">משתמשים</a>
-        <a href="#admin/customers" class="${tab === '#admin/customers' || tab.startsWith('#admin/customers/') ? 'active' : ''}">לקוחות</a>
-        <a href="#admin/promotions" class="${tab === '#admin/promotions' ? 'active' : ''}">מבצעים</a>
-        <a href="#admin/invites" class="${tab === '#admin/invites' ? 'active' : ''}">הזמנות-לקוח</a>
-        <a href="#admin/payments" class="${tab === '#admin/payments' ? 'active' : ''}">תשלומים</a>
-        <a href="#admin/leads" class="${tab === '#admin/leads' ? 'active' : ''}">לידים</a>
-        <a href="#admin/settings" class="${tab === '#admin/settings' ? 'active' : ''}">הגדרות</a>
-      </nav>
-    </div>
-    <div id="admin-content"></div>
-  `;
-  const c = shell.querySelector('#admin-content') as HTMLDivElement;
+  const c = renderAdminChrome(shell, tab);
 
   if (tab === '#admin/dashboard') await renderDashboard(c);
   else if (tab === '#admin/analytics') await renderAnalyticsAdmin(c);
   else if (tab === '#admin/products') await renderAdminProducts(c);
   else if (tab === '#admin/catalog') await renderCatalogAdmin(c);
-  else if (tab === '#admin/users') await renderUsersAdmin(c);
+  else if (tab === '#admin/orders') await renderAdminOrders(c);
+  else if (tab === '#admin/users') await renderUsersAdmin(c);           // off-nav, still routable
   else if (tab.startsWith('#admin/customers/')) { await renderCustomerCard(c, decodeURIComponent(tab.slice('#admin/customers/'.length))); }
   else if (tab === '#admin/customers') await renderAdminCustomers(c);
   else if (tab === '#admin/promotions') await renderPromotionsAdmin(c);
-  else if (tab === '#admin/invites') await renderInvitesAdmin(c);
+  else if (tab === '#admin/invites') await renderInvitesAdmin(c);       // off-nav, still routable
   else if (tab === '#admin/payments') await renderPaymentsAdmin(c);
   else if (tab === '#admin/leads') await renderLeadsAdmin(c);
   else if (tab === '#admin/settings') await renderSettingsAdmin(c);
+  else await renderDashboard(c);                                        // unknown #admin/* → dashboard
 }
 
 interface AdminCheck {
