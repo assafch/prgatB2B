@@ -185,13 +185,14 @@ function lineRow(l: CartLine): string {
         <div class="cart-line-top">
           <div class="cart-line-thumb" aria-hidden="true"><span>—</span></div>
           <div class="cart-line-name">${escapeHtml(name)}</div>
-          <div class="cart-line-total">${l.price != null ? formatMoney(l.line_total) : '—'}</div>
+          <div class="cart-line-price">${priceBlock(l, { variant: 'stack' })}</div>
         </div>
-        <div class="cart-line-sku">${escapeHtml(l.partname)} · ${priceBlock(l, { variant: 'inline', size: 'sm' })}</div>
+        <div class="cart-line-sku">${escapeHtml(l.partname)}</div>
         <div class="cart-line-bottom">
           ${
             l.available
-              ? `<div class="cart-stepper-compact">${qtyStepper(l.partname, l.quantity, 1)}</div><span class="cart-line-units">${l.quantity} יח׳</span>`
+              ? `<div class="cart-stepper-compact">${qtyStepper(l.partname, l.quantity, 1)}</div><span class="cart-line-units">${l.quantity} יח׳</span>
+                 <span class="cart-line-sum"><span class="cart-line-sum-label">סה״כ</span><b>${l.price != null ? formatMoney(l.line_total) : '—'}</b></span>`
               : `<span class="cart-line-unavail-note">${l.outOfStock ? OOS_LABEL : 'לא זמין יותר'}</span>
                  <button type="button" class="cart-line-remove" data-remove="${escapeAttr(l.partname)}">הסר מהסל</button>`
           }

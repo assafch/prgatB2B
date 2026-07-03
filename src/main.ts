@@ -60,14 +60,7 @@ function topbar(): string {
       </div>`;
   }
   if (me.role === 'admin') {
-    return `
-      <div class="topbar">
-        <div class="logo"><img class="logo-img" src="/icons/logo.svg" alt="אורגת"/><span class="logo-sub">אדמין</span></div>
-        <nav>
-          <a href="#admin" class="${location.hash.startsWith('#admin') ? 'active' : ''}">לוח בקרה</a>
-          <a href="#logout">יציאה</a>
-        </nav>
-      </div>`;
+    return ''; // the admin control center renders its own chrome (sidebar / bottom nav)
   }
   // Customer: slim topbar (logo + logout); primary nav is the bottom bar.
   return `

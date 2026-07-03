@@ -182,3 +182,25 @@ matrix. Opt-in (it spawns many agents); ask to run it.
 ## 13. Bug log format
 `[severity] area — symptom — repro — expected vs actual — fix/owner`.
 Track regressions here as they're found.
+
+## Admin control center (Stage 8) — 2026-07-03
+
+Cases below cover the grouped-sidebar/bottom-nav shell, the "דורש טיפול" ops
+rail, the drawer editing pattern, and the kill-switch panel added in Stage 8
+(`src/pages/adminShell.ts`, `adminDashboard.ts`, `adminPayments.ts`,
+`adminSettings.ts`). Rows marked **PASS — controller walk 2026-07-03** were
+confirmed live during the controller's visual walk of the new admin that day;
+rows left unmarked are genuine gaps — mostly actions that write real data
+(Priority orders, cheque status, lead status) that the walk didn't exercise.
+
+| # | Case | Expected |
+|---|---|---|
+| CC.1 | Sidebar / bottom-nav routing + off-nav deep links | every sidebar item (desktop ≥1024px) and bottom-nav item + "עוד" sheet (mobile <1024px) routes to its screen; `#admin/users` and `#admin/invites` — which left the nav but stayed in the router (design law) — still render when the hash is typed or linked directly (PASS — controller walk 2026-07-03) |
+| CC.2 | Ops-rail resend-all idempotence | "שלח ל-Priority" on the stuck-orders rail card, run twice in a row: first run resends the stuck set, second run finds zero stuck orders left and no-ops (no duplicate order sent to Priority) — not exercised: not clickable against live Priority in the walk |
+| CC.3 | Typed-confirm cancel path | flipping a switch toward its `dangerousValue` opens the "הקלד/י את שם המתג" sheet; dismissing it (Escape, backdrop, ✕, or leaving the typed value mismatched) resolves `false` and leaves the switch and its setting untouched — no PATCH sent (PASS — controller walk 2026-07-03) |
+| CC.4 | Drawer Escape/backdrop/hashchange close | the `openDrawer()` panel (customer/promotion editors) closes on Escape key, backdrop click, and `hashchange` (back/forward or navigating to another route) — same three dismiss paths as the existing bottom sheet (PASS — controller walk 2026-07-03) |
+| CC.5 | Cheque approve → history flow + badge decrement | "✓ אשר צ׳ק" on a submitted cheque moves it out of the צ׳קים queue into היסטוריה, and the pay-tabs badge + "תשלומים" nav/rail badge count decrement by one — not exercised: approving writes a real status change to a live submitted cheque; not run in the visual walk |
+| CC.6 | Lead triage decrements badge | marking a new lead as handled/contacted removes it from `newLeads.count` and decrements the "לידים" nav badge + dashboard rail card — not exercised: writes a real lead status change; not run in the visual walk |
+| CC.7 | RTL drawer slide direction | `.adm-drawer` slides in and sits on the correct edge for the RTL layout (not mirrored) on desktop widths (PASS — controller walk 2026-07-03) |
+| CC.8 | 44px+ tap targets | mobile bottom-nav items and the "+" FAB (`.adm-fab`) meet the ~44px minimum touch target at phone widths (PASS — controller walk 2026-07-03) |
+| CC.9 | Sparkline direction matches labels (RTL) | revenue sparkline series runs right→left (newest point leftmost), matching the month-label flex row under it — **regression found in this walk**: the SVG `x` mapping ran oldest→newest left→right (SVG coords are LTR) against an RTL label row whose first (oldest) label renders rightmost, so the newest-point dot sat above the oldest month label; fixed same day by mirroring the `x` mapping in `sparkline()` (`src/pages/adminDashboard.ts`) — pending a fresh visual re-check on the next deploy |

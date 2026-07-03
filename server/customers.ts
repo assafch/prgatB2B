@@ -15,6 +15,7 @@ export interface AdminCustomerRow {
   enforced: number;             // per-customer policy rollout gate (0=off, 1=on)
   paymentTerms: string | null;  // cached PAYDES, may be null
   openTotal: number | null;     // cached ACC_DEBIT, may be null
+  discount_percent: number | null;
 }
 
 /** CACHED-only finance (no live Priority call): read the per-piece finance_cache. */
@@ -38,8 +39,10 @@ export function listCustomersAdmin(q: string, page: number, pageSize: number): {
   ).get(...params) as { n: number }).n;
   const rows = db.prepare(
     `SELECT u.custname AS custname, MAX(u.cust_desc) AS cust_desc, COUNT(*) AS user_count,
-            cp.kind AS kind, cp.open_debt_threshold AS open_debt_threshold, cp.allow_order_with_open_debt AS allow_order_with_open_debt, cp.enforced AS enforced
+            cp.kind AS kind, cp.open_debt_threshold AS open_debt_threshold, cp.allow_order_with_open_debt AS allow_order_with_open_debt, cp.enforced AS enforced,
+            cd.percent AS discount_percent
      FROM users u LEFT JOIN customer_policies cp ON cp.custname = u.custname
+                  LEFT JOIN customer_discounts cd ON cd.custname = u.custname
      WHERE u.role='customer' AND u.custname IS NOT NULL ${where}
      GROUP BY u.custname ORDER BY cust_desc IS NULL, cust_desc LIMIT ? OFFSET ?`
   ).all(...params, pageSize, page * pageSize) as Array<Record<string, unknown>>;
@@ -57,6 +60,7 @@ export function listCustomersAdmin(q: string, page: number, pageSize: number): {
       enforced: Number(r.enforced) || 0,
       paymentTerms: fin.paymentTerms,
       openTotal: fin.openTotal,
+      discount_percent: r.discount_percent == null ? null : Number(r.discount_percent),
     };
   });
   return { items, total };

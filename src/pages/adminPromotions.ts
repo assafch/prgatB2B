@@ -1,5 +1,9 @@
+// Promotions board — the "רשימה + מגירה" template (Stage 8b), same pattern as
+// src/pages/adminCustomers.ts. Row click → drawer (details, active toggle, danger
+// zone). FAB → creation drawer (the old full-page form, re-parented unchanged).
 import { api } from '../api.js';
-import { escapeHtml, escapeAttr } from '../format.js';
+import { escapeHtml, formatDate } from '../format.js';
+import { confirmDialog, openDrawer, toast } from '../ui.js';
 
 interface Promo {
   id: number;
@@ -23,41 +27,141 @@ function describe(p: Promo): string {
   return JSON.stringify(x);
 }
 
-export async function renderPromotionsAdmin(c: HTMLElement): Promise<void> {
-  c.innerHTML = `<div class="muted">טוען…</div>`;
-  let promos: Promo[] = [];
-  try {
-    promos = (await api.get<{ promotions: Promo[] }>('/api/admin/promotions')).promotions;
-  } catch (ex) {
-    c.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
-    return;
-  }
-
-  c.innerHTML = `
-    <div class="card">
-      <h2 style="margin-top:0">מבצע חדש</h2>
-      <div class="form-grid">
-        <input id="pm-name" placeholder="שם המבצע (יוצג ללקוח)"/>
-        <select id="pm-type">
-          <option value="percent">אחוז הנחה</option>
-          <option value="fixed">הנחה בש"ח</option>
-          <option value="bogo">1+1 / קנה-קבל</option>
-          <option value="gift">מתנה מעל סכום</option>
-        </select>
-      </div>
-      <div id="pm-fields" style="margin-top:0.6rem"></div>
-      <div class="form-grid" style="margin-top:0.6rem">
-        <input id="pm-start" type="date" title="תאריך התחלה (אופציונלי)"/>
-        <input id="pm-end" type="date" title="תאריך סיום (אופציונלי)"/>
-      </div>
-      <button id="pm-create" style="width:100%;margin-top:0.6rem">יצירת מבצע</button>
-      <div id="pm-msg" style="margin-top:0.5rem;text-align:center"></div>
+export async function renderPromotionsAdmin(shell: HTMLElement): Promise<void> {
+  shell.innerHTML = `
+    <div class="adm-head">
+      <h1 class="adm-title">מבצעים</h1><span class="adm-meta" id="promo-count"></span>
     </div>
-    <div class="card" style="margin-top:0.75rem">
-      <h2 style="margin-top:0">מבצעים (${promos.length})</h2>
-      <div id="pm-list"></div>
-      <div id="pm-lmsg" style="margin-top:0.5rem;text-align:center"></div>
+    <div id="promo-list" class="adm-card" style="padding:0;overflow:hidden"></div>
+    <button type="button" id="promo-fab" class="adm-fab" aria-label="מבצע חדש">+</button>`;
+  (shell.querySelector('#promo-fab') as HTMLButtonElement).onclick = () => openPromoCreateDrawer(shell);
+  await loadPromoList(shell);
+}
+
+async function loadPromoList(shell: HTMLElement): Promise<void> {
+  const wrap = shell.querySelector('#promo-list') as HTMLElement;
+  wrap.innerHTML = `<div class="adm-empty">טוען…</div>`;
+  try {
+    const promos = (await api.get<{ promotions: Promo[] }>('/api/admin/promotions')).promotions;
+    (shell.querySelector('#promo-count') as HTMLElement).textContent = promos.length ? `${promos.length} מבצעים` : '';
+
+    if (promos.length === 0) {
+      wrap.innerHTML = `
+        <div class="adm-empty">מבצעים שתגדיר יופיעו כאן ויוצגו ללקוחות בקטלוג ובעגלה<br/>
+          <button type="button" id="promo-empty-cta" class="adm-btn-ghost" style="margin-top:10px">+ מבצע חדש</button>
+        </div>`;
+      (wrap.querySelector('#promo-empty-cta') as HTMLButtonElement).onclick = () => openPromoCreateDrawer(shell);
+      return;
+    }
+
+    wrap.innerHTML = promos
+      .map(
+        (p) => `
+      <div class="promo-row" data-id="${p.id}">
+        <div class="promo-row-main">
+          <div class="promo-row-name">${escapeHtml(p.name)} <span class="cust-pill ${p.active ? 'pill-on' : 'pill-off'}">${p.active ? 'פעיל' : 'כבוי'}</span></div>
+          <div class="promo-row-desc">${escapeHtml(describe(p))}${p.endsAt ? ' · עד ' + escapeHtml(formatDate(p.endsAt)) : ''}</div>
+        </div>
+        <span class="cust-chev">‹</span>
+      </div>`
+      )
+      .join('');
+
+    wrap.querySelectorAll<HTMLElement>('.promo-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const p = promos.find((x) => String(x.id) === row.dataset.id);
+        if (p) void openPromoDrawer(p, shell);
+      });
+    });
+  } catch (ex) {
+    wrap.innerHTML = `<div class="adm-empty error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
+  }
+}
+
+// ---- The drawer: details · active toggle (PATCHes immediately) · danger zone ----
+async function openPromoDrawer(p: Promo, shell: HTMLElement): Promise<void> {
+  const body = document.createElement('div');
+  body.className = 'adm-drawer-body';
+  const validity = [p.startsAt ? 'מ-' + formatDate(p.startsAt) : '', p.endsAt ? 'עד ' + formatDate(p.endsAt) : ''].filter(Boolean).join(' · ') || 'ללא הגבלת תאריכים';
+  body.innerHTML = `
+    <div>
+      <div class="adm-sect-label">פירוט</div>
+      <div style="font-size:13px">${escapeHtml(describe(p))}</div>
+    </div>
+    <div>
+      <div class="adm-sect-label">תוקף</div>
+      <div class="muted" style="font-size:13px">${escapeHtml(validity)}</div>
+    </div>
+    <div>
+      <div class="adm-sect-label">סטטוס</div>
+      <label class="adm-toggle-line"><button type="button" id="pd-active" class="adm-toggle ${p.active ? 'on' : ''}"></button>מבצע פעיל</label>
+    </div>
+    <details class="adm-danger"><summary>אזור מסוכן ▾</summary>
+      <button type="button" id="pd-delete" class="adm-btn-ghost" style="margin-top:8px;color:var(--err);border-color:#f0c9c5">מחיקת המבצע</button>
+    </details>`;
+
+  const drawer = openDrawer(body, {
+    title: p.name,
+    sub: escapeHtml(TYPE_HE[p.type] || p.type),
+  });
+
+  (body.querySelector('#pd-active') as HTMLButtonElement).onclick = async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    const nextActive = !btn.classList.contains('on');
+    btn.disabled = true;
+    try {
+      await api.patch(`/api/admin/promotions/${p.id}`, { active: nextActive });
+      btn.classList.toggle('on', nextActive);
+      p.active = nextActive;
+      toast(nextActive ? 'המבצע הופעל ✓' : 'המבצע כובה ✓', 'ok');
+      void loadPromoList(shell);
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : 'העדכון נכשל', 'error');
+    }
+    btn.disabled = false;
+  };
+
+  (body.querySelector('#pd-delete') as HTMLButtonElement).onclick = async () => {
+    if (!(await confirmDialog(`למחוק את המבצע "${p.name}"? הפעולה בלתי הפיכה.`, 'מחיקה', 'ביטול'))) return;
+    try {
+      await api.del(`/api/admin/promotions/${p.id}`);
+      toast('המבצע נמחק ✓', 'ok');
+      drawer.close();
+      void loadPromoList(shell);
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : 'המחיקה נכשלה', 'error');
+    }
+  };
+}
+
+// FAB → creation drawer. The form fields + type-switching logic + POST payload
+// assembly below are the previous full-page form, re-parented into the drawer
+// body unchanged.
+function openPromoCreateDrawer(shell: HTMLElement): void {
+  const body = document.createElement('div');
+  body.className = 'adm-drawer-body';
+  body.innerHTML = `
+    <div><div class="adm-sect-label">שם המבצע</div><input id="pm-name" placeholder="שם המבצע (יוצג ללקוח)" style="width:100%"/></div>
+    <div><div class="adm-sect-label">סוג מבצע</div>
+      <select id="pm-type" style="width:100%">
+        <option value="percent">אחוז הנחה</option>
+        <option value="fixed">הנחה בש"ח</option>
+        <option value="bogo">1+1 / קנה-קבל</option>
+        <option value="gift">מתנה מעל סכום</option>
+      </select>
+    </div>
+    <div id="pm-fields"></div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><div class="adm-sect-label">תאריך התחלה</div><input id="pm-start" type="date" style="width:100%"/></div>
+      <div style="flex:1"><div class="adm-sect-label">תאריך סיום</div><input id="pm-end" type="date" style="width:100%"/></div>
     </div>`;
+
+  const foot = document.createElement('div');
+  foot.className = 'adm-drawer-foot';
+  foot.innerHTML = `<button type="button" class="save" id="pm-create">יצירת מבצע</button>`;
+  body.append(foot);
+
+  const drawer = openDrawer(body, { title: 'מבצע חדש', sub: 'המבצע יוצג ללקוחות בקטלוג ובעגלה' });
 
   const fieldsFor = (t: string): string => {
     if (t === 'percent' || t === 'fixed')
@@ -79,25 +183,24 @@ export async function renderPromotionsAdmin(c: HTMLElement): Promise<void> {
         <input id="pf-gqty" type="number" placeholder="כמות מתנה" value="1"/>
       </div>`;
   };
-  const typeSel = c.querySelector('#pm-type') as HTMLSelectElement;
-  const fields = c.querySelector('#pm-fields') as HTMLElement;
+  const typeSel = body.querySelector('#pm-type') as HTMLSelectElement;
+  const fields = body.querySelector('#pm-fields') as HTMLElement;
   const renderFields = () => (fields.innerHTML = fieldsFor(typeSel.value));
   typeSel.addEventListener('change', renderFields);
   renderFields();
 
-  const v = (id: string) => (c.querySelector('#' + id) as HTMLInputElement | HTMLSelectElement | null)?.value || '';
+  const v = (id: string) => (body.querySelector('#' + id) as HTMLInputElement | HTMLSelectElement | null)?.value || '';
   const n = (id: string) => Number(v(id)) || 0;
 
-  const msg = c.querySelector('#pm-msg') as HTMLDivElement;
-  (c.querySelector('#pm-create') as HTMLButtonElement).onclick = async () => {
+  (body.querySelector('#pm-create') as HTMLButtonElement).onclick = async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
     const type = typeSel.value;
     let params: Record<string, unknown> = {};
     if (type === 'percent') params = { scope: v('pf-scope'), target: v('pf-target') || undefined, percent: n('pf-value'), minSubtotal: n('pf-min') || undefined };
     else if (type === 'fixed') params = { scope: v('pf-scope'), target: v('pf-target') || undefined, amount: n('pf-value'), minSubtotal: n('pf-min') || undefined };
     else if (type === 'bogo') params = { partname: v('pf-part'), buy: n('pf-buy'), free: n('pf-free') };
     else params = { minSubtotal: n('pf-min'), giftPartname: v('pf-gift'), giftQty: n('pf-gqty') };
-    msg.textContent = 'יוצר…';
-    msg.className = 'muted';
+    btn.disabled = true;
     try {
       await api.post('/api/admin/promotions', {
         name: v('pm-name'),
@@ -106,54 +209,12 @@ export async function renderPromotionsAdmin(c: HTMLElement): Promise<void> {
         startsAt: v('pm-start') || null,
         endsAt: v('pm-end') || null,
       });
-      msg.textContent = '✓ נוצר';
-      msg.className = 'ok';
-      setTimeout(() => renderPromotionsAdmin(c), 600);
+      toast('המבצע נוצר ✓', 'ok');
+      drawer.close();
+      void loadPromoList(shell);
     } catch (ex) {
-      msg.textContent = ex instanceof Error ? ex.message : String(ex);
-      msg.className = 'error';
+      toast(ex instanceof Error ? ex.message : 'היצירה נכשלה', 'error');
     }
+    btn.disabled = false;
   };
-
-  const list = c.querySelector('#pm-list') as HTMLElement;
-  const lmsg = c.querySelector('#pm-lmsg') as HTMLDivElement;
-  list.innerHTML = promos.length
-    ? promos
-        .map(
-          (p) => `
-      <div class="dash-row" style="border-bottom:1px solid var(--border);padding:0.55rem 0">
-        <div class="grow">
-          <div style="font-weight:700">${escapeHtml(p.name)} ${!p.active ? '<span class="chip error">כבוי</span>' : ''}</div>
-          <div class="muted" style="font-size:0.82rem">${escapeHtml(TYPE_HE[p.type] || p.type)} · ${escapeHtml(describe(p))}${p.endsAt ? ' · עד ' + escapeHtml(p.endsAt) : ''}</div>
-        </div>
-        <button class="ghost pm-toggle" data-id="${p.id}" data-active="${p.active ? 1 : 0}">${p.active ? 'כבה' : 'הפעל'}</button>
-        <button class="ghost pm-del" data-id="${p.id}">מחק</button>
-      </div>`
-        )
-        .join('')
-    : '<div class="muted">אין מבצעים עדיין.</div>';
-
-  list.querySelectorAll<HTMLButtonElement>('.pm-toggle').forEach((b) => {
-    b.onclick = async () => {
-      try {
-        await api.patch(`/api/admin/promotions/${b.dataset.id}`, { active: b.dataset.active !== '1' });
-        renderPromotionsAdmin(c);
-      } catch (ex) {
-        lmsg.textContent = ex instanceof Error ? ex.message : String(ex);
-        lmsg.className = 'error';
-      }
-    };
-  });
-  list.querySelectorAll<HTMLButtonElement>('.pm-del').forEach((b) => {
-    b.onclick = async () => {
-      if (!window.confirm('למחוק את המבצע?')) return;
-      try {
-        await api.del(`/api/admin/promotions/${b.dataset.id}`);
-        renderPromotionsAdmin(c);
-      } catch (ex) {
-        lmsg.textContent = ex instanceof Error ? ex.message : String(ex);
-        lmsg.className = 'error';
-      }
-    };
-  });
 }
