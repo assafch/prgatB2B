@@ -215,9 +215,10 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     ${maintenanceCard}
     ${bannerCard}
     ${promoRail}
+    ${pendingPayBanner}
     <div class="home-grid">
       ${tiles}
-      ${pendingPayBanner}${debtCard}
+      ${debtCard}
     </div>
     ${utilBar}
     ${lastOrderCard}
