@@ -413,6 +413,15 @@ try {
   /* exists */
 }
 
+// Saved-card (Phase 1) consent flag: 1 = customer opted in to save the card used on
+// this intent (PayPlus create_token), captured into `saved_cards` once the charge
+// confirms paid. Additive, defaults off.
+try {
+  db.exec('ALTER TABLE card_payments ADD COLUMN save_card INTEGER DEFAULT 0');
+} catch {
+  /* exists */
+}
+
 export function getSetting(key: string): string | null {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row?.value ?? null;

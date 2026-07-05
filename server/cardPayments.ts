@@ -11,6 +11,8 @@ import { getAccountSummary, getUnpaidInvoices, bustFinanceCache } from './financ
 import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
 import * as tranzila from './tranzila.js';
 import * as payplus from './payplus.js';
+import { tokenVaultReady } from './tokenVault.js';
+import { upsertSavedCard } from './savedCards.js';
 
 export interface CardRow {
   id: string;
@@ -29,6 +31,7 @@ export interface CardRow {
   four_digits: string | null;
   provider: string | null;
   payments_count: number | null;
+  save_card: number;
   created_at: string;
   paid_at: string | null;
 }
@@ -82,12 +85,17 @@ async function createPspIntent(opts: {
   contact: string;
   phone: string | undefined;
   baseUrl: string;
+  // Customer opted in (checkbox) to save the card used on this intent for later
+  // one-tap reuse. Only takes effect on the PayPlus path, and only when the
+  // saved_cards_enabled setting is on and the token vault has a key configured.
+  saveCard?: boolean;
 }): Promise<{ id: string; url: string }> {
   const { id, baseUrl } = opts;
   const psp = activeCardProvider();
   if (!psp) throw new Error('תשלום בכרטיס אינו זמין כרגע');
 
   if (psp === 'payplus') {
+    const shouldSaveCard = !!opts.saveCard && getSettingBool('saved_cards_enabled', false) && tokenVaultReady();
     const created = await payplus.createPaymentPage({
       amount: opts.amount,
       ref: id,
@@ -100,11 +108,12 @@ async function createPspIntent(opts: {
       cancelUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&cancel=1`,
       notifyUrl: `${baseUrl}/api/payments/payplus/ipn?id=${id}`,
       maxPayments: installmentsFor(opts.amount) ?? undefined,
+      createToken: shouldSaveCard || undefined,
     });
     db.prepare(
-      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref, paid_items)
-       VALUES (?, ?, ?, ?, ?, 'pending', 'payplus', ?, ?)`
-    ).run(id, opts.userId, opts.custname, opts.kind, opts.amount, created.pageRequestUid, opts.paidItemsJson);
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref, paid_items, save_card)
+       VALUES (?, ?, ?, ?, ?, 'pending', 'payplus', ?, ?, ?)`
+    ).run(id, opts.userId, opts.custname, opts.kind, opts.amount, created.pageRequestUid, opts.paidItemsJson, shouldSaveCard ? 1 : 0);
     return { id, url: created.url };
   }
 
@@ -214,7 +223,8 @@ export async function createCardDebtIntent(
   custname: string,
   selection: { invoices?: string[] },
   phone: string | undefined,
-  baseUrl: string
+  baseUrl: string,
+  saveCard?: boolean
 ): Promise<{ id: string; url: string; amount: number }> {
   const summary = await getAccountSummary(custname);
   if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
@@ -270,6 +280,7 @@ export async function createCardDebtIntent(
     contact: custname,
     phone,
     baseUrl,
+    saveCard,
   });
   return { id, url, amount };
 }
@@ -285,7 +296,8 @@ export async function createCardPartialIntent(
   requestedAmount: number,
   invoiceRefs: string[] | undefined,
   phone: string | undefined,
-  baseUrl: string
+  baseUrl: string,
+  saveCard?: boolean
 ): Promise<{ id: string; url: string; amount: number }> {
   const summary = await getAccountSummary(custname);
   if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
@@ -315,6 +327,7 @@ export async function createCardPartialIntent(
     contact: custname,
     phone,
     baseUrl,
+    saveCard,
   });
   return { id, url, amount };
 }
@@ -327,7 +340,8 @@ export async function createCardOrderIntent(
   custname: string,
   orderId: number,
   phone: string | undefined,
-  baseUrl: string
+  baseUrl: string,
+  saveCard?: boolean
 ): Promise<{ id: string; url: string; amount: number }> {
   const order = db
     .prepare(
@@ -366,6 +380,7 @@ export async function createCardOrderIntent(
     contact: custname,
     phone,
     baseUrl,
+    saveCard,
   });
   db.prepare('UPDATE card_payments SET order_id = ? WHERE id = ?').run(String(orderId), id);
   return { id, url, amount };
@@ -468,6 +483,16 @@ export async function confirmCard(id: string, opts?: { throwOnQueryFailure?: boo
          WHERE id = ? AND status != 'paid'`
       ).run(tx.confirmationCode, tx.fourDigits, tx.transactionUid, tx.paymentsCount, id);
       bustFinanceCache(row.custname);
+      // Consent capture: only when the customer opted in on this intent AND the
+      // charge actually produced a reusable token (create_token requires the PSP's
+      // own eligibility — not guaranteed just because we asked).
+      if (row.save_card && tx.tokenUid) {
+        try {
+          upsertSavedCard(row.user_id, row.custname, tx);
+        } catch (err) {
+          console.warn('[card] saved-card capture failed (non-blocking):', err instanceof Error ? err.message : err);
+        }
+      }
       return returnPaidCard(id);
     }
     // Attempts carrying our ref exist and none is paid (findTransaction prefers a

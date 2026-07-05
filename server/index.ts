@@ -12,6 +12,7 @@ import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus, up
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
 import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider, expireStaleCardIntents } from './cardPayments.js';
+import { getSavedCard, deleteSavedCard } from './savedCards.js';
 import * as payplus from './payplus.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
@@ -1056,8 +1057,9 @@ app.post('/api/payments/card/create', requireOwner, blockIfMaintenance, cardPayL
   }
   const rawInvoices = (req.body as { invoices?: unknown })?.invoices;
   const invoices = Array.isArray(rawInvoices) ? rawInvoices.filter((x): x is string => typeof x === 'string') : [];
+  const saveCard = (req.body as { saveCard?: unknown })?.saveCard === true;
   try {
-    const out = await createCardDebtIntent(req.user!.id, req.user!.custname!, { invoices }, undefined, appBaseUrl(req));
+    const out = await createCardDebtIntent(req.user!.id, req.user!.custname!, { invoices }, undefined, appBaseUrl(req), saveCard);
     res.json(out);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה ביצירת התשלום' });
@@ -1072,13 +1074,14 @@ app.post('/api/payments/card/intent', requireOwner, blockIfMaintenance, cardPayL
     res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
     return;
   }
-  const body = (req.body || {}) as { amount?: unknown; invoiceRefs?: unknown };
+  const body = (req.body || {}) as { amount?: unknown; invoiceRefs?: unknown; saveCard?: unknown };
   const amount = typeof body.amount === 'number' ? body.amount : Number(body.amount);
   const invoiceRefs = Array.isArray(body.invoiceRefs)
     ? body.invoiceRefs.filter((x): x is string => typeof x === 'string')
     : undefined;
+  const saveCard = body.saveCard === true;
   try {
-    const out = await createCardPartialIntent(req.user!.id, req.user!.custname!, amount, invoiceRefs, undefined, appBaseUrl(req));
+    const out = await createCardPartialIntent(req.user!.id, req.user!.custname!, amount, invoiceRefs, undefined, appBaseUrl(req), saveCard);
     res.json(out);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה ביצירת התשלום' });
@@ -1091,8 +1094,9 @@ app.post('/api/orders/:id/pay/card', requireCustomer, blockIfMaintenance, cardPa
     res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
     return;
   }
+  const saveCard = (req.body as { saveCard?: unknown })?.saveCard === true;
   try {
-    const intent = await createCardOrderIntent(req.user!.id, req.user!.custname!, Number(req.params.id), undefined, appBaseUrl(req));
+    const intent = await createCardOrderIntent(req.user!.id, req.user!.custname!, Number(req.params.id), undefined, appBaseUrl(req), saveCard);
     res.json(intent);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1138,6 +1142,21 @@ app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, re
   }
   res.json({ id: row.id, status: row.status, amount: row.amount, confirmationCode: row.confirmation_code, fourDigits: row.four_digits, provider: row.provider, orderId, ordname });
 }));
+
+// Phase 1 saved card (PayPlus token, one per user) — display fields only, never the token.
+app.get('/api/payments/saved-card', requireOwner, (req: AuthedRequest, res) => {
+  const row = getSavedCard(req.user!.id);
+  res.json({
+    card: row
+      ? { id: row.id, brand: row.brand, fourDigits: row.four_digits, expiryMonth: row.expiry_month, expiryYear: row.expiry_year }
+      : null,
+  });
+});
+
+app.delete('/api/payments/saved-card', requireOwner, (req: AuthedRequest, res) => {
+  deleteSavedCard(req.user!.id);
+  res.json({ ok: true });
+});
 
 // UPay server-to-server IPN — confirms by re-query (caller is never trusted).
 app.get('/api/payments/upay/ipn', ah(async (req, res) => {
