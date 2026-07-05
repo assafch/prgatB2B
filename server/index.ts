@@ -1125,7 +1125,18 @@ app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, re
   // the same hosted page (or a charge whose IPN was lost while the intent aged out)
   // must resolve to paid, not stick on the stale failure.
   if (row.status === 'pending' || row.status === 'failed' || row.status === 'expired') row = (await confirmCard(row.id)) || row;
-  res.json({ id: row.id, status: row.status, amount: row.amount, confirmationCode: row.confirmation_code, fourDigits: row.four_digits, provider: row.provider });
+  // Unified checkout: order-payment polls need to know WHICH order was settled so
+  // the success page can say "ההזמנה אושרה" instead of a generic payment message.
+  let orderId: number | null = null;
+  let ordname: string | null = null;
+  if (row.kind === 'order_payment' && row.order_id) {
+    orderId = Number(row.order_id);
+    const o = db.prepare('SELECT priority_ordname FROM orders_local WHERE id = ?').get(orderId) as
+      | { priority_ordname: string | null }
+      | undefined;
+    ordname = o?.priority_ordname ?? null; // null until Priority send completes — success copy must not depend on it
+  }
+  res.json({ id: row.id, status: row.status, amount: row.amount, confirmationCode: row.confirmation_code, fourDigits: row.four_digits, provider: row.provider, orderId, ordname });
 }));
 
 // UPay server-to-server IPN — confirms by re-query (caller is never trusted).
