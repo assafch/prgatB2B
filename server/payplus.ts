@@ -69,6 +69,10 @@ export async function createPaymentPage(input: {
   // Optional itemized lines (one per selected invoice); their prices sum to `amount`.
   // When omitted, a single line is built from `description`.
   items?: { name: string; amount: number }[];
+  // Save the card used on this page as a reusable token (for later off-session charges).
+  createToken?: boolean;
+  // Offer the customer installments on the hosted page; only sent when >= 2.
+  maxPayments?: number;
 }): Promise<{ url: string; pageRequestUid: string | null }> {
   const c = cfg();
   const body: Record<string, unknown> = {
@@ -98,6 +102,8 @@ export async function createPaymentPage(input: {
         : [{ name: input.description, quantity: 1, price: Number(input.amount.toFixed(2)) }],
   };
   if (c.cashierUid) body.cashier_uid = c.cashierUid;
+  if (input.createToken) body.create_token = true;
+  if (input.maxPayments && input.maxPayments >= 2) body.payments = input.maxPayments;
 
   const res = await fetch(`${c.base}/PaymentPages/generateLink`, {
     method: 'POST',
@@ -126,6 +132,11 @@ export interface PayPlusTx {
   fourDigits: string | null;
   confirmationCode: string | null; // approval_num
   refFound: boolean; // our ref appears in the transaction record (more_info)
+  tokenUid: string | null; // reusable card token, when create_token was requested
+  paymentsCount: number | null; // number of installments the charge was split into
+  brand: string | null; // card brand (Visa/Mastercard/…)
+  expiryMonth: string | null;
+  expiryYear: string | null;
   raw: unknown;
 }
 
@@ -153,8 +164,78 @@ function parseTx(tx: unknown, ref: string): PayPlusTx {
     })(),
     // ref is a 24-hex random id — a substring match over the record is unambiguous.
     refFound: JSON.stringify(tx).includes(ref),
+    tokenUid: (() => {
+      const u = pick<string>(tx, 'token_uid', 'token') ?? pick<string>(cardInfo, 'token_uid', 'token');
+      return u != null ? String(u) : null;
+    })(),
+    paymentsCount: (() => {
+      const p = pick<string | number>(tx, 'number_of_payments', 'payments') ?? pick<string | number>(cardInfo, 'number_of_payments', 'payments');
+      return p != null && isFinite(Number(p)) ? Number(p) : null;
+    })(),
+    brand: (() => {
+      const b = pick<string>(tx, 'brand_name', 'brand') ?? pick<string>(cardInfo, 'brand_name', 'brand');
+      return b != null ? String(b) : null;
+    })(),
+    expiryMonth: (() => {
+      const m = pick<string | number>(tx, 'expiry_month') ?? pick<string | number>(cardInfo, 'expiry_month');
+      return m != null ? String(m) : null;
+    })(),
+    expiryYear: (() => {
+      const y = pick<string | number>(tx, 'expiry_year') ?? pick<string | number>(cardInfo, 'expiry_year');
+      return y != null ? String(y) : null;
+    })(),
     raw: tx,
   };
+}
+
+// Test-only alias — the parse fixture test in scripts/test-saved-card.mjs imports
+// this to exercise parseTx's token/installments extraction against dist output.
+export { parseTx as parseTxForTest };
+
+/** Off-session charge against a previously saved card token (no hosted page — the
+ *  customer isn't present). amount in shekels; credit_terms: 1 is a standard
+ *  (non-installment) charge unless `payments` >= 2 requests installments. */
+export async function chargeToken(input: {
+  token: string;
+  amount: number;
+  ref: string;
+  customerName: string;
+  email?: string;
+  payments?: number;
+}): Promise<PayPlusTx> {
+  const c = cfg();
+  const body: Record<string, unknown> = {
+    terminal_uid: c.terminalUid,
+    use_token: true,
+    token: input.token,
+    credit_terms: 1,
+    amount: Number(input.amount.toFixed(2)), // SHEKELS, never agorot
+    currency_code: 'ILS',
+    more_info: input.ref, // our 24-hex intent id — echoed back, cross-checked on confirm
+    customer: { customer_name: input.customerName, email: input.email || '' },
+    // Field-name caveat (spec §2): `payments.number_of_payments` is our best guess at
+    // the installments sub-shape for a token charge — confirm the exact field name
+    // against a real staging charge (Task 8) before flipping the Phase-2 flag.
+    ...(input.payments && input.payments >= 2 ? { payments: { number_of_payments: input.payments } } : {}),
+  };
+  if (c.cashierUid) body.cashier_uid = c.cashierUid;
+
+  const res = await fetch(`${c.base}/Transactions/Charge`, {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json: { results?: { status?: string; description?: string }; data?: unknown };
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`payplus Transactions/Charge: non-JSON response (${res.status})`);
+  }
+  if (!res.ok || json?.results?.status !== 'success') {
+    throw new Error(`payplus Transactions/Charge failed (${res.status}): ${json?.results?.description || text.slice(0, 200)}`);
+  }
+  return parseTx(json?.data, input.ref);
 }
 
 /** Authoritative status lookup. The transaction must carry our ref (random 24-hex,
