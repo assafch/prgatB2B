@@ -19,7 +19,7 @@ export async function renderOrderPay(shell: HTMLElement, orderId: string): Promi
         <div style="font-weight:700">תשלום להזמנה</div>
         <div class="muted" style="margin-top:0.25rem">כלקוח מזומן, יש לשלם ₪${amt} כדי שההזמנה תאושר ותישלח.</div>
         <button id="pay-card" class="es-cta" style="margin-top:0.8rem">שלם באשראי ₪${amt}</button>
-        <button id="pay-check" class="es-cta" style="margin-top:0.6rem;background:var(--ok)">שלם בצ׳ק</button>
+        <button id="pay-check" class="es-cta" style="margin-top:0.6rem;background:var(--ok)">שלם בצ׳ק ₪${amt}</button>
       </div>`;
     const btn = shell.querySelector('#pay-card') as HTMLButtonElement;
     btn.addEventListener('click', async () => {

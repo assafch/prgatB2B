@@ -154,9 +154,18 @@ export function renderPayCardReturn(shell: HTMLElement, id: string): void {
   const poll = async () => {
     tries++;
     try {
-      const r = await api.get<{ status: string; amount: number; confirmationCode: string | null }>(`/api/payments/card/${encodeURIComponent(id)}`);
+      const r = await api.get<{ status: string; amount: number; confirmationCode: string | null; orderId?: number | null; ordname?: string | null }>(`/api/payments/card/${encodeURIComponent(id)}`);
       if (r.status === 'paid') {
-        shell.innerHTML = `
+        const forOrder = r.orderId != null;
+        shell.innerHTML = forOrder
+          ? `
+          <div class="empty-state">
+            <div class="es-icon">✅</div>
+            <div class="es-title">התשלום בוצע — ההזמנה אושרה ותישלח</div>
+            <div class="es-sub">שולם ₪${(r.amount || 0).toFixed(2)} בכרטיס אשראי.${r.ordname ? `<br/>מספר הזמנה: <b>${escapeHtml(r.ordname)}</b>` : `<br/>מספר הזמנה מקומי: <b>${r.orderId}</b>`}${r.confirmationCode ? `<br/>אישור: ${escapeHtml(r.confirmationCode)}` : ''}</div>
+            <a class="es-cta" href="#orders">להזמנות שלי</a>
+          </div>`
+          : `
           <div class="empty-state">
             <div class="es-icon">✅</div>
             <div class="es-title">התשלום בוצע</div>
@@ -166,7 +175,8 @@ export function renderPayCardReturn(shell: HTMLElement, id: string): void {
         return;
       }
       if (r.status === 'failed' || r.status === 'expired') {
-        shell.innerHTML = `<div class="card error" style="text-align:center"><div class="es-icon">⚠️</div><div class="es-title">התשלום לא הושלם</div><div style="margin-top:0.75rem"><a href="#pay/card">נסו שוב</a> · <a href="#home">דף הבית</a></div></div>`;
+        const retry = r.orderId != null ? `#order-pay/${r.orderId}` : '#pay/card';
+        shell.innerHTML = `<div class="card error" style="text-align:center"><div class="es-icon">⚠️</div><div class="es-title">התשלום לא הושלם</div><div style="margin-top:0.75rem"><a href="${retry}">נסו שוב</a> · <a href="#home">דף הבית</a></div></div>`;
         return;
       }
     } catch {
