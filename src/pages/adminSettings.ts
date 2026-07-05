@@ -28,6 +28,9 @@ const SWITCH_ROWS: SwitchRow[] = [
   { key: 'payments_enabled', name: 'תשלום בכרטיס אשראי', desc: 'לקוחות משלמים חוב מהאפליקציה', def: false, dangerousValue: false },
   { key: 'check_payment_enabled', name: 'תשלום בצ׳ק (צילום)', desc: 'OCR + אישור ידני שלך', def: true, dangerousValue: false },
   { key: 'unified_checkout_enabled', name: 'תשלום בסיום הזמנה (מאוחד)', desc: 'פירוט מע״מ בסל + תשלום ישירות במסך סיום ההזמנה. כיבוי מחזיר מיידית את התהליך הקודם.', def: false, dangerousValue: true },
+  { key: 'installments_enabled', name: 'תשלומים באשראי', desc: 'חלוקה לתשלומים בעמוד PayPlus מעל סף שנקבע', def: false, dangerousValue: true },
+  { key: 'saved_cards_enabled', name: 'שמירת כרטיס (טוקן)', desc: 'שמירת כרטיס בהסכמה לתשלומים הבאים — דורש אישור PayPlus', def: false, dangerousValue: true },
+  { key: 'saved_card_charge_enabled', name: 'תשלום בלחיצה בכרטיס שמור', desc: 'חיוב טוקן ללא הזנת כרטיס — דורש אישור PayPlus בכתב', def: false, dangerousValue: true },
   { key: 'priority_receipts_enabled', name: 'קבלות Priority אוטומטיות', desc: 'קבלה נרשמת מיד עם אישור תשלום', def: false, dangerousValue: false },
   { key: 'maintenance_enabled', name: 'מצב תחזוקה', desc: '⚠ חוסם את כל הלקוחות מהאפליקציה', def: false, dangerousValue: true, maint: true },
 ];
@@ -104,6 +107,12 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         <span>מחיר מחירון + הנחת לקוח (קו אדום על המחיר המלא)</span>
         <button type="button" id="s-discount" class="adm-toggle${on('discount_pricing_enabled') ? ' on' : ''}" aria-label="מחיר מחירון + הנחת לקוח"></button>
       </div>
+
+      <div class="set-row" style="margin-top:0.6rem"><span>סף תשלומים בחשבון — סכום מינימלי (₪)</span></div>
+      <input id="s-installments-min" type="number" min="0" placeholder="1000" value="${escapeHtml(txt('installments_min_amount') || '1000')}" style="width:100%;box-sizing:border-box"/>
+
+      <div class="set-row" style="margin-top:0.6rem"><span>תשלומים — מספר חודשים מקסימלי</span></div>
+      <input id="s-installments-max" type="number" min="2" max="12" placeholder="4" value="${escapeHtml(txt('installments_max') || '4')}" style="width:100%;box-sizing:border-box"/>
 
       <div class="set-row" style="margin-top:0.6rem"><span>הודעת תחזוקה</span></div>
       <textarea id="s-maint-text" rows="2" placeholder="הודעת תחזוקה שתוצג ללקוח">${escapeHtml(txt('maintenance_message'))}</textarea>
@@ -198,16 +207,22 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       const announcementText = (c.querySelector('#s-ann-text') as HTMLTextAreaElement).value;
       const discountEnabled = discToggle.classList.contains('on');
       const maintenanceMessage = (c.querySelector('#s-maint-text') as HTMLTextAreaElement).value;
+      const installmentsMin = (c.querySelector('#s-installments-min') as HTMLInputElement).value;
+      const installmentsMax = (c.querySelector('#s-installments-max') as HTMLInputElement).value;
       await api.patch('/api/admin/settings', {
         announcement_enabled: announcementEnabled,
         announcement_text: announcementText,
         discount_pricing_enabled: discountEnabled,
         maintenance_message: maintenanceMessage,
+        installments_min_amount: installmentsMin,
+        installments_max: installmentsMax,
       });
       s.announcement_enabled = String(announcementEnabled);
       s.announcement_text = announcementText;
       s.discount_pricing_enabled = String(discountEnabled);
       s.maintenance_message = maintenanceMessage;
+      s.installments_min_amount = installmentsMin;
+      s.installments_max = installmentsMax;
       msgEl.textContent = '✓ ההעדפות נשמרו';
       msgEl.className = 'ok';
     } catch (ex) {

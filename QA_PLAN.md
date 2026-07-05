@@ -215,3 +215,43 @@ rows left unmarked are genuine gaps — mostly actions that write real data
 - [ ] Flag ON, abandon payment: home shows `⏳ הזמנה ממתינה לתשלום` banner → resumes at `#order-pay/:id`. Flag OFF hides the banner.
 - [ ] Flag ON, net-terms customer: VAT rows visible, NO payment section, plain `שלח הזמנה`; net+debt still blocked.
 - [ ] Rollback drill: turn the flag OFF in admin settings (one tap, no typed confirm) → next page load renders the old flow.
+
+## Saved cards & installments (`installments_enabled`, `saved_cards_enabled`, `saved_card_charge_enabled`)
+
+### Flags-off regression
+- [ ] All three flags OFF (default): payment routes and admin toggles invisible (no installments picker, no saved-card save/list, no one-tap charge); `features` object shows `installmentsEnabled: false`, `savedCardsEnabled: false`, `savedCardChargeEnabled: false`; checkout flow identical to pre-saved-card baseline.
+
+### Consent checkbox flows
+- [ ] `saved_cards_enabled` ON: payment success page shows "שמור כרטיס זה לתשלומים הבאים" checkbox + clear disclosure text (customer may opt out); check checked → card tokenized, token stored in Account.saved_cards with created_at + last_4 digits; check unchecked → no token stored, payment succeeds normally.
+- [ ] Token save fails: server error during tokenization shown on success page; customer prompted to accept risk or enable saved card separately later (not blocking payment).
+- [ ] Account page: customers see "כרטיסים שמורים" list; list empty if flag OFF or no tokens created; each row shows last 4 digits + created date + delete icon.
+- [ ] Delete saved card: confirm delete, call server (DELETE /api/account/saved-cards/:token_id), card removed from list immediately, no impact on future payments.
+
+### Installments thresholds
+- [ ] Admin config: two number inputs in "העדפות תצוגה" — `installments_min_amount` (default 1000, ₪) and `installments_max` (default 4, range 2-12); both PATCH on combined "שמירת העדפות" save, no independent toggles.
+- [ ] Threshold check: `installments_enabled` ON, cart ≥ min_amount → PayPlus page shows installments dropdown (2–max months); cart < min_amount → dropdown hidden.
+- [ ] Boundary test: min_amount=1000, cart ₪999 → no picker; ₪1000 → picker shown; cart ₪100,000, max=4 → picker shows 1–4 months; if max=12 → picker shows 1–12 months.
+
+### One-tap saved-card charge happy + decline paths
+- [ ] Happy path: `saved_card_charge_enabled` ON, saved card in account, open order awaiting payment → Account page shows "כרטיסים שמורים", one-tap charge button on card row; tap → overlay spinner; server calls PayPlus Create(token=X, amount=Y); PayPlus returns auth_token + status; charge succeeds (status='סוגר בחשבון' or similar) → order marked paid, notification shown, card debit flow complete.
+- [ ] Declined: charge server response `status='בעיבוד'` or declined → overlay persists, message "תשלום בעיבוד — בדוק בעוד דקה" or "תשלום נדחה — אנא נסה כרטיס אחר או שיטת תשלום"; customer may retry or abandon (no forced retry loop).
+- [ ] Fallback: token invalid / 404 / PayPlus unavailable → graceful error, link to manual payment route (#account-pay or #order-pay/:id).
+- [ ] Network failure mid-charge: no retry; "נסה שוב" button, let customer manually resubmit or switch payment method (no double-charge risk).
+
+### Account delete with saved cards
+- [ ] Customer calls DELETE /api/account (requires password); server deletes session, user row, **all saved-card tokens for that user**; customer redirected to login.
+- [ ] Post-delete: logout from another device works; attempting /api/account/saved-cards/:token_id → 401 (user/session gone).
+
+### Admin per-flag rollback
+- [ ] Turn `installments_enabled` OFF: PayPlus page immediately stops showing installments picker, next order uses standard single-payment; home shows no "תשלומים" mention.
+- [ ] Turn `saved_cards_enabled` OFF: Account "כרטיסים שמורים" list and delete buttons hidden; existing tokens not deleted (can be re-enabled to show them again).
+- [ ] Turn `saved_card_charge_enabled` OFF: one-tap charge buttons hidden from saved-card rows; tokens remain in Account.
+- [ ] No data migration on toggle OFF.
+
+### Staging verification checklist (before ANY prod flag flip)
+- [ ] **create_token round-trip on restapidev**: call `/api/saved-cards/create-token` with test card details, verify `token_id` + `last_4` returned, check token stored in Transactions/saved_card_tokens.
+- [ ] **Real token charge via Transactions/Charge**: fetch token from staging DB, call Transactions/Charge(token=X, amount=test_amount), confirm charge succeeds; check Transactions/payments + Transactions/Charges rows.
+- [ ] **Payments field semantics**: verify new Payment fields (saved_card_token, installments_months, etc.) are created/populated correctly; spot-check 3 historical orders for backward-compat (no payment.saved_card_token in old orders — must be optional nullable).
+- [ ] **Admin settings persistence**: set installments_min_amount=500 and installments_max=6, refresh page, verify values persist.
+- [ ] **Feature flags show false in /api/home**: when all three flags OFF, response includes `installmentsEnabled: false`, `savedCardsEnabled: false`, `savedCardChargeEnabled: false`.
+- [ ] **One real end-to-end flow per flag**: submit order with installments picker ON; save real card on success; one-tap charge the saved card on a separate order. (Staging-only charges; do not run against live customers.)
