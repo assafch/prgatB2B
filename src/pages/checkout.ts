@@ -12,7 +12,19 @@ interface CartLine {
   line_total: number;
   available: boolean;
 }
-interface CartResp { lines: CartLine[]; total: number }
+interface CartPromotions {
+  subtotal: number;
+  discount: number;
+  total: number;
+  applied: { id: number; name: string; type: string; savings: number }[];
+}
+interface CartResp {
+  lines: CartLine[];
+  total: number;
+  promotions?: CartPromotions;
+  vatRate?: number;
+  unifiedCheckout?: boolean;
+}
 interface HomeData {
   features: { payments: boolean; discountPricing?: boolean };
   balance: { obligo: number | null; creditLimit: number | null };
@@ -114,8 +126,15 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         )
         .join('')}
       ${home?.features?.discountPricing ? '<p class="muted" style="font-size:0.78rem;margin:0.2rem 0 0.5rem">המחירים כוללים את ההנחה הקבועה שלך.</p>' : ''}
+      ${(cart.promotions?.applied || [])
+        .filter((a) => a.savings > 0)
+        .map(
+          (a) => `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:var(--ok);font-size:0.9rem">
+            <span>🏷️ ${escapeHtml(a.name)}</span><span dir="ltr">−${formatMoney(a.savings)}</span></div>`
+        )
+        .join('')}
       <div style="display:flex;justify-content:space-between;margin-top:0.75rem;font-weight:900;font-size:1.2rem">
-        <span>סה״כ</span><span style="color:var(--brand)">${formatMoney(cart.total)}</span>
+        <span>סה״כ</span><span style="color:var(--brand)">${formatMoney(cart.promotions?.total ?? cart.total)}</span>
       </div>
     </div>
 
