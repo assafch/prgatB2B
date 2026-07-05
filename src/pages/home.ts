@@ -38,10 +38,11 @@ interface HomeData {
   lastOrder: LastOrder | null;
   suggestions: Suggestion[];
   promotions: HomePromo[];
-  features: { payments: boolean; checkPayment: boolean };
+  features: { payments: boolean; checkPayment: boolean; unifiedCheckout?: boolean };
   banner: { text: string } | null;
   maintenance: { enabled: boolean; message: string };
   paymentPolicy?: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
+  pendingPaymentOrder?: { id: number; amount: number; createdAt: string } | null;
 }
 
 export async function renderHome(shell: HTMLElement): Promise<void> {
@@ -103,6 +104,18 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
         <div class="label">אין חשבוניות פתוחות — הזמינו דרך הקטלוג</div>
       </div>`;
   }
+
+  // Unified checkout: an order held for payment is the single most urgent thing on
+  // this screen — surface it above everything (spec §3.6).
+  const pendingPayBanner =
+    d.features.unifiedCheckout && d.pendingPaymentOrder
+      ? `<a class="debt-coral" style="display:block;text-decoration:none;margin-bottom:0.75rem" href="#order-pay/${d.pendingPaymentOrder.id}">
+           <div class="label">⏳ הזמנה ממתינה לתשלום</div>
+           <div class="amount">${formatMoney(d.pendingPaymentOrder.amount)}</div>
+           <div class="label">ההזמנה תישלח מיד עם השלמת התשלום</div>
+           <span class="pay-navy" style="margin-top:0.5rem">שלם עכשיו ←</span>
+         </a>`
+      : '';
 
   // Side tiles (the two white shortcut cards in the design). Staff 'orderer'
   // doesn't see finance — swap the invoices tile for the catalog.
@@ -204,7 +217,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     ${promoRail}
     <div class="home-grid">
       ${tiles}
-      ${debtCard}
+      ${pendingPayBanner}${debtCard}
     </div>
     ${utilBar}
     ${lastOrderCard}
