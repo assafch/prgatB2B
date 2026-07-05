@@ -207,8 +207,20 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       const announcementText = (c.querySelector('#s-ann-text') as HTMLTextAreaElement).value;
       const discountEnabled = discToggle.classList.contains('on');
       const maintenanceMessage = (c.querySelector('#s-maint-text') as HTMLTextAreaElement).value;
-      const installmentsMin = (c.querySelector('#s-installments-min') as HTMLInputElement).value;
-      const installmentsMax = (c.querySelector('#s-installments-max') as HTMLInputElement).value;
+      // Blank/non-numeric/non-positive falls back to the server default rather than
+      // saving a value that would make installments apply to every payment (a min of
+      // 0) or silently offer 0 payments (a max of 0). Reflect the fallback in the
+      // input so the admin sees what was actually saved.
+      const minInput = c.querySelector('#s-installments-min') as HTMLInputElement;
+      const maxInput = c.querySelector('#s-installments-max') as HTMLInputElement;
+      const sanitizePositiveInt = (raw: string, fallback: number): number => {
+        const n = Number(raw.trim());
+        return raw.trim() !== '' && Number.isFinite(n) && n > 0 ? n : fallback;
+      };
+      const installmentsMin = String(sanitizePositiveInt(minInput.value, 1000));
+      const installmentsMax = String(sanitizePositiveInt(maxInput.value, 4));
+      minInput.value = installmentsMin;
+      maxInput.value = installmentsMax;
       await api.patch('/api/admin/settings', {
         announcement_enabled: announcementEnabled,
         announcement_text: announcementText,

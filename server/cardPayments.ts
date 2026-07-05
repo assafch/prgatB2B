@@ -57,28 +57,38 @@ export function activeCardProvider(): 'upay' | 'tranzila' | 'payplus' | null {
   return null;
 }
 
+// getSettingInt only falls back when the stored value fails Number.isFinite — an
+// admin clearing the input leaves '' in the settings table, and Number('') is 0,
+// which is finite. A blank/zero/negative min would let installments apply to EVERY
+// payment (any amount >= 0), so these reads additionally require a positive result.
+function positiveSettingInt(key: string, fallback: number): number {
+  const v = getSettingInt(key, fallback);
+  return v > 0 ? v : fallback;
+}
+
 /** How many installments (תשלומים) to offer for this amount, or null for a single
  *  payment. Reads settings fresh on every call (no caching) so an admin toggle takes
  *  effect immediately: off unless `installments_enabled`, and only once the amount
- *  clears `installments_min_amount` (default ₪1000); the count is `installments_max`
- *  (default 4) clamped to PayPlus's supported [2,12] range. */
+ *  clears `installments_min_amount` (default ₪1000, falls back if blank/invalid/<=0);
+ *  the count is `installments_max` (default 4, same fallback) clamped to PayPlus's
+ *  supported [2,12] range. */
 export function installmentsFor(amount: number): number | null {
   if (!getSettingBool('installments_enabled', false)) return null;
-  const min = getSettingInt('installments_min_amount', 1000);
+  const min = positiveSettingInt('installments_min_amount', 1000);
   if (!(amount >= min)) return null;
-  const max = getSettingInt('installments_max', 4);
+  const max = positiveSettingInt('installments_max', 4);
   return Math.min(12, Math.max(2, max));
 }
 
 /** Installments window (min amount + max count) for display purposes — independent of
  *  any specific cart/payable amount (unlike installmentsFor). Used by /api/home and the
  *  checkout preview so the client can show "up to N payments" before an amount is known
- *  to be eligible. Same settings/defaults/clamp as installmentsFor; null when the
- *  feature flag is off. */
+ *  to be eligible. Same settings/defaults/clamp/fallback as installmentsFor; null when
+ *  the feature flag is off. */
 export function installmentsRange(): { min: number; max: number } | null {
   if (!getSettingBool('installments_enabled', false)) return null;
-  const min = getSettingInt('installments_min_amount', 1000);
-  const max = getSettingInt('installments_max', 4);
+  const min = positiveSettingInt('installments_min_amount', 1000);
+  const max = positiveSettingInt('installments_max', 4);
   return { min, max: Math.min(12, Math.max(2, max)) };
 }
 

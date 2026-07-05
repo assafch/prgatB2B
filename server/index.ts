@@ -1057,7 +1057,11 @@ app.post('/api/payments/card/create', requireOwner, blockIfMaintenance, cardPayL
   }
   const rawInvoices = (req.body as { invoices?: unknown })?.invoices;
   const invoices = Array.isArray(rawInvoices) ? rawInvoices.filter((x): x is string => typeof x === 'string') : [];
-  const saveCard = (req.body as { saveCard?: unknown })?.saveCard === true;
+  // Only an account owner can create a savable token — 'orderer' staff have no
+  // saved-card surface (view/delete/use are all requireOwner), so their consent
+  // would mint an unrevocable token. requireOwner above already blocks orderers
+  // from this route entirely; this is a belt-and-suspenders gate on the flag itself.
+  const saveCard = (req.body as { saveCard?: unknown })?.saveCard === true && req.user!.customer_role === 'owner';
   try {
     const out = await createCardDebtIntent(req.user!.id, req.user!.custname!, { invoices }, undefined, appBaseUrl(req), saveCard);
     res.json(out);
@@ -1079,7 +1083,8 @@ app.post('/api/payments/card/intent', requireOwner, blockIfMaintenance, cardPayL
   const invoiceRefs = Array.isArray(body.invoiceRefs)
     ? body.invoiceRefs.filter((x): x is string => typeof x === 'string')
     : undefined;
-  const saveCard = body.saveCard === true;
+  // Owner-only consent gate — see the /card/create comment above.
+  const saveCard = body.saveCard === true && req.user!.customer_role === 'owner';
   try {
     const out = await createCardPartialIntent(req.user!.id, req.user!.custname!, amount, invoiceRefs, undefined, appBaseUrl(req), saveCard);
     res.json(out);
@@ -1094,7 +1099,11 @@ app.post('/api/orders/:id/pay/card', requireCustomer, blockIfMaintenance, cardPa
     res.status(503).json({ error: 'תשלום בכרטיס אשראי אינו זמין כרגע' });
     return;
   }
-  const saveCard = (req.body as { saveCard?: unknown })?.saveCard === true;
+  // This route runs under requireCustomer (not requireOwner) since any staff member
+  // may pay a held order — but 'orderer' staff have no saved-card surface at all
+  // (view/delete/use are requireOwner-gated), so their consent here would mint an
+  // unrevocable token nobody can ever see or revoke. Restrict saveCard to owners.
+  const saveCard = (req.body as { saveCard?: unknown })?.saveCard === true && req.user!.customer_role === 'owner';
   try {
     const intent = await createCardOrderIntent(req.user!.id, req.user!.custname!, Number(req.params.id), undefined, appBaseUrl(req), saveCard);
     res.json(intent);

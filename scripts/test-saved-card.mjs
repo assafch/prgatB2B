@@ -37,6 +37,21 @@ assert.equal(installmentsFor(1000), 4);
 assert.equal(installmentsFor(50000), 4);
 console.log('installmentsFor: ALL PASS');
 
+// A blank installments_min_amount (admin cleared the input) must fall back to the
+// 1000 default, not Number('') === 0 — otherwise installments would apply to every
+// payment amount >= 0.
+{
+  const bdb = new Database(path.join(process.env.DATA_DIR, 'app.db'));
+  bdb.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('installments_min_amount','')").run();
+  bdb.close();
+  assert.equal(installmentsFor(1), null, 'blank min falls back to 1000, not 0');
+  assert.equal(installmentsFor(1000), 4, 'blank min still honors the 1000 fallback boundary');
+  const rdb = new Database(path.join(process.env.DATA_DIR, 'app.db'));
+  rdb.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('installments_min_amount','1000')").run();
+  rdb.close();
+}
+console.log('installmentsFor blank-min fallback: ALL PASS');
+
 // --- Saved card (Phase 1 token capture) upsert/read/delete round-trip -----------
 const { upsertSavedCard, getSavedCard, deleteSavedCard } = await import('../dist/server/savedCards.js');
 
