@@ -25,6 +25,8 @@ interface CartResp {
   lines: CartLine[];
   total: number;
   promotions?: Promotions;
+  vatRate?: number;
+  unifiedCheckout?: boolean;
 }
 
 export async function renderCart(shell: HTMLElement): Promise<void> {
@@ -61,6 +63,13 @@ async function load(shell: HTMLElement): Promise<void> {
   const promo = cart.promotions;
   const hasDiscount = !!promo && promo.discount > 0;
   const finalTotal = promo ? promo.total : cart.total;
+
+  // Unified checkout: one honest number from here to the payment page. The VAT
+  // formula mirrors server money.ts withVat exactly (round-half-up to 2dp).
+  const unified = !!cart.unifiedCheckout && typeof cart.vatRate === 'number';
+  const vatRate = cart.vatRate ?? 0;
+  const payable = Math.round(finalTotal * (1 + vatRate) * 100) / 100;
+  const vatAmount = Math.round((payable - finalTotal) * 100) / 100;
   const giftsHtml =
     promo && promo.gifts.length
       ? promo.gifts
@@ -110,8 +119,14 @@ async function load(shell: HTMLElement): Promise<void> {
           ? `<div class="cart-promo-line muted"><span>סכום ביניים</span><span>${formatMoney(cart.total)}</span></div>${promoLinesHtml}`
           : ''
       }
-      <div class="cart-summary-total"><b>סה״כ לתשלום</b><b>${formatMoney(finalTotal)}</b></div>
-      <button id="checkout" class="cart-summary-cta" ${hasUnavailable ? 'disabled' : ''}>לסיום הזמנה · ${formatMoney(finalTotal)} ←</button>
+      ${
+        unified
+          ? `<div class="cart-summary-row"><span>סה״כ לפני מע״מ</span><span>${formatMoney(finalTotal)}</span></div>
+             <div class="cart-summary-row"><span>מע״מ ${Math.round(vatRate * 100)}%</span><span>${formatMoney(vatAmount)}</span></div>
+             <div class="cart-summary-total"><b>סה״כ לתשלום כולל מע״מ</b><b>${formatMoney(payable)}</b></div>`
+          : `<div class="cart-summary-total"><b>סה״כ לתשלום</b><b>${formatMoney(finalTotal)}</b></div>`
+      }
+      <button id="checkout" class="cart-summary-cta" ${hasUnavailable ? 'disabled' : ''}>לסיום הזמנה · ${formatMoney(unified ? payable : finalTotal)} ←</button>
       ${
         hasUnavailable
           ? `<div class="cart-blocked-note">יש להסיר פריטים שאינם זמינים כדי להמשיך</div>`
