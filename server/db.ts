@@ -422,6 +422,11 @@ try {
   /* exists */
 }
 
+// Saved-card (Phase 2) one-tap charge: which path produced this row. 'token' = charged
+// off-session against a saved PayPlus token (no hosted page); NULL = hosted-page flow
+// (unchanged, existing rows stay NULL forever). Additive, read by admin/reporting only.
+ensureColumn('card_payments', 'charge_source', 'TEXT');
+
 export function getSetting(key: string): string | null {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row?.value ?? null;

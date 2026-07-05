@@ -52,3 +52,14 @@ export function getSavedCard(userId: number): SavedCardRow | null {
 export function deleteSavedCard(userId: number): void {
   db.prepare('DELETE FROM saved_cards WHERE user_id = ?').run(userId);
 }
+
+/** Internal accessor for the one-tap charge path ONLY — returns the still-encrypted
+ *  token. Callers must decrypt via tokenVault.decryptToken before ever sending it to
+ *  the PSP; never expose this row (or the raw token) outside server-side charge logic. */
+export function getSavedCardToken(userId: number): { id: string; token: string } | null {
+  return (
+    (db.prepare(`SELECT id, token FROM saved_cards WHERE user_id = ?`).get(userId) as
+      | { id: string; token: string }
+      | undefined) ?? null
+  );
+}

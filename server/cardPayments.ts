@@ -11,8 +11,10 @@ import { getAccountSummary, getUnpaidInvoices, bustFinanceCache } from './financ
 import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
 import * as tranzila from './tranzila.js';
 import * as payplus from './payplus.js';
-import { tokenVaultReady } from './tokenVault.js';
-import { upsertSavedCard } from './savedCards.js';
+import { tokenVaultReady, decryptToken } from './tokenVault.js';
+import { upsertSavedCard, getSavedCardToken } from './savedCards.js';
+// OrderError is imported dynamically inside chargeSavedCard — a static import here would
+// create a load-time cycle (orders.js -> paymentPolicy.js -> cardPayments.js already).
 
 export interface CardRow {
   id: string;
@@ -227,17 +229,20 @@ export function paidDebtCardTotal(custname: string): number {
   return Math.round(((row.s || 0) + Number.EPSILON) * 100) / 100;
 }
 
-/** Create a hosted-page intent to pay the open debt — either a chosen set of invoices
- *  (selection.invoices) or, when none are given, the whole open balance. The amount is
- *  always re-derived SERVER-SIDE; the client never supplies amounts. */
-export async function createCardDebtIntent(
-  userId: number,
+/** Shared derivation for the debt path (whole balance or a chosen set of invoices) —
+ *  used by BOTH the hosted intent (createCardDebtIntent) and the one-tap token charge
+ *  (chargeSavedCard). Throws the exact same errors as the pre-refactor inline logic;
+ *  callers that need a payer email for the PSP page read it off `summary`. */
+export async function deriveDebtCharge(
   custname: string,
-  selection: { invoices?: string[] },
-  phone: string | undefined,
-  baseUrl: string,
-  saveCard?: boolean
-): Promise<{ id: string; url: string; amount: number }> {
+  selection: { invoices?: string[] }
+): Promise<{
+  amount: number;
+  label: string;
+  paidItems: string[];
+  payplusItems?: { name: string; amount: number }[];
+  summary: Awaited<ReturnType<typeof getAccountSummary>>;
+}> {
   const summary = await getAccountSummary(custname);
   if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
   const debt = round2(summary.balance.openTotal);
@@ -277,6 +282,21 @@ export async function createCardDebtIntent(
     label = `תשלום חוב — ${custname}`;
   }
   if (amount <= 0) throw new Error('הסכום לתשלום אינו תקין');
+  return { amount, label, paidItems, payplusItems, summary };
+}
+
+/** Create a hosted-page intent to pay the open debt — either a chosen set of invoices
+ *  (selection.invoices) or, when none are given, the whole open balance. The amount is
+ *  always re-derived SERVER-SIDE; the client never supplies amounts. */
+export async function createCardDebtIntent(
+  userId: number,
+  custname: string,
+  selection: { invoices?: string[] },
+  phone: string | undefined,
+  baseUrl: string,
+  saveCard?: boolean
+): Promise<{ id: string; url: string; amount: number }> {
+  const { amount, label, paidItems, payplusItems, summary } = await deriveDebtCharge(custname, selection);
 
   const id = crypto.randomBytes(12).toString('hex');
   const { url } = await createPspIntent({
@@ -297,6 +317,31 @@ export async function createCardDebtIntent(
   return { id, url, amount };
 }
 
+/** Shared derivation for the partial / custom-amount path — used by BOTH the hosted
+ *  intent (createCardPartialIntent) and the one-tap token charge (chargeSavedCard).
+ *  Validates 0 < amount <= payable, where payable = authoritative openTotal minus
+ *  recent unreconciled card payments. Throws the exact same errors as before the
+ *  refactor. */
+export async function derivePartialCharge(
+  custname: string,
+  requestedAmount: number
+): Promise<{ amount: number; summary: Awaited<ReturnType<typeof getAccountSummary>> }> {
+  const summary = await getAccountSummary(custname);
+  if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
+  const openTotal = round2(summary.balance.openTotal);
+  if (openTotal <= 0) throw new Error('אין חוב פתוח לתשלום');
+
+  const payable = round2(Math.max(0, openTotal - unreconciledCardTotal(custname)));
+  const amount = round2(Number(requestedAmount));
+  if (!isFinite(amount) || amount <= 0) throw new Error('יש להזין סכום תקין');
+  if (amount > payable + 0.001) {
+    throw new Error(
+      payable > 0 ? `הסכום חורג מהיתרה לתשלום (₪${payable.toFixed(2)})` : 'קיים תשלום בעיבוד — נסו שוב מאוחר יותר'
+    );
+  }
+  return { amount, summary };
+}
+
 /** Partial / custom-amount card payment ("תשלום על חשבון"). This is the ONE place a
  *  client-supplied amount is accepted — validated SERVER-SIDE to 0 < amount <= payable,
  *  where payable = authoritative openTotal minus recent unreconciled card payments.
@@ -311,19 +356,7 @@ export async function createCardPartialIntent(
   baseUrl: string,
   saveCard?: boolean
 ): Promise<{ id: string; url: string; amount: number }> {
-  const summary = await getAccountSummary(custname);
-  if (!summary.balanceOk) throw new Error('נתוני החוב אינם זמינים כרגע');
-  const openTotal = round2(summary.balance.openTotal);
-  if (openTotal <= 0) throw new Error('אין חוב פתוח לתשלום');
-
-  const payable = round2(Math.max(0, openTotal - unreconciledCardTotal(custname)));
-  const amount = round2(Number(requestedAmount));
-  if (!isFinite(amount) || amount <= 0) throw new Error('יש להזין סכום תקין');
-  if (amount > payable + 0.001) {
-    throw new Error(
-      payable > 0 ? `הסכום חורג מהיתרה לתשלום (₪${payable.toFixed(2)})` : 'קיים תשלום בעיבוד — נסו שוב מאוחר יותר'
-    );
-  }
+  const { amount, summary } = await derivePartialCharge(custname, requestedAmount);
 
   const hint = Array.isArray(invoiceRefs) ? invoiceRefs.filter((s) => typeof s === 'string').slice(0, 200) : [];
   const id = crypto.randomBytes(12).toString('hex');
@@ -344,17 +377,13 @@ export async function createCardPartialIntent(
   return { id, url, amount };
 }
 
-/** Create a hosted-page intent to pay for a specific order. Amount comes from the
- *  order row (server-trusted); the client never supplies amounts. Only valid when
- *  the order is in `pending_payment` status. */
-export async function createCardOrderIntent(
-  userId: number,
-  custname: string,
-  orderId: number,
-  phone: string | undefined,
-  baseUrl: string,
-  saveCard?: boolean
-): Promise<{ id: string; url: string; amount: number }> {
+/** Shared derivation for the order path — used by BOTH the hosted intent
+ *  (createCardOrderIntent) and the one-tap token charge (chargeSavedCard). Enforces
+ *  ownership (order belongs to this user AND custname), status (`pending_payment`
+ *  only), a valid positive amount, and the same "already paid" duplicate-tab/race
+ *  guard the hosted path always had. Throws the exact same errors as before the
+ *  refactor. Synchronous — no PSP/Priority I/O, only local DB reads. */
+export function deriveOrderCharge(userId: number, custname: string, orderId: number): { amount: number; label: string } {
   const order = db
     .prepare(
       `SELECT payment_required_amount, status, user_id FROM orders_local WHERE id = ? AND custname = ?`
@@ -370,6 +399,23 @@ export async function createCardOrderIntent(
   // M1: reject if already paid (duplicate tab / race)
   const paid = db.prepare("SELECT id FROM card_payments WHERE order_id = ? AND kind = 'order_payment' AND status = 'paid' LIMIT 1").get(String(orderId));
   if (paid) throw new Error('order already paid');
+
+  return { amount, label: `תשלום הזמנה #${orderId}` };
+}
+
+/** Create a hosted-page intent to pay for a specific order. Amount comes from the
+ *  order row (server-trusted); the client never supplies amounts. Only valid when
+ *  the order is in `pending_payment` status. */
+export async function createCardOrderIntent(
+  userId: number,
+  custname: string,
+  orderId: number,
+  phone: string | undefined,
+  baseUrl: string,
+  saveCard?: boolean
+): Promise<{ id: string; url: string; amount: number }> {
+  const { amount, label } = deriveOrderCharge(userId, custname, orderId);
+
   // Expire any stale not-yet-paid intents so only the newest will be live
   db.prepare("UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending')").run(String(orderId));
 
@@ -386,7 +432,7 @@ export async function createCardOrderIntent(
     custname,
     kind: 'order_payment',
     amount,
-    label: `תשלום הזמנה #${orderId}`,
+    label,
     paidItemsJson: null,
     email,
     contact: custname,
@@ -544,4 +590,92 @@ export function listAllCardPayments(): CardRow[] {
   return db
     .prepare(`SELECT * FROM card_payments WHERE status != 'created' ORDER BY created_at DESC LIMIT 500`)
     .all() as CardRow[];
+}
+
+/** One-tap charge against the customer's saved PayPlus token — no hosted page, the
+ *  customer isn't present. Exactly one of orderId/invoices/amount selects the mode;
+ *  the amount is derived via the SAME shared helpers the hosted intents use (byte-
+ *  identical validation/errors), so a customer never gets a different eligibility
+ *  answer here than on the hosted page.
+ *
+ *  chargeToken's own result is NEVER trusted — win or throw, we always fall through to
+ *  confirmCard's authoritative Transactions/View re-query, exactly like the hosted
+ *  callback/return/IPN paths. Only that re-query flips the row to 'paid' and runs the
+ *  existing receipts/approveOrder/payments_count side effects. */
+export async function chargeSavedCard(
+  userId: number,
+  custname: string,
+  mode: { orderId?: number; invoices?: string[]; amount?: number }
+): Promise<{ id: string; status: string; amount: number }> {
+  // Dynamic import: orders.js -> paymentPolicy.js -> cardPayments.js already forms a
+  // load-time cycle; a static import of OrderError here would re-trigger it.
+  const { OrderError } = await import('./orders.js');
+
+  const card = getSavedCardToken(userId);
+  if (!card) throw new OrderError('אין כרטיס שמור');
+  const token = decryptToken(card.token);
+  if (!token) throw new OrderError('כרטיס שמור אינו זמין כרגע'); // vault key missing/corrupt — no charge attempted
+
+  let amount: number;
+  let kind: string;
+  let orderId: number | undefined;
+  let paidItemsJson: string | null = null;
+
+  try {
+    if (mode.orderId != null) {
+      orderId = Number(mode.orderId);
+      const derived = deriveOrderCharge(userId, custname, orderId);
+      amount = derived.amount;
+      kind = 'order_payment';
+    } else if (mode.invoices !== undefined) {
+      const derived = await deriveDebtCharge(custname, { invoices: mode.invoices });
+      amount = derived.amount;
+      paidItemsJson = derived.paidItems.length ? JSON.stringify(derived.paidItems) : null;
+      kind = 'debt';
+    } else if (mode.amount != null) {
+      const derived = await derivePartialCharge(custname, mode.amount);
+      amount = derived.amount;
+      kind = 'debt_partial';
+    } else {
+      throw new OrderError('בקשת תשלום שגויה');
+    }
+  } catch (err) {
+    // The derivation helpers throw plain Error (same as the hosted creators) — surface
+    // the same customer-safe message here via OrderError so the route can 402 it.
+    if (err instanceof OrderError) throw err;
+    throw new OrderError(err instanceof Error ? err.message : 'שגיאה בבדיקת סכום התשלום');
+  }
+
+  const id = crypto.randomBytes(12).toString('hex');
+  db.prepare(
+    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, paid_items, save_card, charge_source, order_id)
+     VALUES (?, ?, ?, ?, ?, 'pending', 'payplus', ?, 0, 'token', ?)`
+  ).run(id, userId, custname, kind, amount, paidItemsJson, orderId != null ? String(orderId) : null);
+
+  try {
+    await payplus.chargeToken({
+      token,
+      amount,
+      ref: id,
+      customerName: custname,
+      payments: installmentsFor(amount) ?? undefined,
+    });
+  } catch (err) {
+    // chargeToken's own throw/result is NOT authoritative — swallow it here and let the
+    // confirmCard re-query below decide paid vs. not (identical to a declined hosted page).
+    console.warn('[card] chargeToken threw for saved-card charge', id, err instanceof Error ? err.message : err);
+  }
+
+  const confirmed = await confirmCard(id);
+
+  if (confirmed && confirmed.status === 'paid') {
+    db.prepare(`UPDATE saved_cards SET last_used_at = datetime('now') WHERE user_id = ?`).run(userId);
+    return { id, status: 'paid', amount: confirmed.amount };
+  }
+
+  // Not confirmed paid (declined, or the PSP query itself failed) — never leave the
+  // row hanging as 'pending' deflating the payable cap; the client falls back to the
+  // hosted flow on this error.
+  db.prepare(`UPDATE card_payments SET status = 'failed' WHERE id = ? AND status = 'pending'`).run(id);
+  throw new OrderError('החיוב נדחה — נסו בעמוד התשלום');
 }

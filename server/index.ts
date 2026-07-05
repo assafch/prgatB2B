@@ -11,7 +11,7 @@ import { db, getSetting, getSettingBool, setSetting, setSettingBool, getAllSetti
 import { listAllUsers, createCustomerLogin, resetUserPassword, setUserStatus, updateCustomerDetails, deleteCustomerUser } from './adminUsers.js';
 import { getRevenueByMonth, getTopProducts, getTopDebtors, getInactiveCustomers } from './analytics.js';
 import { runAssistant, assistantEnabled } from './assistant.js';
-import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider, expireStaleCardIntents } from './cardPayments.js';
+import { createCardDebtIntent, createCardPartialIntent, createCardOrderIntent, chargeSavedCard, unreconciledCardTotal, getCardForUser, confirmCard, listAllCardPayments, recordTranzilaIndex, activeCardProvider, expireStaleCardIntents } from './cardPayments.js';
 import { getSavedCard, deleteSavedCard } from './savedCards.js';
 import * as payplus from './payplus.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, type PromoInput } from './promotions.js';
@@ -1157,6 +1157,43 @@ app.delete('/api/payments/saved-card', requireOwner, (req: AuthedRequest, res) =
   deleteSavedCard(req.user!.id);
   res.json({ ok: true });
 });
+
+// Phase 2: one-tap charge against the saved PayPlus token — no hosted page. Body must
+// carry EXACTLY ONE of orderId / invoices / amount (the same three modes as the hosted
+// /create, /intent, /pay/card routes). Kept 404 (not 503/400) while dark — flag off,
+// payments not live, or no saved card on file all look like "feature doesn't exist" to
+// the client, which silently falls back to the hosted flow.
+app.post('/api/payments/card/charge-saved', requireOwner, blockIfMaintenance, cardPayLimiter, ah(async (req: AuthedRequest, res) => {
+  if (!getSettingBool('saved_card_charge_enabled', false) || !paymentsLive()) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  if (!getSavedCard(req.user!.id)) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  const body = (req.body || {}) as { orderId?: unknown; invoices?: unknown; amount?: unknown };
+  const hasOrderId = body.orderId !== undefined && body.orderId !== null;
+  const hasInvoices = body.invoices !== undefined && body.invoices !== null;
+  const hasAmount = body.amount !== undefined && body.amount !== null;
+  if ([hasOrderId, hasInvoices, hasAmount].filter(Boolean).length !== 1) {
+    res.status(400).json({ error: 'יש לבחור מצב תשלום אחד בלבד' });
+    return;
+  }
+  const mode = hasOrderId
+    ? { orderId: Number(body.orderId) }
+    : hasInvoices
+      ? { invoices: Array.isArray(body.invoices) ? body.invoices.filter((x): x is string => typeof x === 'string') : [] }
+      : { amount: typeof body.amount === 'number' ? body.amount : Number(body.amount) };
+  try {
+    const out = await chargeSavedCard(req.user!.id, req.user!.custname!, mode);
+    res.json(out);
+  } catch (err) {
+    if (err instanceof OrderError) { res.status(402).json({ error: err.message }); return; }
+    console.error('[card] charge-saved failed:', err);
+    res.status(500).json({ error: 'שגיאה בחיוב' });
+  }
+}));
 
 // UPay server-to-server IPN — confirms by re-query (caller is never trusted).
 app.get('/api/payments/upay/ipn', ah(async (req, res) => {

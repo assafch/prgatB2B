@@ -78,3 +78,127 @@ countDb.close();
 deleteSavedCard(1);
 assert.equal(getSavedCard(1), null, 'null after delete');
 console.log('savedCards upsert/read/delete: ALL PASS');
+
+// --- Task 6: derivation-parity — the extracted helpers must enforce the exact same
+// guards the hosted creators enforced before the refactor (order/debt/partial). -----
+
+// getSavedCardToken: the encrypted-token accessor the one-tap charge path needs.
+const { getSavedCardToken } = await import('../dist/server/savedCards.js');
+upsertSavedCard(1, 'CUST1', fakeTx1);
+const tokenRow = getSavedCardToken(1);
+assert.ok(tokenRow && tokenRow.token && tokenRow.token !== fakeTx1.tokenUid, 'getSavedCardToken returns the encrypted blob, not plaintext');
+assert.equal(decryptToken(tokenRow.token), fakeTx1.tokenUid, 'getSavedCardToken round-trips to the original PSP token');
+deleteSavedCard(1);
+console.log('getSavedCardToken: ALL PASS');
+
+// --- Order-mode helper (deriveOrderCharge): pure DB guards, no Priority I/O -----
+const { deriveOrderCharge, deriveDebtCharge, derivePartialCharge } = await import('../dist/server/cardPayments.js');
+
+const odb = new Database(path.join(process.env.DATA_DIR, 'app.db'));
+odb.prepare("INSERT OR IGNORE INTO users (id, username, password_hash, role, custname) VALUES (2, 'u2', 'x', 'customer', 'CUST1')").run();
+const insOrder = odb.prepare(
+  `INSERT INTO orders_local (id, user_id, custname, status, total, payment_required_amount)
+   VALUES (?, ?, ?, ?, ?, ?)`
+);
+insOrder.run(101, 1, 'CUST1', 'pending_payment', 590, 590);
+insOrder.run(102, 1, 'CUST1', 'approved', 590, 590); // not awaiting payment
+insOrder.run(103, 1, 'CUST1', 'pending_payment', 590, null); // amount unavailable
+insOrder.run(104, 1, 'CUST1', 'pending_payment', 590, 250);
+odb.prepare("INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, order_id) VALUES ('paid-104', 1, 'CUST1', 'order_payment', 250, 'paid', 'payplus', '104')").run();
+odb.close();
+
+// Happy path — same amount + label the hosted createCardOrderIntent would derive.
+{
+  const out = deriveOrderCharge(1, 'CUST1', 101);
+  assert.deepEqual(out, { amount: 590, label: 'תשלום הזמנה #101' });
+}
+// Foreign user — order belongs to user 1, not user 2.
+assert.throws(() => deriveOrderCharge(2, 'CUST1', 101), /order not found/, 'foreign user rejected');
+// Not pending — status is 'approved'.
+assert.throws(() => deriveOrderCharge(1, 'CUST1', 102), /order not awaiting payment/, 'non-pending order rejected');
+// Missing amount.
+assert.throws(() => deriveOrderCharge(1, 'CUST1', 103), /order amount unavailable/, 'missing amount rejected');
+// Already paid (duplicate tab / race) — same M1 guard the hosted path enforced.
+assert.throws(() => deriveOrderCharge(1, 'CUST1', 104), /order already paid/, 'already-paid order rejected');
+// Unknown order id.
+assert.throws(() => deriveOrderCharge(1, 'CUST1', 9999), /order not found/, 'unknown order rejected');
+console.log('deriveOrderCharge: ALL PASS');
+
+// --- Debt/partial helpers (deriveDebtCharge / derivePartialCharge): these call
+// getAccountSummary/getUnpaidInvoices, which hit Priority over HTTP. Point them at a
+// fake config and stub global.fetch so the cap/selection math runs against known
+// fixtures instead of a real tenant. -----------------------------------------------
+process.env.PRIORITY_BASE_URL = 'http://priority.invalid';
+process.env.PRIORITY_COMPANY = 'test-co';
+process.env.PRIORITY_PAT = 'test-pat';
+
+const origFetch = global.fetch;
+const jsonRes = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+global.fetch = async (url) => {
+  const u = String(url);
+  if (u.includes('/OBLIGO')) return jsonRes({ value: [{ ACC_DEBIT: 300, OBLIGO: 300, MAX_CREDIT: 1000 }] });
+  if (u.includes('/OPENINVOICES')) return jsonRes({ value: [] });
+  if (u.includes('/AINVOICES')) {
+    return jsonRes({
+      value: [
+        { IVNUM: 'INV-1', TOTPRICE: 120, IVDATE: '2026-01-01', STATDES: 'סופית', IVRECONDATE: null },
+        { IVNUM: 'INV-2', TOTPRICE: 200, IVDATE: '2026-01-02', STATDES: 'סופית', IVRECONDATE: null },
+      ],
+    });
+  }
+  if (u.includes('/CUSTOMERS')) return jsonRes({ value: [{ CUSTNAME: 'CUST1', CUSTDES: 'Test Ltd', EMAIL: 'x@test.com' }] });
+  return jsonRes({ value: [] });
+};
+
+// deriveDebtCharge — whole-balance fallback (no selection): amount = ACC_DEBIT (300).
+{
+  const out = await deriveDebtCharge('CUST1', {});
+  assert.equal(out.amount, 300);
+  assert.equal(out.label, 'תשלום חוב — CUST1');
+}
+// deriveDebtCharge — single selected invoice under the cap: itemized label + payplusItems kept.
+{
+  const out = await deriveDebtCharge('CUST1', { invoices: ['INV-1'] });
+  assert.equal(out.amount, 120);
+  assert.equal(out.label, 'חשבונית מס׳ INV-1');
+  assert.deepEqual(out.paidItems, ['INV-1']);
+  assert.ok(out.payplusItems && out.payplusItems.length === 1);
+}
+// deriveDebtCharge — selection sum (320) exceeds the payable cap once a recent
+// unreconciled debt payment (250, within RECON_WINDOW) deflates it to 50: amount is
+// clamped to the cap and the itemization is dropped (can't reconcile 50 to 2 invoices).
+const cardDb = new Database(path.join(process.env.DATA_DIR, 'app.db'));
+cardDb.prepare(
+  "INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp) VALUES ('deflate-1', 1, 'CUST1', 'debt', 250, 'pending', 'payplus')"
+).run();
+cardDb.close();
+{
+  const out = await deriveDebtCharge('CUST1', { invoices: ['INV-1', 'INV-2'] });
+  assert.equal(out.amount, 50, 'clamped to the deflated payable cap, not the itemized sum (320)');
+  assert.equal(out.label, 'תשלום חוב — CUST1', 'itemization dropped once capped below the selected sum');
+  assert.equal(out.payplusItems, undefined);
+}
+console.log('deriveDebtCharge: ALL PASS');
+
+// derivePartialCharge — same deflated payable (50): a request under the cap succeeds,
+// at/over the cap is rejected with the same message createCardPartialIntent used.
+{
+  const out = await derivePartialCharge('CUST1', 30);
+  assert.equal(out.amount, 30);
+}
+await assert.rejects(
+  () => derivePartialCharge('CUST1', 100),
+  /הסכום חורג מהיתרה לתשלום \(₪50\.00\)/,
+  'partial helper enforces the same payable cap as the hosted /intent route'
+);
+await assert.rejects(() => derivePartialCharge('CUST1', 0), /יש להזין סכום תקין/, 'zero amount rejected');
+await assert.rejects(() => derivePartialCharge('CUST1', -5), /יש להזין סכום תקין/, 'negative amount rejected');
+await assert.rejects(() => derivePartialCharge('CUST1', NaN), /יש להזין סכום תקין/, 'NaN amount rejected');
+console.log('derivePartialCharge: ALL PASS');
+
+// Cleanup the fetch stub + fixtures so it can't leak into anything appended after this file.
+global.fetch = origFetch;
+const cleanupDb = new Database(path.join(process.env.DATA_DIR, 'app.db'));
+cleanupDb.prepare("DELETE FROM card_payments WHERE id IN ('paid-104','deflate-1')").run();
+cleanupDb.prepare('DELETE FROM orders_local WHERE id IN (101,102,103,104)').run();
+cleanupDb.close();
