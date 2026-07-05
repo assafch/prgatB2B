@@ -14,17 +14,14 @@ export interface SavedCardRow {
   created_at: string;
 }
 
-/** Replace this user's saved card (one per user) with the card used on `tx`. Always
- *  clears the old row first — even when the new token can't be stored — so a stale
- *  card is never left behind. Skips the insert (warns) when `encryptToken` can't
- *  produce ciphertext (vault key not configured / tx has no tokenUid): a plaintext
- *  token must never be persisted. */
+/** Replace this user's saved card (one per user) with the card used on `tx`.
+ *  Encrypts first; only on success deletes the old row and inserts the new one.
+ *  If encryption fails, warns and returns without deleting — preserving the existing card. */
 export function upsertSavedCard(
   userId: number,
   custname: string,
   tx: { tokenUid: string | null; brand: string | null; fourDigits: string | null; expiryMonth: string | null; expiryYear: string | null }
 ): void {
-  db.prepare('DELETE FROM saved_cards WHERE user_id = ?').run(userId);
   if (!tx.tokenUid) {
     console.warn('[savedCards] no tokenUid on tx — skipping save for user', userId);
     return;
@@ -34,6 +31,8 @@ export function upsertSavedCard(
     console.warn('[savedCards] encryptToken returned null (vault key not configured) — skipping save for user', userId);
     return;
   }
+  // Encryption succeeded; now safe to delete and insert
+  db.prepare('DELETE FROM saved_cards WHERE user_id = ?').run(userId);
   const id = crypto.randomBytes(12).toString('hex');
   db.prepare(
     `INSERT INTO saved_cards (id, user_id, custname, token, brand, four_digits, expiry_month, expiry_year, consented_at)
