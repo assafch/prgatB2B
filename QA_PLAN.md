@@ -204,3 +204,14 @@ rows left unmarked are genuine gaps — mostly actions that write real data
 | CC.7 | RTL drawer slide direction | `.adm-drawer` slides in and sits on the correct edge for the RTL layout (not mirrored) on desktop widths (PASS — controller walk 2026-07-03) |
 | CC.8 | 44px+ tap targets | mobile bottom-nav items and the "+" FAB (`.adm-fab`) meet the ~44px minimum touch target at phone widths (PASS — controller walk 2026-07-03) |
 | CC.9 | Sparkline direction matches labels (RTL) | revenue sparkline series runs right→left (newest point leftmost), matching the month-label flex row under it — **regression found in this walk**: the SVG `x` mapping ran oldest→newest left→right (SVG coords are LTR) against an RTL label row whose first (oldest) label renders rightmost, so the newest-point dot sat above the oldest month label; fixed same day by mirroring the `x` mapping in `sparkline()` (`src/pages/adminDashboard.ts`) — pending a fresh visual re-check on the next deploy |
+
+## Unified checkout (`unified_checkout_enabled`)
+
+- [ ] Flag OFF: cart/checkout/home render exactly as before; checkout total equals cart total (promo bugfix); cash-customer submit lands on `#order-pay/:id`.
+- [ ] Flag ON, cash customer: cart shows `סה״כ לפני מע״מ` / `מע״מ 18%` / bold `סה״כ לתשלום כולל מע״מ`; checkout breakdown shows the SAME payable; CTA `שלח ושלם ₪X ←`.
+- [ ] Flag ON, card: submit → PSP page directly; amount on PSP equals checkout payable; success page says "ההזמנה אושרה ותישלח" + order number.
+- [ ] Flag ON, cheque: submit with צ׳ק selected → scanner directly with the required amount shown.
+- [ ] Flag ON, PSP create failure: submit falls back to `#order-pay/:id` (order recorded, nothing lost).
+- [ ] Flag ON, abandon payment: home shows `⏳ הזמנה ממתינה לתשלום` banner → resumes at `#order-pay/:id`. Flag OFF hides the banner.
+- [ ] Flag ON, net-terms customer: VAT rows visible, NO payment section, plain `שלח הזמנה`; net+debt still blocked.
+- [ ] Rollback drill: turn the flag OFF in admin settings (one tap, no typed confirm) → next page load renders the old flow.

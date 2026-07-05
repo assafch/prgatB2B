@@ -27,6 +27,7 @@ interface SwitchRow {
 const SWITCH_ROWS: SwitchRow[] = [
   { key: 'payments_enabled', name: 'תשלום בכרטיס אשראי', desc: 'לקוחות משלמים חוב מהאפליקציה', def: false, dangerousValue: false },
   { key: 'check_payment_enabled', name: 'תשלום בצ׳ק (צילום)', desc: 'OCR + אישור ידני שלך', def: true, dangerousValue: false },
+  { key: 'unified_checkout_enabled', name: 'תשלום בסיום הזמנה (מאוחד)', desc: 'פירוט מע״מ בסל + תשלום ישירות במסך סיום ההזמנה. כיבוי מחזיר מיידית את התהליך הקודם.', def: false, dangerousValue: true },
   { key: 'priority_receipts_enabled', name: 'קבלות Priority אוטומטיות', desc: 'קבלה נרשמת מיד עם אישור תשלום', def: false, dangerousValue: false },
   { key: 'maintenance_enabled', name: 'מצב תחזוקה', desc: '⚠ חוסם את כל הלקוחות מהאפליקציה', def: false, dangerousValue: true, maint: true },
 ];
