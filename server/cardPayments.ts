@@ -6,7 +6,7 @@
 // to Priority (the office reconciles, same as cheques).
 
 import crypto from 'node:crypto';
-import { db, getSetting } from './db.js';
+import { db, getSetting, getSettingBool, getSettingInt } from './db.js';
 import { getAccountSummary, getUnpaidInvoices, bustFinanceCache } from './finance.js';
 import { createPaymentPage, getTransaction, upayEnabled } from './upay.js';
 import * as tranzila from './tranzila.js';
@@ -28,6 +28,7 @@ export interface CardRow {
   confirmation_code: string | null;
   four_digits: string | null;
   provider: string | null;
+  payments_count: number | null;
   created_at: string;
   paid_at: string | null;
 }
@@ -49,6 +50,19 @@ export function activeCardProvider(): 'upay' | 'tranzila' | 'payplus' | null {
   if (upayEnabled()) return 'upay';
   if (payplus.payPlusEnabled()) return 'payplus';
   return null;
+}
+
+/** How many installments (תשלומים) to offer for this amount, or null for a single
+ *  payment. Reads settings fresh on every call (no caching) so an admin toggle takes
+ *  effect immediately: off unless `installments_enabled`, and only once the amount
+ *  clears `installments_min_amount` (default ₪1000); the count is `installments_max`
+ *  (default 4) clamped to PayPlus's supported [2,12] range. */
+export function installmentsFor(amount: number): number | null {
+  if (!getSettingBool('installments_enabled', false)) return null;
+  const min = getSettingInt('installments_min_amount', 1000);
+  if (!(amount >= min)) return null;
+  const max = getSettingInt('installments_max', 4);
+  return Math.min(12, Math.max(2, max));
 }
 
 /** Shared: open the active PSP's hosted page for an intent and persist the row. The
@@ -85,6 +99,7 @@ async function createPspIntent(opts: {
       failUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&fail=1`,
       cancelUrl: `${baseUrl}/api/payments/payplus/return?id=${id}&cancel=1`,
       notifyUrl: `${baseUrl}/api/payments/payplus/ipn?id=${id}`,
+      maxPayments: installmentsFor(opts.amount) ?? undefined,
     });
     db.prepare(
       `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, payplus_ref, paid_items)
@@ -449,9 +464,9 @@ export async function confirmCard(id: string, opts?: { throwOnQueryFailure?: boo
       // was marked failed/expired must still be recorded — money moved.
       db.prepare(
         `UPDATE card_payments SET status = 'paid', confirmation_code = ?, four_digits = ?, provider = 'payplus',
-           payplus_ref = COALESCE(?, payplus_ref), paid_at = datetime('now')
+           payplus_ref = COALESCE(?, payplus_ref), payments_count = ?, paid_at = datetime('now')
          WHERE id = ? AND status != 'paid'`
-      ).run(tx.confirmationCode, tx.fourDigits, tx.transactionUid, id);
+      ).run(tx.confirmationCode, tx.fourDigits, tx.transactionUid, tx.paymentsCount, id);
       bustFinanceCache(row.custname);
       return returnPaidCard(id);
     }

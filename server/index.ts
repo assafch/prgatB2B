@@ -1229,7 +1229,7 @@ app.get('/api/admin/card-payments', requireAdmin, (_req, res) => {
     payments: listAllCardPayments().map((c) => ({
       id: c.id, custname: c.custname, amount: c.amount, status: c.status, kind: c.kind,
       confirmationCode: c.confirmation_code, fourDigits: c.four_digits, provider: c.provider,
-      paidItems: parsePaidItems(c.paid_items),
+      paidItems: parsePaidItems(c.paid_items), paymentsCount: c.payments_count,
       createdAt: c.created_at, paidAt: c.paid_at,
     })),
   });

@@ -28,6 +28,7 @@ interface CardPayment {
   fourDigits: string | null;
   provider: string | null;
   paidItems: string[] | null;
+  paymentsCount: number | null;
   createdAt: string;
   paidAt: string | null;
 }
@@ -275,7 +276,7 @@ async function loadCreditTab(body: HTMLElement): Promise<void> {
           <span class="cred-icon">✓</span>
           <div class="promo-row-main">
             <div class="promo-row-name">${escapeHtml(p.custname)}</div>
-            <div class="promo-row-desc">${escapeHtml(p.provider || 'אשראי')} · ${escapeHtml(formatDateTime(p.paidAt || p.createdAt))}</div>
+            <div class="promo-row-desc">${escapeHtml(p.provider || 'אשראי')} · ${escapeHtml(formatDateTime(p.paidAt || p.createdAt))}${p.paymentsCount && p.paymentsCount > 1 ? ` · ב-${p.paymentsCount} תשלומים` : ''}</div>
           </div>
           <span class="money">${formatMoney(p.amount)}</span>
         </div>`
