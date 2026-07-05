@@ -246,10 +246,11 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
       const result = await api.post<{ ordname: string; orderId: number; needsPayment?: boolean; amount?: number }>('/api/orders', { details });
       await refreshCartCount();
       if (result.needsPayment) {
-        // Unified flow: continue straight into the chosen payment. Any failure in
-        // the pay step falls back to the interstitial (#order-pay) — the order is
-        // already safely recorded as pending_payment; nothing is lost.
-        if (unified && payMethod === 'card') {
+        // Unified flow: continue straight to the chosen payment method only when the
+        // picker was shown (payNow = true). Any failure in the pay step falls back to
+        // the interstitial (#order-pay) — the order is already safely recorded as
+        // pending_payment; nothing is lost.
+        if (payNow && payMethod === 'card') {
           msg.textContent = 'מעביר לעמוד תשלום מאובטח…';
           try {
             const r = await api.post<{ url: string }>(`/api/orders/${result.orderId}/pay/card`, {});
@@ -259,7 +260,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
           }
           return;
         }
-        if (unified && payMethod === 'check') {
+        if (payNow && payMethod === 'check') {
           location.hash = '#pay-check/' + result.orderId;
           return;
         }
