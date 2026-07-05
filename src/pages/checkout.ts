@@ -193,7 +193,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
              <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">לקוחות מזומן משלמים בעת ההזמנה — ההזמנה תישלח מיד עם אישור התשלום.</p>
              <div style="display:flex;gap:0.5rem">
                <button type="button" class="pay-method sel" data-method="card" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:var(--brand);color:#fff">💳 אשראי</button>
-               <button type="button" class="pay-method" data-method="check" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--border);border-radius:10px;background:#fff">📸 צ׳ק</button>
+               <button type="button" class="pay-method" data-method="check" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--border);border-radius:10px;background:#fff;color:var(--text)">📸 צ׳ק</button>
              </div>
            </div>`
         : ''
@@ -221,7 +221,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         const on = b === btn;
         b.classList.toggle('sel', on);
         b.style.background = on ? 'var(--brand)' : '#fff';
-        b.style.color = on ? '#fff' : 'inherit';
+        b.style.color = on ? '#fff' : 'var(--text)';
         b.style.borderColor = on ? 'var(--brand)' : 'var(--border)';
       });
       payMethod = (btn.dataset.method as 'card' | 'check') || 'card';
