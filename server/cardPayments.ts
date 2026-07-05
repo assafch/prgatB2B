@@ -180,6 +180,13 @@ const RECON_WINDOW = '-3 days';
 // over-pays the debt. Both charges are recorded 'paid' (confirmCard pays from any
 // non-paid status), so the office sees it at reconciliation and refunds via PayPlus.
 const PENDING_INTENT_TTL = '-2 hours';
+// Token (one-tap saved-card) charges settle almost immediately in practice — the
+// customer copy on a still-pending charge promises resolution "בדקות הקרובות" (in
+// the next few minutes). Sweeping them on the same 2-hour hosted-page TTL made that
+// promise false and left an in-flight token row deflating the payable cap for hours.
+// Hosted-page rows keep the 2-hour TTL (PayPlus pages are alive up to 30 min, plus
+// slack for a slow customer/redirect).
+const TOKEN_INTENT_TTL = '-5 minutes';
 export function unreconciledCardTotal(custname: string): number {
   const row = db
     .prepare(
@@ -199,8 +206,13 @@ export function unreconciledCardTotal(custname: string): number {
  *  as paid are marked 'expired'. */
 export async function expireStaleCardIntents(): Promise<number> {
   const stale = db
-    .prepare(`SELECT id FROM card_payments WHERE status = 'pending' AND created_at < datetime('now', ?)`)
-    .all(PENDING_INTENT_TTL) as { id: string }[];
+    .prepare(
+      `SELECT id FROM card_payments WHERE status = 'pending' AND (
+         (COALESCE(charge_source,'') = 'token' AND created_at < datetime('now', ?))
+         OR (COALESCE(charge_source,'') != 'token' AND created_at < datetime('now', ?))
+       )`
+    )
+    .all(TOKEN_INTENT_TTL, PENDING_INTENT_TTL) as { id: string }[];
   let expired = 0;
   for (const row of stale) {
     try {
@@ -416,8 +428,13 @@ export async function createCardOrderIntent(
 ): Promise<{ id: string; url: string; amount: number }> {
   const { amount, label } = deriveOrderCharge(userId, custname, orderId);
 
-  // Expire any stale not-yet-paid intents so only the newest will be live
-  db.prepare("UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending')").run(String(orderId));
+  // Expire any stale not-yet-paid intents so only the newest will be live. Token
+  // charges are excluded: an unconfirmed one-tap charge may have already moved money
+  // (chargeToken's own result is never trusted — see chargeSavedCard) and 'expired'
+  // rows are never re-confirmed, so flipping it here would risk an invisible double
+  // charge. It stays 'pending' until confirmCard settles it (paid/failed) or the
+  // expiry sweep does, after re-confirming with the PSP.
+  db.prepare("UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending') AND COALESCE(charge_source,'') != 'token'").run(String(orderId));
 
   let email = '';
   try {
@@ -653,8 +670,9 @@ export async function chargeSavedCard(
         kind = 'order_payment';
         // Expire any stale not-yet-paid intents for this order — same one-liner
         // createCardOrderIntent runs, so only the newest intent (this one) is live.
+        // Token charges are excluded — see the matching comment in createCardOrderIntent.
         db.prepare(
-          "UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending')"
+          "UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending') AND COALESCE(charge_source,'') != 'token'"
         ).run(String(orderId));
       } else if (mode.invoices !== undefined) {
         const derived = await deriveDebtCharge(custname, { invoices: mode.invoices });
