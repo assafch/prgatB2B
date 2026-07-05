@@ -214,8 +214,8 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     </div>
     ${maintenanceCard}
     ${bannerCard}
-    ${promoRail}
     ${pendingPayBanner}
+    ${promoRail}
     <div class="home-grid">
       ${tiles}
       ${debtCard}
