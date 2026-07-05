@@ -31,6 +31,19 @@ interface HomeData {
   priorityOk: boolean;
   paymentPolicy?: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
 }
+interface CheckoutPreview {
+  enabled: boolean;
+  subtotal: number;
+  discount: number;
+  total: number;
+  vatRate: number;
+  vatAmount: number;
+  payable: number;
+  requiresPayment: boolean;
+  kind: 'cash' | 'net' | null;
+  blocked: boolean;
+  blockedReason: 'open_debt' | null;
+}
 
 const HE_DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
 
@@ -62,10 +75,12 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
   shell.innerHTML = `<div class="card muted">טוען…</div>`;
   let cart: CartResp;
   let home: HomeData | null = null;
+  let preview: CheckoutPreview | null = null;
   try {
-    [cart, home] = await Promise.all([
+    [cart, home, preview] = await Promise.all([
       api.get<CartResp>('/api/cart'),
       api.get<HomeData>('/api/home').catch(() => null),
+      api.get<CheckoutPreview>('/api/checkout/preview').catch(() => null),
     ]);
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
@@ -81,6 +96,9 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     location.hash = '#cart';
     return;
   }
+
+  const unified = !!preview?.enabled;
+  const payNow = unified && !!preview!.requiresPayment;
 
   const dates = deliveryOptions();
 
@@ -126,16 +144,26 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         )
         .join('')}
       ${home?.features?.discountPricing ? '<p class="muted" style="font-size:0.78rem;margin:0.2rem 0 0.5rem">המחירים כוללים את ההנחה הקבועה שלך.</p>' : ''}
-      ${(cart.promotions?.applied || [])
-        .filter((a) => a.savings > 0)
-        .map(
-          (a) => `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:var(--ok);font-size:0.9rem">
-            <span>🏷️ ${escapeHtml(a.name)}</span><span dir="ltr">−${formatMoney(a.savings)}</span></div>`
-        )
-        .join('')}
-      <div style="display:flex;justify-content:space-between;margin-top:0.75rem;font-weight:900;font-size:1.2rem">
-        <span>סה״כ</span><span style="color:var(--brand)">${formatMoney(cart.promotions?.total ?? cart.total)}</span>
-      </div>
+      ${
+        unified
+          ? `${preview!.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;font-size:0.9rem"><span>סכום ביניים</span><span>${formatMoney(preview!.subtotal)}</span></div>` : ''}
+             ${(cart.promotions?.applied || [])
+               .filter((a) => a.savings > 0)
+               .map((a) => `<div style="display:flex;justify-content:space-between;margin-top:0.3rem;color:var(--ok);font-size:0.9rem"><span>🏷️ ${escapeHtml(a.name)}</span><span dir="ltr">−${formatMoney(a.savings)}</span></div>`)
+               .join('')}
+             <div style="display:flex;justify-content:space-between;margin-top:0.4rem;font-size:0.9rem"><span>מע״מ ${Math.round(preview!.vatRate * 100)}%</span><span>${formatMoney(preview!.vatAmount)}</span></div>
+             <div style="display:flex;justify-content:space-between;margin-top:0.6rem;font-weight:900;font-size:1.2rem"><span>לתשלום</span><span style="color:var(--brand)">${formatMoney(preview!.payable)}</span></div>`
+          : `${(cart.promotions?.applied || [])
+               .filter((a) => a.savings > 0)
+               .map(
+                 (a) => `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:var(--ok);font-size:0.9rem">
+                   <span>🏷️ ${escapeHtml(a.name)}</span><span dir="ltr">−${formatMoney(a.savings)}</span></div>`
+               )
+               .join('')}
+             <div style="display:flex;justify-content:space-between;margin-top:0.75rem;font-weight:900;font-size:1.2rem">
+               <span>סה״כ</span><span style="color:var(--brand)">${formatMoney(cart.promotions?.total ?? cart.total)}</span>
+             </div>`
+      }
     </div>
 
     ${debtBlock}
@@ -158,7 +186,22 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
       <textarea id="order-note" rows="2" placeholder="לדוגמה: לתאם טלפונית לפני הגעה"></textarea>
     </div>
 
-    <button id="submit" style="width:100%;padding:0.9rem;font-size:1.05rem;font-weight:700;margin-top:0.25rem">שלח הזמנה</button>
+    ${
+      payNow
+        ? `<div class="card">
+             <div style="font-weight:700;margin-bottom:0.35rem">אמצעי תשלום</div>
+             <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">לקוחות מזומן משלמים בעת ההזמנה — ההזמנה תישלח מיד עם אישור התשלום.</p>
+             <div style="display:flex;gap:0.5rem">
+               <button type="button" class="pay-method sel" data-method="card" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:var(--brand);color:#fff">💳 אשראי</button>
+               <button type="button" class="pay-method" data-method="check" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--border);border-radius:10px;background:#fff">📸 צ׳ק</button>
+             </div>
+           </div>`
+        : ''
+    }
+
+    <button id="submit" style="width:100%;padding:0.9rem;font-size:1.05rem;font-weight:700;margin-top:0.25rem">${
+      payNow ? `שלח ושלם ${formatMoney(preview!.payable)} ←` : 'שלח הזמנה'
+    }</button>
     <div id="msg" style="margin-top:0.5rem;text-align:center"></div>
   `;
 
@@ -171,11 +214,25 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     });
   });
 
+  let payMethod: 'card' | 'check' = 'card';
+  shell.querySelectorAll<HTMLButtonElement>('.pay-method').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      shell.querySelectorAll<HTMLButtonElement>('.pay-method').forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle('sel', on);
+        b.style.background = on ? 'var(--brand)' : '#fff';
+        b.style.color = on ? '#fff' : 'inherit';
+        b.style.borderColor = on ? 'var(--brand)' : 'var(--border)';
+      });
+      payMethod = (btn.dataset.method as 'card' | 'check') || 'card';
+    });
+  });
+
   const submitBtn = shell.querySelector('#submit') as HTMLButtonElement;
   const note = shell.querySelector('#order-note') as HTMLTextAreaElement;
   const msg = shell.querySelector('#msg') as HTMLDivElement;
 
-  if (home?.paymentPolicy?.blocksOnDebt) {
+  if (home?.paymentPolicy?.blocksOnDebt || preview?.blocked) {
     submitBtn.disabled = true;
     submitBtn.textContent = 'סגור חוב כדי להזמין';
   }
@@ -188,7 +245,27 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     try {
       const result = await api.post<{ ordname: string; orderId: number; needsPayment?: boolean; amount?: number }>('/api/orders', { details });
       await refreshCartCount();
-      if (result.needsPayment) { location.hash = '#order-pay/' + result.orderId; return; }
+      if (result.needsPayment) {
+        // Unified flow: continue straight into the chosen payment. Any failure in
+        // the pay step falls back to the interstitial (#order-pay) — the order is
+        // already safely recorded as pending_payment; nothing is lost.
+        if (unified && payMethod === 'card') {
+          msg.textContent = 'מעביר לעמוד תשלום מאובטח…';
+          try {
+            const r = await api.post<{ url: string }>(`/api/orders/${result.orderId}/pay/card`, {});
+            window.location.href = r.url;
+          } catch {
+            location.hash = '#order-pay/' + result.orderId;
+          }
+          return;
+        }
+        if (unified && payMethod === 'check') {
+          location.hash = '#pay-check/' + result.orderId;
+          return;
+        }
+        location.hash = '#order-pay/' + result.orderId;
+        return;
+      }
       shell.innerHTML = `
         <div class="empty-state">
           <div class="es-icon">✅</div>
