@@ -14,10 +14,18 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
   let debt = 0;
   let enabled = false;
   let items: OpenInvoice[] = [];
+  let savedCards = false;
+  let installments: { min: number; max: number } | null = null;
   try {
-    const d = await api.get<{ balance: { openTotal: number }; balanceOk: boolean; features: { payments: boolean } }>('/api/home');
+    const d = await api.get<{
+      balance: { openTotal: number };
+      balanceOk: boolean;
+      features: { payments: boolean; savedCards?: boolean; installments?: { min: number; max: number } | null };
+    }>('/api/home');
     debt = d.balanceOk ? d.balance.openTotal : 0;
     enabled = !!d.features?.payments;
+    savedCards = !!d.features?.savedCards;
+    installments = d.features?.installments ?? null;
   } catch {
     /* ignore — show generic */
   }
@@ -47,6 +55,13 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
   }
 
   const secureNote = `<p class="muted" style="font-size:0.78rem;margin-top:0.6rem">התשלום מתבצע בעמוד תשלום מאובטח (תקן PCI-DSS). פרטי הכרטיס אינם נשמרים אצלנו.</p>`;
+  const saveCardBlock = savedCards
+    ? `<label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.6rem;font-size:0.9rem;cursor:pointer"><input type="checkbox" id="save-card" style="width:1.05rem;height:1.05rem"> 💾 שמור את הכרטיס לתשלומים הבאים</label>`
+    : '';
+  const installmentsNote =
+    installments && debt >= installments.min
+      ? `<p class="muted" style="font-size:0.8rem;margin-top:0.5rem">אפשר לחלק עד ${installments.max} תשלומים בעמוד התשלום</p>`
+      : '';
 
   // No itemized invoices (rare) — pay the whole open balance in one button.
   if (!items.length) {
@@ -55,6 +70,8 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
         <h1 style="margin-top:0">תשלום בכרטיס אשראי</h1>
         <div class="muted">יתרת החוב לתשלום</div>
         <div style="font-size:2rem;font-weight:800;color:var(--brand);margin:0.4rem 0">${formatMoney(debt)}</div>
+        ${saveCardBlock}
+        ${installmentsNote}
         <button id="pc-go" style="width:100%;padding:0.8rem;font-weight:700">לתשלום מאובטח ←</button>
         <div id="pc-msg" style="margin-top:0.5rem"></div>
         ${secureNote}
@@ -92,6 +109,8 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
         <span id="pc-total" style="color:var(--brand)">${formatMoney(debt)}</span>
       </div>
       <div id="pc-cap-note" class="muted" style="font-size:0.8rem;margin-top:0.2rem"></div>
+      ${saveCardBlock}
+      ${installmentsNote}
       <button id="pc-go" style="width:100%;padding:0.8rem;font-weight:700;margin-top:0.6rem">לתשלום מאובטח ←</button>
       <div id="pc-msg" style="margin-top:0.5rem"></div>
       ${secureNote}
@@ -137,7 +156,8 @@ function wirePay(shell: HTMLElement, getInvoices: () => string[]): void {
     msg.textContent = 'מעביר לעמוד התשלום…';
     msg.className = 'muted';
     try {
-      const r = await api.post<{ id: string; url: string }>('/api/payments/card/create', { invoices: getInvoices() });
+      const saveCard = !!(shell.querySelector('#save-card') as HTMLInputElement | null)?.checked;
+      const r = await api.post<{ id: string; url: string }>('/api/payments/card/create', { invoices: getInvoices(), saveCard });
       window.location.href = r.url; // PSP hosted page
     } catch (ex) {
       msg.textContent = ex instanceof Error ? ex.message : String(ex);

@@ -5,6 +5,8 @@ import { getCart } from './orders.js';
 import { enforcedFor, evaluate } from './paymentPolicy.js';
 import { vatBreakdown } from './money.js';
 import { getSettingBool } from './db.js';
+import { installmentsRange } from './cardPayments.js';
+import { tokenVaultReady } from './tokenVault.js';
 
 export interface CheckoutPreview {
   enabled: boolean; // unified_checkout_enabled flag — client renders new UI only when true
@@ -18,6 +20,10 @@ export interface CheckoutPreview {
   kind: 'cash' | 'net' | null; // null when policy not enforced for this customer
   blocked: boolean; // net-terms open-debt block (mirrors decide())
   blockedReason: 'open_debt' | null;
+  /** saved-card one-tap reuse: flag on AND the token vault has a key configured */
+  savedCards: boolean;
+  /** installments window; non-null only when the feature is on AND payable ≥ min */
+  installments: { min: number; max: number } | null;
 }
 
 export async function buildCheckoutPreview(userId: number, custname: string): Promise<CheckoutPreview> {
@@ -28,13 +34,17 @@ export async function buildCheckoutPreview(userId: number, custname: string): Pr
     discount: promotions.discount,
     total: promotions.total,
     ...vatBreakdown(promotions.total),
+    savedCards: getSettingBool('saved_cards_enabled', false) && tokenVaultReady(),
   };
+  const instRange = installmentsRange();
+  const installments = instRange && base.payable >= instRange.min ? instRange : null;
   if (!enforcedFor(custname)) {
-    return { ...base, requiresPayment: false, kind: null, blocked: false, blockedReason: null };
+    return { ...base, installments, requiresPayment: false, kind: null, blocked: false, blockedReason: null };
   }
   const d = await evaluate(custname, promotions.total);
   return {
     ...base,
+    installments,
     requiresPayment: d.requiresPayment,
     kind: d.kind,
     blocked: !d.allowOrder,

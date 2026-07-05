@@ -83,11 +83,13 @@ export async function renderAccount(shell: HTMLElement): Promise<void> {
       <div id="passkey-card"></div>
       <div id="push-card"></div>
       <div id="mobile-card"></div>
+      <div id="paycard-card"></div>
       <div id="staff-card"></div>
     `;
     renderPasskeys(shell.querySelector('#passkey-card') as HTMLElement);
     void renderPush(shell.querySelector('#push-card') as HTMLElement);
     renderMobile(shell.querySelector('#mobile-card') as HTMLElement, a.phone);
+    if (isOwner) void renderPaymentMethod(shell.querySelector('#paycard-card') as HTMLElement);
     if (isOwner) void renderStaff(shell.querySelector('#staff-card') as HTMLElement);
   } catch (ex) {
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
@@ -177,6 +179,61 @@ async function renderPush(host: HTMLElement): Promise<void> {
       btn.disabled = false;
     }
   };
+}
+
+interface SavedCard {
+  id: string;
+  brand: string | null;
+  fourDigits: string | null;
+  expiryMonth: string | null;
+  expiryYear: string | null;
+}
+
+// Saved card (PayPlus token) — consent management. Fetched unconditionally so a card
+// stays deletable even after the saved_cards_enabled flag is turned off (consent
+// revocation must always work); the section itself is hidden when there's no card
+// AND the flag is off, so there's zero visual change for customers who never opted in.
+async function renderPaymentMethod(host: HTMLElement): Promise<void> {
+  let card: SavedCard | null = null;
+  let savedCardsEnabled = false;
+  try {
+    const [cardResp, home] = await Promise.all([
+      api.get<{ card: SavedCard | null }>('/api/payments/saved-card'),
+      api.get<{ features?: { savedCards?: boolean } }>('/api/home').catch(() => null),
+    ]);
+    card = cardResp.card;
+    savedCardsEnabled = !!home?.features?.savedCards;
+  } catch {
+    return; // 403 (non-owner) or vault unavailable — hide silently
+  }
+  if (!card && !savedCardsEnabled) return;
+
+  const draw = () => {
+    host.innerHTML = `
+      <div class="card" style="max-width:720px;margin:1rem auto 0">
+        <h2 style="margin-top:0">אמצעי תשלום</h2>
+        ${
+          card
+            ? `<div class="dash-row" style="padding:0.5rem 0">
+                 <div class="grow">💳 ${escapeHtml(card.brand || 'כרטיס')} •• ${escapeHtml(card.fourDigits || '')} · בתוקף עד ${escapeHtml(String(card.expiryMonth || '').padStart(2, '0'))}/${escapeHtml(card.expiryYear || '')}</div>
+                 <button class="ghost" id="card-del">הסר כרטיס</button>
+               </div>`
+            : `<p class="muted">בתשלום הבא באשראי תוכלו לסמן "שמור את הכרטיס"</p>`
+        }
+      </div>`;
+    host.querySelector('#card-del')?.addEventListener('click', async () => {
+      if (!(await confirmDialog('להסיר את הכרטיס השמור?', 'הסר', 'ביטול'))) return;
+      await api.del('/api/payments/saved-card');
+      toast('הכרטיס הוסר', 'ok');
+      card = null;
+      if (!savedCardsEnabled) {
+        host.innerHTML = ''; // flag already off — nothing left to manage, revert to zero-visual-change
+        return;
+      }
+      draw();
+    });
+  };
+  draw();
 }
 
 interface Staff { id: number; username: string; status: string; created_at: string; last_login_at: string | null }

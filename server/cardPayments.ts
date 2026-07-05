@@ -68,6 +68,18 @@ export function installmentsFor(amount: number): number | null {
   return Math.min(12, Math.max(2, max));
 }
 
+/** Installments window (min amount + max count) for display purposes — independent of
+ *  any specific cart/payable amount (unlike installmentsFor). Used by /api/home and the
+ *  checkout preview so the client can show "up to N payments" before an amount is known
+ *  to be eligible. Same settings/defaults/clamp as installmentsFor; null when the
+ *  feature flag is off. */
+export function installmentsRange(): { min: number; max: number } | null {
+  if (!getSettingBool('installments_enabled', false)) return null;
+  const min = getSettingInt('installments_min_amount', 1000);
+  const max = getSettingInt('installments_max', 4);
+  return { min, max: Math.min(12, Math.max(2, max)) };
+}
+
 /** Shared: open the active PSP's hosted page for an intent and persist the row. The
  *  caller has already derived the authoritative amount + label (+ optional itemized
  *  lines). `kind` distinguishes a whole-invoice/balance pay ('debt') from a partial

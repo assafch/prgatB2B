@@ -9,6 +9,8 @@ import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
 import { activePromotions } from './promotions.js';
 import { getProduct } from './catalog.js';
 import { resolvePolicy, enforcedFor, pendingSettlement } from './paymentPolicy.js';
+import { installmentsRange } from './cardPayments.js';
+import { tokenVaultReady } from './tokenVault.js';
 
 export interface LastOrderView {
   id: number;
@@ -40,7 +42,16 @@ export interface HomeData {
   suggestions: ReorderSuggestion[];
   promotions: HomePromo[];
   /** server-owned feature flags so the client never shows dead CTAs */
-  features: { payments: boolean; checkPayment: boolean; discountPricing: boolean; unifiedCheckout: boolean };
+  features: {
+    payments: boolean;
+    checkPayment: boolean;
+    discountPricing: boolean;
+    unifiedCheckout: boolean;
+    /** saved-card one-tap reuse: flag on AND the token vault has a key configured */
+    savedCards: boolean;
+    /** installments window for display; null when the feature flag is off */
+    installments: { min: number; max: number } | null;
+  };
   /** admin-controlled customer announcement (plain text, rendered escaped) */
   banner: { text: string } | null;
   /** admin-controlled maintenance mode — client blocks ordering + shows a notice */
@@ -146,6 +157,8 @@ export async function getHomeData(
       checkPayment: getSettingBool('check_payment_enabled', true),
       discountPricing: getSettingBool('discount_pricing_enabled', false),
       unifiedCheckout: getSettingBool('unified_checkout_enabled', false),
+      savedCards: getSettingBool('saved_cards_enabled', false) && tokenVaultReady(),
+      installments: installmentsRange(),
     },
     banner: getSettingBool('announcement_enabled', false)
       ? { text: getSetting('announcement_text') || '' }

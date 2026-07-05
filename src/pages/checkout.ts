@@ -43,6 +43,8 @@ interface CheckoutPreview {
   kind: 'cash' | 'net' | null;
   blocked: boolean;
   blockedReason: 'open_debt' | null;
+  savedCards: boolean;
+  installments: { min: number; max: number } | null;
 }
 
 const HE_DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
@@ -195,6 +197,16 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
                <button type="button" class="pay-method sel" data-method="card" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:var(--brand);color:#fff">💳 אשראי</button>
                <button type="button" class="pay-method" data-method="check" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--border);border-radius:10px;background:#fff;color:var(--text)">📸 צ׳ק</button>
              </div>
+             ${
+               preview!.savedCards
+                 ? `<label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.6rem;font-size:0.9rem;cursor:pointer"><input type="checkbox" id="save-card" style="width:1.05rem;height:1.05rem"> 💾 שמור את הכרטיס לתשלומים הבאים</label>`
+                 : ''
+             }
+             ${
+               preview!.installments
+                 ? `<p class="muted" style="font-size:0.8rem;margin-top:0.5rem">אפשר לחלק עד ${preview!.installments.max} תשלומים בעמוד התשלום</p>`
+                 : ''
+             }
            </div>`
         : ''
     }
@@ -253,7 +265,8 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         if (payNow && payMethod === 'card') {
           msg.textContent = 'מעביר לעמוד תשלום מאובטח…';
           try {
-            const r = await api.post<{ url: string }>(`/api/orders/${result.orderId}/pay/card`, {});
+            const saveCard = !!(shell.querySelector('#save-card') as HTMLInputElement | null)?.checked;
+            const r = await api.post<{ url: string }>(`/api/orders/${result.orderId}/pay/card`, { saveCard });
             window.location.href = r.url;
           } catch {
             location.hash = '#order-pay/' + result.orderId;
