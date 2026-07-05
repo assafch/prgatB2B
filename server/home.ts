@@ -49,6 +49,8 @@ export interface HomeData {
     unifiedCheckout: boolean;
     /** saved-card one-tap reuse: flag on AND the token vault has a key configured */
     savedCards: boolean;
+    /** saved-card one-tap CHARGE (Phase 2): separate flag, gates the /charge-saved endpoint */
+    savedCardCharge: boolean;
     /** installments window for display; null when the feature flag is off */
     installments: { min: number; max: number } | null;
   };
@@ -158,6 +160,7 @@ export async function getHomeData(
       discountPricing: getSettingBool('discount_pricing_enabled', false),
       unifiedCheckout: getSettingBool('unified_checkout_enabled', false),
       savedCards: getSettingBool('saved_cards_enabled', false) && tokenVaultReady(),
+      savedCardCharge: getSettingBool('saved_card_charge_enabled', false),
       installments: installmentsRange(),
     },
     banner: getSettingBool('announcement_enabled', false)

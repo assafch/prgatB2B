@@ -6,6 +6,13 @@ interface OpenInvoice {
   amount: number;
   date: string | null;
 }
+interface SavedCardInfo {
+  id: string;
+  brand: string | null;
+  fourDigits: string | null;
+  expiryMonth: string | null;
+  expiryYear: string | null;
+}
 
 // Pay open invoices by credit card via the PSP hosted page. The customer picks which
 // invoices to settle (default all); the server re-derives the amount from the selection.
@@ -16,16 +23,26 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
   let items: OpenInvoice[] = [];
   let savedCards = false;
   let installments: { min: number; max: number } | null = null;
+  let savedCard: SavedCardInfo | null = null;
   try {
     const d = await api.get<{
       balance: { openTotal: number };
       balanceOk: boolean;
-      features: { payments: boolean; savedCards?: boolean; installments?: { min: number; max: number } | null };
+      features: { payments: boolean; savedCards?: boolean; savedCardCharge?: boolean; installments?: { min: number; max: number } | null };
     }>('/api/home');
     debt = d.balanceOk ? d.balance.openTotal : 0;
     enabled = !!d.features?.payments;
     savedCards = !!d.features?.savedCards;
     installments = d.features?.installments ?? null;
+    // One-tap saved-card charge: fetch the card only when the flag is on.
+    if (d.features?.savedCardCharge) {
+      try {
+        const r = await api.get<{ card: SavedCardInfo | null }>('/api/payments/saved-card');
+        savedCard = r.card;
+      } catch {
+        /* non-owner or vault unavailable — fall back to the hosted flow */
+      }
+    }
   } catch {
     /* ignore — show generic */
   }
@@ -63,6 +80,10 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
       ? `<p class="muted" style="font-size:0.8rem;margin-top:0.5rem">אפשר לחלק עד ${installments.max} תשלומים בעמוד התשלום</p>`
       : '';
 
+  const savedCardBlockHtml = savedCard
+    ? `<button type="button" id="pc-saved" style="width:100%;padding:0.8rem;font-weight:700;margin-bottom:0.6rem;background:var(--brand);color:#fff;border:none;border-radius:10px">שלם ב${escapeHtml(savedCard.brand)} ••${escapeHtml(savedCard.fourDigits)}</button>`
+    : '';
+
   // No itemized invoices (rare) — pay the whole open balance in one button.
   if (!items.length) {
     shell.innerHTML = `
@@ -70,6 +91,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
         <h1 style="margin-top:0">תשלום בכרטיס אשראי</h1>
         <div class="muted">יתרת החוב לתשלום</div>
         <div style="font-size:2rem;font-weight:800;color:var(--brand);margin:0.4rem 0">${formatMoney(debt)}</div>
+        ${savedCardBlockHtml}
         ${saveCardBlock}
         ${installmentsNote}
         <button id="pc-go" style="width:100%;padding:0.8rem;font-weight:700">לתשלום מאובטח ←</button>
@@ -78,6 +100,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
         <div style="margin-top:0.5rem"><a href="#home">ביטול</a></div>
       </div>`;
     wirePay(shell, () => []);
+    if (savedCard) wireSavedPay(shell, () => []);
     return;
   }
 
@@ -99,6 +122,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
     <div class="card">
       <h1 style="margin-top:0;text-align:center">תשלום בכרטיס אשראי</h1>
       <div class="muted" style="text-align:center">בחרו את החשבוניות לתשלום</div>
+      ${savedCardBlockHtml}
       <label style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.2rem;margin-top:0.5rem;font-weight:600;cursor:pointer">
         <input type="checkbox" id="pc-all" checked style="width:1.15rem;height:1.15rem">
         <span>בחר הכל (${items.length} חשבוניות)</span>
@@ -122,6 +146,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
   const totalEl = shell.querySelector('#pc-total') as HTMLElement;
   const capNote = shell.querySelector('#pc-cap-note') as HTMLElement | null;
   const btn = shell.querySelector('#pc-go') as HTMLButtonElement;
+  const savedBtn = shell.querySelector('#pc-saved') as HTMLButtonElement | null;
   const recalc = () => {
     const checked = cbs.filter((c) => c.checked);
     const sum = checked.reduce((s, c) => s + Number(c.dataset.amount || 0), 0);
@@ -137,6 +162,7 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
     all.indeterminate = checked.length > 0 && checked.length < cbs.length;
     btn.disabled = checked.length === 0;
     btn.textContent = checked.length ? `לתשלום מאובטח ${formatMoney(total)} ←` : 'בחרו חשבונית לתשלום';
+    if (savedBtn) savedBtn.disabled = checked.length === 0;
   };
   cbs.forEach((c) => (c.onchange = recalc));
   all.onchange = () => {
@@ -144,7 +170,9 @@ export async function renderPayCard(shell: HTMLElement): Promise<void> {
     recalc();
   };
   recalc();
-  wirePay(shell, () => cbs.filter((c) => c.checked).map((c) => c.dataset.ivnum || ''));
+  const getInvoices = () => cbs.filter((c) => c.checked).map((c) => c.dataset.ivnum || '');
+  wirePay(shell, getInvoices);
+  if (savedCard) wireSavedPay(shell, getInvoices);
 }
 
 // Wire the pay button: POST the selected invoice numbers, then redirect to the PSP page.
@@ -165,6 +193,45 @@ function wirePay(shell: HTMLElement, getInvoices: () => string[]): void {
       btn.disabled = false;
     }
   };
+}
+
+// Wire the one-tap saved-card button: charges the selected invoices directly (no hosted
+// page). Success renders the same paid empty-state as the hosted return page; a decline
+// falls back to a toast, leaving the hosted "לתשלום מאובטח" button in place; a
+// still-processing charge replaces the card with a waiting message (never a retry).
+function wireSavedPay(shell: HTMLElement, getInvoices: () => string[]): void {
+  const btn = shell.querySelector('#pc-saved') as HTMLButtonElement | null;
+  if (!btn) return;
+  const msg = shell.querySelector('#pc-msg') as HTMLDivElement;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    msg.textContent = 'מחייב את הכרטיס השמור…';
+    msg.className = 'muted';
+    try {
+      const r = await api.post<{ id: string; status: string; amount: number }>('/api/payments/card/charge-saved', { invoices: getInvoices() });
+      shell.innerHTML = `
+        <div class="empty-state">
+          <div class="es-icon">✅</div>
+          <div class="es-title">התשלום בוצע</div>
+          <div class="es-sub">שולם ${formatMoney(r.amount)} בכרטיס אשראי.</div>
+          <a class="es-cta" href="#home">חזרה לדף הבית</a>
+        </div>`;
+    } catch (ex) {
+      const msgText = ex instanceof Error ? ex.message : String(ex);
+      if (msgText.includes('בעיבוד')) {
+        shell.innerHTML = `
+          <div class="card" style="text-align:center">
+            <div class="es-icon">⏳</div>
+            <div style="font-weight:700">${escapeHtml(msgText)}</div>
+            <a class="es-cta" href="#home" style="display:inline-block;margin-top:0.75rem">חזרה לדף הבית</a>
+          </div>`;
+        return;
+      }
+      msg.textContent = msgText;
+      msg.className = 'error';
+      btn.disabled = false;
+    }
+  });
 }
 
 export function renderPayCardReturn(shell: HTMLElement, id: string): void {

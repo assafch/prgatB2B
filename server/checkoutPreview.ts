@@ -22,6 +22,8 @@ export interface CheckoutPreview {
   blockedReason: 'open_debt' | null;
   /** saved-card one-tap reuse: flag on AND the token vault has a key configured */
   savedCards: boolean;
+  /** saved-card one-tap CHARGE (Phase 2): separate flag, gates the /charge-saved endpoint */
+  savedCardCharge: boolean;
   /** installments window; non-null only when the feature is on AND payable ≥ min */
   installments: { min: number; max: number } | null;
 }
@@ -35,6 +37,7 @@ export async function buildCheckoutPreview(userId: number, custname: string): Pr
     total: promotions.total,
     ...vatBreakdown(promotions.total),
     savedCards: getSettingBool('saved_cards_enabled', false) && tokenVaultReady(),
+    savedCardCharge: getSettingBool('saved_card_charge_enabled', false),
   };
   const instRange = installmentsRange();
   const installments = instRange && base.payable >= instRange.min ? instRange : null;

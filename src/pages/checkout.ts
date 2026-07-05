@@ -26,7 +26,7 @@ interface CartResp {
   unifiedCheckout?: boolean;
 }
 interface HomeData {
-  features: { payments: boolean; discountPricing?: boolean };
+  features: { payments: boolean; discountPricing?: boolean; savedCardCharge?: boolean };
   balance: { obligo: number | null; creditLimit: number | null };
   priorityOk: boolean;
   paymentPolicy?: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
@@ -44,7 +44,15 @@ interface CheckoutPreview {
   blocked: boolean;
   blockedReason: 'open_debt' | null;
   savedCards: boolean;
+  savedCardCharge: boolean;
   installments: { min: number; max: number } | null;
+}
+interface SavedCardInfo {
+  id: string;
+  brand: string | null;
+  fourDigits: string | null;
+  expiryMonth: string | null;
+  expiryYear: string | null;
 }
 
 const HE_DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
@@ -101,6 +109,19 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
 
   const unified = !!preview?.enabled;
   const payNow = unified && !!preview!.requiresPayment;
+
+  // One-tap saved-card charge: fetch the card only when the flag is on, so a customer
+  // who never opted in (or the office hasn't enabled the feature) never pays the
+  // extra round-trip.
+  let savedCard: SavedCardInfo | null = null;
+  if (payNow && preview!.savedCardCharge) {
+    try {
+      const r = await api.get<{ card: SavedCardInfo | null }>('/api/payments/saved-card');
+      savedCard = r.card;
+    } catch {
+      /* non-owner or vault unavailable — fall back to the method picker */
+    }
+  }
 
   const dates = deliveryOptions();
 
@@ -193,6 +214,11 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         ? `<div class="card">
              <div style="font-weight:700;margin-bottom:0.35rem">אמצעי תשלום</div>
              <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">לקוחות מזומן משלמים בעת ההזמנה — ההזמנה תישלח מיד עם אישור התשלום.</p>
+             ${
+               savedCard
+                 ? `<button type="button" class="pay-method" data-method="saved" style="width:100%;padding:0.75rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:#fff;color:var(--text);margin-bottom:0.6rem">שלם ב${escapeHtml(savedCard.brand)} ••${escapeHtml(savedCard.fourDigits)} · ${formatMoney(preview!.payable)}</button>`
+                 : ''
+             }
              <div style="display:flex;gap:0.5rem">
                <button type="button" class="pay-method sel" data-method="card" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:var(--brand);color:#fff">💳 אשראי</button>
                <button type="button" class="pay-method" data-method="check" style="flex:1;padding:0.7rem;font-weight:700;border:2px solid var(--border);border-radius:10px;background:#fff;color:var(--text)">📸 צ׳ק</button>
@@ -226,7 +252,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     });
   });
 
-  let payMethod: 'card' | 'check' = 'card';
+  let payMethod: 'card' | 'check' | 'saved' = 'card';
   shell.querySelectorAll<HTMLButtonElement>('.pay-method').forEach((btn) => {
     btn.addEventListener('click', () => {
       shell.querySelectorAll<HTMLButtonElement>('.pay-method').forEach((b) => {
@@ -236,7 +262,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         b.style.color = on ? '#fff' : 'var(--text)';
         b.style.borderColor = on ? 'var(--brand)' : 'var(--border)';
       });
-      payMethod = (btn.dataset.method as 'card' | 'check') || 'card';
+      payMethod = (btn.dataset.method as 'card' | 'check' | 'saved') || 'card';
     });
   });
 
@@ -262,6 +288,35 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         // picker was shown (payNow = true). Any failure in the pay step falls back to
         // the interstitial (#order-pay) — the order is already safely recorded as
         // pending_payment; nothing is lost.
+        if (payNow && payMethod === 'saved') {
+          msg.textContent = 'מחייב את הכרטיס השמור…';
+          try {
+            const chargeResult = await api.post<{ id: string; status: string; amount: number }>('/api/payments/card/charge-saved', { orderId: result.orderId });
+            shell.innerHTML = `
+              <div class="empty-state">
+                <div class="es-icon">✅</div>
+                <div class="es-title">התשלום בוצע — ההזמנה אושרה ותישלח</div>
+                <div class="es-sub">שולם ${formatMoney(chargeResult.amount)} בכרטיס אשראי.<br/>מספר הזמנה מקומי: <b>${result.orderId}</b></div>
+                <a class="es-cta" href="#orders">להזמנות שלי</a>
+              </div>`;
+          } catch (ex) {
+            const chargeMsg = ex instanceof Error ? ex.message : String(ex);
+            if (chargeMsg.includes('בעיבוד')) {
+              // Processing, not declined — never reveal a retry path for the same charge.
+              shell.innerHTML = `
+                <div class="card" style="text-align:center">
+                  <div class="es-icon">⏳</div>
+                  <div style="font-weight:700">התשלום בעיבוד — ההזמנה תאושר אוטומטית עם אישור התשלום</div>
+                  <a class="es-cta" href="#orders" style="display:inline-block;margin-top:0.75rem">להזמנות שלי</a>
+                </div>`;
+            } else {
+              // Decline (or generic 400/404/503) — the order is safely pending_payment;
+              // send the customer to the interstitial, which offers the hosted card page + cheque.
+              location.hash = '#order-pay/' + result.orderId;
+            }
+          }
+          return;
+        }
         if (payNow && payMethod === 'card') {
           msg.textContent = 'מעביר לעמוד תשלום מאובטח…';
           try {
