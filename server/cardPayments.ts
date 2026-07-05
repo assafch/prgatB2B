@@ -586,6 +586,13 @@ export async function confirmCard(id: string, opts?: { throwOnQueryFailure?: boo
   return row;
 }
 
+// Single-process in-flight guard for one-tap saved-card charges: a double-tap must
+// not fire two chargeToken calls before either row is paid. Sound only because the
+// server runs as a single process (no cross-instance coordination) — paired below
+// with a DB-level guard that also covers a very-recent request from just before a
+// restart, which this in-memory set can't see.
+const chargeLocks = new Set<number>();
+
 export function listAllCardPayments(): CardRow[] {
   return db
     .prepare(`SELECT * FROM card_payments WHERE status != 'created' ORDER BY created_at DESC LIMIT 500`)
@@ -611,71 +618,110 @@ export async function chargeSavedCard(
   // load-time cycle; a static import of OrderError here would re-trigger it.
   const { OrderError } = await import('./orders.js');
 
-  const card = getSavedCardToken(userId);
-  if (!card) throw new OrderError('אין כרטיס שמור');
-  const token = decryptToken(card.token);
-  if (!token) throw new OrderError('כרטיס שמור אינו זמין כרגע'); // vault key missing/corrupt — no charge attempted
-
-  let amount: number;
-  let kind: string;
-  let orderId: number | undefined;
-  let paidItemsJson: string | null = null;
-
+  // In-flight guard (a): a double-tap must not fire two chargeToken calls before
+  // either row is paid. See chargeLocks' definition above for why this is sound.
+  if (chargeLocks.has(userId)) {
+    throw new OrderError('תשלום קודם עדיין בעיבוד — המתינו רגע');
+  }
+  chargeLocks.add(userId);
   try {
-    if (mode.orderId != null) {
-      orderId = Number(mode.orderId);
-      const derived = deriveOrderCharge(userId, custname, orderId);
-      amount = derived.amount;
-      kind = 'order_payment';
-    } else if (mode.invoices !== undefined) {
-      const derived = await deriveDebtCharge(custname, { invoices: mode.invoices });
-      amount = derived.amount;
-      paidItemsJson = derived.paidItems.length ? JSON.stringify(derived.paidItems) : null;
-      kind = 'debt';
-    } else if (mode.amount != null) {
-      const derived = await derivePartialCharge(custname, mode.amount);
-      amount = derived.amount;
-      kind = 'debt_partial';
-    } else {
-      throw new OrderError('בקשת תשלום שגויה');
+    const card = getSavedCardToken(userId);
+    if (!card) throw new OrderError('אין כרטיס שמור');
+    const token = decryptToken(card.token);
+    if (!token) throw new OrderError('כרטיס שמור אינו זמין כרגע'); // vault key missing/corrupt — no charge attempted
+
+    // In-flight guard (b): a DB-level check for the same race, covering a gap the
+    // in-memory lock above can't (e.g. a request from just before a process restart).
+    const inFlight = db
+      .prepare(
+        `SELECT id FROM card_payments WHERE user_id = ? AND charge_source = 'token' AND status = 'pending'
+           AND created_at >= datetime('now','-2 minutes') LIMIT 1`
+      )
+      .get(userId);
+    if (inFlight) throw new OrderError('תשלום קודם עדיין בעיבוד — המתינו רגע');
+
+    let amount: number;
+    let kind: string;
+    let orderId: number | undefined;
+    let paidItemsJson: string | null = null;
+
+    try {
+      if (mode.orderId != null) {
+        orderId = Number(mode.orderId);
+        const derived = deriveOrderCharge(userId, custname, orderId);
+        amount = derived.amount;
+        kind = 'order_payment';
+        // Expire any stale not-yet-paid intents for this order — same one-liner
+        // createCardOrderIntent runs, so only the newest intent (this one) is live.
+        db.prepare(
+          "UPDATE card_payments SET status='expired' WHERE order_id = ? AND kind='order_payment' AND status IN ('created','pending')"
+        ).run(String(orderId));
+      } else if (mode.invoices !== undefined) {
+        const derived = await deriveDebtCharge(custname, { invoices: mode.invoices });
+        amount = derived.amount;
+        paidItemsJson = derived.paidItems.length ? JSON.stringify(derived.paidItems) : null;
+        kind = 'debt';
+      } else if (mode.amount != null) {
+        const derived = await derivePartialCharge(custname, mode.amount);
+        amount = derived.amount;
+        kind = 'debt_partial';
+      } else {
+        throw new OrderError('בקשת תשלום שגויה');
+      }
+    } catch (err) {
+      // The derivation helpers throw plain Error (same as the hosted creators) — surface
+      // the same customer-safe message here via OrderError so the route can 402 it.
+      if (err instanceof OrderError) throw err;
+      throw new OrderError(err instanceof Error ? err.message : 'שגיאה בבדיקת סכום התשלום');
     }
-  } catch (err) {
-    // The derivation helpers throw plain Error (same as the hosted creators) — surface
-    // the same customer-safe message here via OrderError so the route can 402 it.
-    if (err instanceof OrderError) throw err;
-    throw new OrderError(err instanceof Error ? err.message : 'שגיאה בבדיקת סכום התשלום');
+
+    const id = crypto.randomBytes(12).toString('hex');
+    db.prepare(
+      `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, paid_items, save_card, charge_source, order_id)
+       VALUES (?, ?, ?, ?, ?, 'pending', 'payplus', ?, 0, 'token', ?)`
+    ).run(id, userId, custname, kind, amount, paidItemsJson, orderId != null ? String(orderId) : null);
+
+    try {
+      await payplus.chargeToken({
+        token,
+        amount,
+        ref: id,
+        customerName: custname,
+        // No installments here on purpose: one-tap is a single charge — the customer
+        // never chose a split, and the payments sub-shape hasn't been verified against
+        // staging for the token-charge path. Installments stay available on the hosted
+        // page; revisit once staging-verified and there's explicit UX to choose a split.
+      });
+    } catch (err) {
+      // chargeToken's own throw/result is NOT authoritative — it can throw AFTER PayPlus
+      // already processed the charge (e.g. a timeout reading the response), so we must
+      // NOT mark this row failed here. Swallow it and let the confirmCard re-query below
+      // decide; if it can't get an authoritative answer either, the row stays 'pending'
+      // for the expiry sweep to settle later (see the fallthrough below).
+      console.warn('[card] chargeToken threw for saved-card charge', id, err instanceof Error ? err.message : err);
+    }
+
+    const confirmed = await confirmCard(id);
+
+    if (confirmed && confirmed.status === 'paid') {
+      db.prepare(`UPDATE saved_cards SET last_used_at = datetime('now') WHERE user_id = ?`).run(userId);
+      return { id, status: 'paid', amount: confirmed.amount };
+    }
+
+    if (confirmed && confirmed.status === 'failed') {
+      // confirmCard's own authoritative decline (refFound && !paid) already set this —
+      // do not stomp it again here.
+      throw new OrderError('החיוב נדחה — נסו בעמוד התשלום');
+    }
+
+    // Still 'pending': no authoritative answer yet (chargeToken threw, or the PSP
+    // query itself failed / found nothing). Do NOT mark this row 'failed' — money may
+    // still have moved. Leave it pending: the existing expiry sweep re-confirms it and
+    // settles it (pays + approves the order if the charge did go through). Telling the
+    // customer to retry here, on top of a charge that may already have succeeded, is
+    // exactly the double-charge this guard exists to prevent.
+    throw new OrderError('התשלום בעיבוד — נעדכן בדקות הקרובות, אל תחייבו שוב');
+  } finally {
+    chargeLocks.delete(userId);
   }
-
-  const id = crypto.randomBytes(12).toString('hex');
-  db.prepare(
-    `INSERT INTO card_payments (id, user_id, custname, kind, amount, status, psp, paid_items, save_card, charge_source, order_id)
-     VALUES (?, ?, ?, ?, ?, 'pending', 'payplus', ?, 0, 'token', ?)`
-  ).run(id, userId, custname, kind, amount, paidItemsJson, orderId != null ? String(orderId) : null);
-
-  try {
-    await payplus.chargeToken({
-      token,
-      amount,
-      ref: id,
-      customerName: custname,
-      payments: installmentsFor(amount) ?? undefined,
-    });
-  } catch (err) {
-    // chargeToken's own throw/result is NOT authoritative — swallow it here and let the
-    // confirmCard re-query below decide paid vs. not (identical to a declined hosted page).
-    console.warn('[card] chargeToken threw for saved-card charge', id, err instanceof Error ? err.message : err);
-  }
-
-  const confirmed = await confirmCard(id);
-
-  if (confirmed && confirmed.status === 'paid') {
-    db.prepare(`UPDATE saved_cards SET last_used_at = datetime('now') WHERE user_id = ?`).run(userId);
-    return { id, status: 'paid', amount: confirmed.amount };
-  }
-
-  // Not confirmed paid (declined, or the PSP query itself failed) — never leave the
-  // row hanging as 'pending' deflating the payable cap; the client falls back to the
-  // hosted flow on this error.
-  db.prepare(`UPDATE card_payments SET status = 'failed' WHERE id = ? AND status = 'pending'`).run(id);
-  throw new OrderError('החיוב נדחה — נסו בעמוד התשלום');
 }

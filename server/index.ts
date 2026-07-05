@@ -1180,16 +1180,35 @@ app.post('/api/payments/card/charge-saved', requireOwner, blockIfMaintenance, ca
     res.status(400).json({ error: 'יש לבחור מצב תשלום אחד בלבד' });
     return;
   }
+  // Strict validation: invoices, when present, must be an array of strings. Silently
+  // coercing a malformed value to [] would fall through to deriveDebtCharge's
+  // whole-balance fallback — charging the entire open debt when the caller meant to
+  // select specific invoices.
+  if (hasInvoices && !(Array.isArray(body.invoices) && body.invoices.every((x): x is string => typeof x === 'string'))) {
+    res.status(400).json({ error: 'בקשה לא תקינה' });
+    return;
+  }
   const mode = hasOrderId
     ? { orderId: Number(body.orderId) }
     : hasInvoices
-      ? { invoices: Array.isArray(body.invoices) ? body.invoices.filter((x): x is string => typeof x === 'string') : [] }
+      ? { invoices: body.invoices as string[] }
       : { amount: typeof body.amount === 'number' ? body.amount : Number(body.amount) };
   try {
     const out = await chargeSavedCard(req.user!.id, req.user!.custname!, mode);
     res.json(out);
   } catch (err) {
-    if (err instanceof OrderError) { res.status(402).json({ error: err.message }); return; }
+    if (err instanceof OrderError) {
+      // deriveOrderCharge (shared with the hosted path) throws plain-English internal
+      // messages via this OrderError wrapper — sanitize them the same way the hosted
+      // /pay/card route does before they reach the customer.
+      const raw = err.message;
+      const safe =
+        raw === 'order not found' || raw === 'order not awaiting payment' || raw === 'order already paid'
+          ? 'ההזמנה אינה ממתינה לתשלום'
+          : raw;
+      res.status(402).json({ error: safe });
+      return;
+    }
     console.error('[card] charge-saved failed:', err);
     res.status(500).json({ error: 'שגיאה בחיוב' });
   }
