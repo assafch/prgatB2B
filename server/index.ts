@@ -91,6 +91,8 @@ import {
 } from './products.js';
 import { scheduleSnapshots } from './backup.js';
 import { getHomeData } from './home.js';
+import { buildCheckoutPreview } from './checkoutPreview.js';
+import { VAT_RATE } from './money.js';
 import { getReorderSuggestions } from './reorder.js';
 import multer from 'multer';
 import { extractCheck, checkOcrEnabled, prepareCheckImage } from './checkOcr.js';
@@ -659,8 +661,18 @@ app.get('/api/catalog/:partname', requireCustomer, (req: AuthedRequest, res) => 
 });
 
 app.get('/api/cart', requireCustomer, (req: AuthedRequest, res) => {
-  res.json(getCart(req.user!.id, req.user!.custname!));
+  res.json({
+    ...getCart(req.user!.id, req.user!.custname!),
+    vatRate: VAT_RATE,
+    unifiedCheckout: getSettingBool('unified_checkout_enabled', false),
+  });
 });
+
+// Read-only checkout preview (unified checkout). Safe to call regardless of the
+// flag; `enabled` tells the client which UI to render.
+app.get('/api/checkout/preview', requireCustomer, ah(async (req: AuthedRequest, res) => {
+  res.json(await buildCheckoutPreview(req.user!.id, req.user!.custname!));
+}));
 
 app.put('/api/cart/lines/:partname', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
   const { quantity, mode } = (req.body || {}) as { quantity?: number; mode?: 'set' | 'add' };

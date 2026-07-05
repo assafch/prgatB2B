@@ -40,13 +40,15 @@ export interface HomeData {
   suggestions: ReorderSuggestion[];
   promotions: HomePromo[];
   /** server-owned feature flags so the client never shows dead CTAs */
-  features: { payments: boolean; checkPayment: boolean; discountPricing: boolean };
+  features: { payments: boolean; checkPayment: boolean; discountPricing: boolean; unifiedCheckout: boolean };
   /** admin-controlled customer announcement (plain text, rendered escaped) */
   banner: { text: string } | null;
   /** admin-controlled maintenance mode — client blocks ordering + shows a notice */
   maintenance: { enabled: boolean; message: string };
   /** resolved payment policy for this customer (informational only; null when feature flag is off) */
   paymentPolicy: { kind: 'cash' | 'net'; netDebt: number; blocksOnDebt: boolean } | null;
+  /** newest order still awaiting payment (unified checkout: home resume banner); null when none */
+  pendingPaymentOrder: { id: number; amount: number; createdAt: string } | null;
 }
 
 // One card per active promotion, with a human subtitle derived from the promo
@@ -104,6 +106,15 @@ export async function getHomeData(
     | { id: number; priority_ordname: string | null; status: string; total: number | null; created_at: string }
     | undefined;
 
+  // Newest order still awaiting payment (unified checkout: home resume banner).
+  const pendingRow = db
+    .prepare(
+      `SELECT id, payment_required_amount, created_at FROM orders_local
+       WHERE user_id = ? AND status = 'pending_payment'
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(userId) as { id: number; payment_required_amount: number | null; created_at: string } | undefined;
+
   let lastOrder: LastOrderView | null = null;
   if (lastRow) {
     const { c } = db
@@ -134,6 +145,7 @@ export async function getHomeData(
       payments: getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true'),
       checkPayment: getSettingBool('check_payment_enabled', true),
       discountPricing: getSettingBool('discount_pricing_enabled', false),
+      unifiedCheckout: getSettingBool('unified_checkout_enabled', false),
     },
     banner: getSettingBool('announcement_enabled', false)
       ? { text: getSetting('announcement_text') || '' }
@@ -144,6 +156,9 @@ export async function getHomeData(
     },
     paymentPolicy: pol
       ? { kind: pol.kind, netDebt, blocksOnDebt: pol.blockOnOpenDebt && !pol.allowOrderWithOpenDebt && netDebt > pol.openDebtThreshold + 0.001 }
+      : null,
+    pendingPaymentOrder: pendingRow
+      ? { id: pendingRow.id, amount: pendingRow.payment_required_amount ?? 0, createdAt: pendingRow.created_at }
       : null,
   };
 }

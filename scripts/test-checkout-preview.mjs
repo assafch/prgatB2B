@@ -12,3 +12,17 @@ for (const v of [0, 0.01, 99.99, 513.6, 1234.56]) {
 }
 assert.deepEqual(vatBreakdown(0), { vatRate: 0.18, vatAmount: 0, payable: 0 });
 console.log('vatBreakdown: ALL PASS');
+
+// buildCheckoutPreview shape check against a scratch DB: no policy row → policy
+// not enforced → requiresPayment=false, kind=null, but VAT math still present.
+// (Full cash-path evaluation needs Priority finance and is covered by manual QA.)
+import { buildCheckoutPreview } from '../dist/server/checkoutPreview.js';
+const preview = await buildCheckoutPreview(999999, 'NO-SUCH-CUSTOMER');
+assert.equal(preview.requiresPayment, false);
+assert.equal(preview.kind, null);
+assert.equal(preview.blocked, false);
+assert.equal(preview.total, 0); // empty cart for unknown user
+assert.equal(preview.payable, 0);
+assert.equal(preview.vatRate, 0.18);
+assert.equal(typeof preview.enabled, 'boolean');
+console.log('buildCheckoutPreview (unenforced/empty): ALL PASS');
