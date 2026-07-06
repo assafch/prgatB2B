@@ -12,6 +12,7 @@ import {
   getObligo,
   getInvoiceWithItems,
   type PriorityCustomerFull,
+  type PriorityUnpaidInvoice,
 } from './priority.js';
 
 export interface InvoiceDetailView {
@@ -262,6 +263,16 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
     priorityOk: customer !== null || obligo !== null || open !== null,
     balanceOk,
   };
+}
+
+/** Unpaid invoices for the POLICY path — memoized + persisted like the balance
+ *  fetches, so a Priority blip serves the last snapshot instead of failing. The
+ *  pay-by-card picker deliberately does NOT use this (amounts must be fresh).
+ *  Returns null only when the fetch fails AND no snapshot exists → caller fails open. */
+export async function getUnpaidInvoicesCached(custname: string): Promise<PriorityUnpaidInvoice[] | null> {
+  const config = getPriorityConfig();
+  if (!config) return null;
+  return tryGet(`unpaid:${custname}`, () => memo(`unpaid:${custname}`, () => listUnpaidInvoices(config, custname)));
 }
 
 export interface UnpaidInvoice {

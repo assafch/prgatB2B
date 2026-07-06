@@ -405,6 +405,7 @@ ensureColumn('users', 'customer_role', "TEXT NOT NULL DEFAULT 'owner'");
 // Per-customer payment-policy rollout gate: 1 = policy fires for this customer,
 // 0 = exempt (master flag must also be on for the policy to fire).
 ensureColumn('customer_policies', 'enforced', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('customer_policies', 'block_overdue_only', 'INTEGER NOT NULL DEFAULT 0');
 
 // Installments: number of payments from PayPlus transaction (null = single payment).
 try {

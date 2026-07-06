@@ -398,6 +398,9 @@ export interface PriorityUnpaidInvoice {
   IVDATE?: string;
   STATDES?: string;
   IVRECONDATE?: string | null; // reconciliation date — null = still unpaid
+  /** Explicit payment schedule (תאריך תשלום). Empty on this tenant today; when
+   *  Priority populates it, the due-date logic prefers it (spec §3). */
+  IVPAY_SUBFORM?: { PAYDATE?: string | null }[];
 }
 
 // AINVOICES that haven't been reconciled (IVRECONDATE empty) are still owed — this
@@ -413,7 +416,7 @@ export async function listUnpaidInvoices(
   const result = await priorityRequest(
     config,
     `AINVOICES?$filter=CUSTNAME eq '${safe}'&$orderby=IVDATE desc&$top=${top}` +
-      `&$select=IVNUM,TOTPRICE,IVDATE,STATDES,IVRECONDATE`
+      `&$select=IVNUM,TOTPRICE,IVDATE,STATDES,IVRECONDATE&$expand=IVPAY_SUBFORM`
   );
   return ((result.value || []) as PriorityUnpaidInvoice[]).filter(
     (iv) => iv.IVRECONDATE == null && (iv.STATDES || '').trim() === 'סופית' && Number(iv.TOTPRICE) > 0
