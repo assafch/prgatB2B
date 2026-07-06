@@ -133,6 +133,7 @@ async function openCustomerDrawer(custname: string, shell: HTMLElement): Promise
         <div class="dr-user-row">
           <b>${escapeHtml(u.username)}</b>
           <span class="${u.status === 'active' ? 'ok' : 'warn'}" style="font-size:10.5px;font-weight:700">${u.status === 'active' ? 'פעיל' : 'מושבת'}</span>
+          ${u.status === 'active' ? `<button type="button" class="adm-btn-ghost dr-loginlink" data-id="${u.id}" style="font-size:11px;padding:3px 8px">🔗 קישור כניסה</button>` : ''}
         </div>`).join('') || '<div class="muted" style="font-size:12px">אין משתמשים עדיין</div>'}
       </div>
       <button type="button" id="dr-invite" class="adm-btn-ghost" style="margin-top:6px;padding:6px 12px">+ צור קישור הזמנה</button>
@@ -203,6 +204,30 @@ async function openCustomerDrawer(custname: string, shell: HTMLElement): Promise
     } catch (ex) { toast(ex instanceof Error ? ex.message : 'יצירת הקישור נכשלה', 'error'); }
     btn.disabled = false;
   };
+
+  body.querySelectorAll<HTMLButtonElement>('.dr-loginlink').forEach((b) => {
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        const r = await api.post<{ url: string; expiresAt: string }>(`/api/admin/users/${b.dataset.id}/login-link`, {});
+        const exp = new Date(r.expiresAt).toLocaleDateString('he-IL');
+        const msg = `שלום! מעכשיו מזמינים מאורגת סחר ישירות מהאפליקציה 📱\nלחצו על הקישור והאפליקציה תיפתח מחוברת — בלי סיסמה:\n${r.url}\n(הקישור בתוקף עד ${exp})`;
+        try {
+          await navigator.clipboard.writeText(msg);
+          toast('הודעת וואטסאפ עם הקישור הועתקה — הדביקו ושלחו ✓', 'ok');
+        } catch {
+          // Safari can lose user-activation across the await above, rejecting
+          // the clipboard write. Fall back to a prefilled prompt so the admin
+          // still gets the link — manual copy works on any browser.
+          window.prompt('העתיקו את ההודעה:', msg);
+        }
+      } catch (ex) {
+        toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      } finally {
+        b.disabled = false;
+      }
+    });
+  });
 
   (body.querySelector('#dr-reset-portal') as HTMLButtonElement).onclick = async () => {
     if (!(await confirmDialog(`לאפס את הפורטל של ${d.cust_desc || d.custname}? כל ההזמנות והסל יימחקו.`, 'איפוס', 'ביטול'))) return;
