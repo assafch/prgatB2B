@@ -266,3 +266,12 @@ rows left unmarked are genuine gaps — mostly actions that write real data
 - [ ] Blocked screens show the העברה-בנקאית note. [verified live in order-submit error]
 - [ ] Admin: customer-card toggle round-trips (save → reload shows state).
 - [ ] Activation for 10330: enroll (enforced ✓, kind auto→net, block_overdue_only ✓) + master payment_policy_enabled ON; verify she can order.
+
+## Magic login links
+
+- [ ] Admin: 🔗 on a user row copies a WhatsApp message with a working link (expiry shown).
+- [ ] Logged-out browser: link → lands on home logged in; welcome nudge once. [verified live 2026-07-06]
+- [ ] Link reusable on a second device. [verified live]
+- [ ] Regenerate: old link dead. [verified live]
+- [ ] Garbage/expired token → 401 → error card with כניסה רגילה fallback. [verified live: 401]
+- [ ] Disabled user / admin user → cannot mint or redeem. [unit-tested]
