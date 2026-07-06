@@ -99,7 +99,8 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
                   ${
                     u.customer_role !== 'admin'
                       ? `<button class="ghost cc-u-reset" data-id="${u.id}" data-name="${escapeAttr(u.username)}" style="font-size:0.8rem">איפוס סיסמה</button>
-                         <button class="ghost cc-u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}" style="font-size:0.8rem">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>`
+                         <button class="ghost cc-u-toggle" data-id="${u.id}" data-status="${escapeAttr(u.status)}" style="font-size:0.8rem">${u.status === 'active' ? 'השבת' : 'הפעל'}</button>
+                         <button class="ghost cc-loginlink" data-id="${u.id}" style="font-size:0.8rem">🔗 קישור כניסה</button>`
                       : '<span class="badge warn">מנהל</span>'
                   }
                 </td>
@@ -309,6 +310,23 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
         umsg.className = 'error';
       }
     };
+  });
+
+  shell.querySelectorAll<HTMLButtonElement>('.cc-loginlink').forEach((b) => {
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        const r = await api.post<{ url: string; expiresAt: string }>(`/api/admin/users/${b.dataset.id}/login-link`, {});
+        const exp = new Date(r.expiresAt).toLocaleDateString('he-IL');
+        const msg = `שלום! מעכשיו מזמינים מאורגת סחר ישירות מהאפליקציה 📱\nלחצו על הקישור והאפליקציה תיפתח מחוברת — בלי סיסמה:\n${r.url}\n(הקישור בתוקף עד ${exp})`;
+        await navigator.clipboard.writeText(msg);
+        toast('הודעת וואטסאפ עם הקישור הועתקה — הדביקו ושלחו ✓', 'ok');
+      } catch (ex) {
+        toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      } finally {
+        b.disabled = false;
+      }
+    });
   });
 
   const nuCreate = shell.querySelector('#cc-nu-create') as HTMLButtonElement | null;

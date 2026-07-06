@@ -56,6 +56,12 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     return;
   }
 
+  // One-time nudge after redeeming a magic login link (see pages/loginLink.ts).
+  if (sessionStorage.getItem('mll-welcome')) {
+    sessionStorage.removeItem('mll-welcome');
+    toast('מחוברים! מומלץ להפעיל כניסה עם טביעת אצבע בחשבון', 'ok');
+  }
+
   const name = d.customerName || d.custDesc || state.me?.cust_desc || '';
   const owing = d.balance.openTotal > 0;
   // 'orderer' staff don't see finance (debt/pay) — that's the owner's view.

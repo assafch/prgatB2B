@@ -6,6 +6,7 @@ import { bottomNav } from './ui.js';
 import { renderLogin } from './pages/login.js';
 import { renderLead } from './pages/lead.js';
 import { renderInvite } from './pages/invite.js';
+import { renderLoginLink } from './pages/loginLink.js';
 import { renderHome } from './pages/home.js';
 import { renderCatalog } from './pages/catalog.js';
 import { renderProduct } from './pages/product.js';
@@ -145,6 +146,10 @@ async function route(): Promise<void> {
   if (hash.startsWith('#invite/')) {
     const token = hash.slice('#invite/'.length);
     return renderInvite(mount(''), token, onAuthChanged);
+  }
+  if (hash.startsWith('#login-link/')) {
+    const token = hash.slice('#login-link/'.length);
+    return renderLoginLink(mount(''), token);
   }
 
   // Require auth
