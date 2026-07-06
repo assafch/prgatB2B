@@ -137,6 +137,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
              ? `יש לסגור חוב פתוח של ₪${home.paymentPolicy!.netDebt.toFixed(2)} לפני ביצוע הזמנה.`
              : 'יש לסגור את החוב הפתוח לפני ביצוע הזמנה — פנו לבעל העסק.'
          }</div>
+         <div class="muted" style="font-size:0.82rem;margin-top:0.35rem">שילמתם בהעברה בנקאית? החסימה תוסר אוטומטית עם קליטת התשלום במשרד.</div>
          ${!isOrderer ? '<a class="es-cta" href="#invoices" style="display:inline-block;margin-top:0.6rem">סגור חוב ←</a>' : ''}
        </div>`
     : '';
