@@ -255,3 +255,14 @@ rows left unmarked are genuine gaps — mostly actions that write real data
 - [ ] **Admin settings persistence**: set installments_min_amount=500 and installments_max=6, refresh page, verify values persist.
 - [ ] **Feature flags show false in /api/home**: when all three flags OFF, response includes `installmentsEnabled: false`, `savedCardsEnabled: false`, `savedCardChargeEnabled: false`.
 - [ ] **One real end-to-end flow per flag**: submit order with installments picker ON; save real card on success; one-tap charge the saved card on a separate order. (Staging-only charges; do not run against live customers.)
+
+## Overdue-only debt block (block_overdue_only, per-customer)
+
+- [ ] Toggle OFF (default): net customer's netDebt figure and block decision identical to before (home, checkout, order submit). [verified live 2026-07-06: 10184 → 45067.36]
+- [ ] Toggle ON, שוטף customer with only current-month unpaid invoices: NOT blocked. [verified live: 10330, ₪4,352 fresh debt → netDebt 0]
+- [ ] Toggle ON, customer with last-month unpaid invoices: blocked; amount = overdue sum capped by total debt. [verified live: 10184 → 36,418]
+- [ ] Month rollover: an invoice due at month-end starts blocking on the 1st. [unit-tested]
+- [ ] Priority unpaid-list failure (no cache): block skipped (fail-open), warning logged. [unit-tested]
+- [ ] Blocked screens show the העברה-בנקאית note. [verified live in order-submit error]
+- [ ] Admin: customer-card toggle round-trips (save → reload shows state).
+- [ ] Activation for 10330: enroll (enforced ✓, kind auto→net, block_overdue_only ✓) + master payment_policy_enabled ON; verify she can order.
