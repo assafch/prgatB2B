@@ -18,6 +18,7 @@ import { listPromotions, createPromotion, updatePromotion, deletePromotion, type
 import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavorite, listFavorites } from './templates.js';
 import { listStaff, createStaff, setStaffStatus, resetStaffPassword } from './staff.js';
 import { vapidPublicKey, saveSubscription, removeSubscription, notifyUser, broadcast } from './push.js';
+import { createLoginLink, redeemLoginLink } from './loginLinks.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -374,6 +375,23 @@ app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res
     },
   });
 }));
+
+// Redeem a magic login link → ordinary customer session. Same limiters as
+// password login (the token is unguessable, but stay conservative). Both
+// limiters here key off req.ip (loginLimiter has no custom keyGenerator, so it
+// falls back to express-rate-limit's IP-based default) — neither depends on
+// req.body.username, which this route never has, so no adjustment was needed.
+app.post('/api/auth/link', globalLoginLimiter, loginLimiter, (req, res) => {
+  const { token } = (req.body || {}) as { token?: string };
+  const hit = token ? redeemLoginLink(token) : null;
+  if (!hit) {
+    res.status(401).json({ error: 'הקישור אינו תקף — בקשו קישור חדש' });
+    return;
+  }
+  const sessionToken = createSession(hit.userId, 'customer', req.ip, req.headers['user-agent'] as string | undefined);
+  setSessionCookie(res, sessionToken, 'customer');
+  res.json({ ok: true });
+});
 
 app.post('/api/auth/logout', (req: Request, res: Response) => {
   const token = tokenFromRequest(req);
@@ -1540,6 +1558,18 @@ app.patch('/api/admin/users/:id', requireAdmin, sensitiveLimiter, (req: AuthedRe
 app.delete('/api/admin/users/:id', requireAdmin, sensitiveLimiter, (req: AuthedRequest, res) => {
   const r = deleteCustomerUser(Number(req.params.id));
   res.status(r.ok ? 200 : 400).json(r);
+});
+
+// Magic login link — one active per user, 14 days, reusable. Admin only.
+app.post('/api/admin/users/:id/login-link', requireAdmin, sensitiveLimiter, (req: AuthedRequest, res) => {
+  const target = db.prepare(`SELECT id, role, status FROM users WHERE id = ?`).get(Number(req.params.id)) as
+    | { id: number; role: string; status: string } | undefined;
+  if (!target || target.role !== 'customer') {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  const { token, expiresAt } = createLoginLink(target.id, req.user!.id);
+  res.json({ url: `${appBaseUrl(req)}/#login-link/${token}`, expiresAt });
 });
 
 // ---------- Admin: company list (group-by custname, cached finance, resolved policy) ----------
