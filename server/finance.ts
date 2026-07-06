@@ -265,10 +265,10 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
   };
 }
 
-/** Unpaid invoices for the POLICY path — memoized + persisted like the balance
- *  fetches, so a Priority blip serves the last snapshot instead of failing. The
- *  pay-by-card picker deliberately does NOT use this (amounts must be fresh).
- *  Returns null only when the fetch fails AND no snapshot exists → caller fails open. */
+/** Unpaid invoices, raw rows (incl. IVDATE + IVPAY_SUBFORM) for the overdue-block
+ *  policy path. Memoized + persisted (finance_cache) — the pay-by-card picker's
+ *  getUnpaidInvoices shares this same cache slot (5-min TTL). Returns null only
+ *  when the fetch fails AND no snapshot exists → caller fails open. */
 export async function getUnpaidInvoicesCached(custname: string): Promise<PriorityUnpaidInvoice[] | null> {
   const config = getPriorityConfig();
   if (!config) return null;
@@ -284,9 +284,7 @@ export interface UnpaidInvoice {
 /** Unpaid (unreconciled) invoices for a customer — IVNUM + amount + date, newest first.
  *  Authoritative source for "which invoices are still owed" (see listUnpaidInvoices). */
 export async function getUnpaidInvoices(custname: string): Promise<UnpaidInvoice[]> {
-  const config = getPriorityConfig();
-  if (!config) return [];
-  const rows = await tryGet(`unpaid:${custname}`, () => memo(`unpaid:${custname}`, () => listUnpaidInvoices(config, custname)));
+  const rows = await getUnpaidInvoicesCached(custname);
   return (rows ?? [])
     .map((iv) => ({ ivnum: String(iv.IVNUM ?? ''), amount: round2(Number(iv.TOTPRICE) || 0), date: iv.IVDATE ?? null }))
     .filter((iv) => iv.ivnum);
