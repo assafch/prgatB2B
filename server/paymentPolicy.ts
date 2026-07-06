@@ -44,6 +44,63 @@ export function decide(policy: Policy, netDebt: number, cartTotal: number): Poli
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+// ---------- Overdue-only block: PURE due-date helpers (no DB/IO — unit-tested) ----------
+// Spec: 2026-07-06-overdue-only-debt-block. The tenant does not expose a per-invoice
+// due date (IVPAY_SUBFORM verified empty on final invoices), so we compute it the way
+// Priority displays it: end of invoice month + N days from the customer's PAYDES.
+
+/** "שוטף" → 0, "שוטף+30"/"שוטף +30"/"שוטף30" → 30. Anything else (מזומן, null,
+ *  unparseable) → 0 — strictest common terms; matches plain שוטף. */
+export function parseNetTermsDays(paydes: string | null): number {
+  const m = (paydes || '').match(/שוטף\s*\+?\s*(\d+)/);
+  if (m) return parseInt(m[1], 10);
+  return 0;
+}
+
+/** yyyy-mm-dd string for a UTC-midnight Date (IVDATE strings are date-only, so all
+ *  math happens on calendar days — no timezone drift). */
+const ymd = (d: Date) =>
+  `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+
+/** Due date for an invoice: the latest explicit IVPAY payment date when present
+ *  (future-proofing — this tenant never populates it), else end of the invoice's
+ *  calendar month + extraDays. Returns yyyy-mm-dd. */
+export function invoiceDueDate(
+  ivdate: string,
+  extraDays: number,
+  ivpayDates?: (string | null | undefined)[]
+): string {
+  const explicit = (ivpayDates || []).filter((s): s is string => typeof s === 'string' && s.length >= 10);
+  if (explicit.length) return explicit.map((s) => s.slice(0, 10)).sort().at(-1)!;
+  const y = Number(ivdate.slice(0, 4));
+  const m = Number(ivdate.slice(5, 7)); // 1-based
+  // Date.UTC(y, m, 0) = last day of month m; + extraDays via UTC ms arithmetic.
+  const due = new Date(Date.UTC(y, m, 0) + extraDays * 86_400_000);
+  return ymd(due);
+}
+
+/** Sum of unpaid invoices strictly past their due date. `todayYmd` is a yyyy-mm-dd
+ *  string (Asia/Jerusalem); comparison is lexicographic (safe for ISO dates). */
+export function overdueSum(
+  invoices: { IVDATE?: string; TOTPRICE?: number; IVPAY_SUBFORM?: { PAYDATE?: string | null }[] }[],
+  paydes: string | null,
+  todayYmd: string
+): number {
+  const extra = parseNetTermsDays(paydes);
+  let sum = 0;
+  for (const iv of invoices) {
+    if (!iv.IVDATE || typeof iv.TOTPRICE !== 'number' || !(iv.TOTPRICE > 0)) continue;
+    const due = invoiceDueDate(iv.IVDATE, extra, iv.IVPAY_SUBFORM?.map((p) => p.PAYDATE));
+    if (due < todayYmd) sum += iv.TOTPRICE;
+  }
+  return Math.round((sum + Number.EPSILON) * 100) / 100;
+}
+
+/** Today's calendar date in Israel as yyyy-mm-dd ('en-CA' locale formats ISO-style). */
+export function israelTodayYmd(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+}
+
 const SETTING_KEYS = {
   enabled: 'payment_policy_enabled',
   cashMatch: 'policy_cash_paydes_match', // CSV of PAYDES substrings → cash
