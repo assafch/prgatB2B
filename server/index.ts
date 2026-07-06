@@ -382,7 +382,7 @@ app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res
 // falls back to express-rate-limit's IP-based default) — neither depends on
 // req.body.username, which this route never has, so no adjustment was needed.
 app.post('/api/auth/link', globalLoginLimiter, loginLimiter, (req, res) => {
-  const { token } = (req.body || {}) as { token?: string };
+  const token = typeof (req.body || {}).token === 'string' ? (req.body as { token: string }).token : '';
   const hit = token ? redeemLoginLink(token) : null;
   if (!hit) {
     res.status(401).json({ error: 'הקישור אינו תקף — בקשו קישור חדש' });
