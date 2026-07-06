@@ -165,9 +165,11 @@ export function pendingSettlement(custname: string): number {
 /** The single source of the net-debt figure used for blocking. Standard mode:
  *  openTotal − pendingSettlement. Overdue-only mode (block_overdue_only): only
  *  invoices strictly past their computed due date count, capped by openTotal
- *  (on-account payments reduce the cap first). Fail-open: if the unpaid list is
- *  unavailable and uncached, the overdue refinement yields 0 (no block) — the
- *  same conservative direction as the M2 balance fail-open. */
+ *  (on-account payments reduce the cap first). Short-circuit: when blockOnOpenDebt
+ *  is off or openTotal <= 0, the unpaid fetch is skipped (avoiding wasted Priority
+ *  requests during outages), yielding openTotal as the blockingDebt. Fail-open: if
+ *  the unpaid list is unavailable and uncached, the overdue refinement yields 0
+ *  (no block) — the same conservative direction as the M2 balance fail-open. */
 export async function computeBlockingNetDebt(
   custname: string,
   policy: Policy,
@@ -175,7 +177,7 @@ export async function computeBlockingNetDebt(
   paymentTerms: string | null
 ): Promise<number> {
   let blockingDebt = openTotal;
-  if (policy.blockOverdueOnly) {
+  if (policy.blockOverdueOnly && policy.blockOnOpenDebt && openTotal > 0.005) {
     const unpaid = await getUnpaidInvoicesCached(custname);
     if (unpaid === null) {
       console.warn('[policy] unpaid invoices unavailable for ' + custname + ' — overdue block skipped (fail-open)');

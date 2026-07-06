@@ -64,8 +64,7 @@ Examples (today = 6/7): invoice 1/7 due 31/7 → never blocks in July; invoice
 - New cached accessor in server/finance.ts: `getUnpaidInvoicesCached(custname)`
   using the existing memo TTL + `finance_cache` persistent fallback (key
   `unpaid:<custname>`), same pattern as balance/customer. The pay-by-card
-  picker keeps its existing uncached call (payment amounts must be fresh);
-  the policy path uses the cached accessor.
+  picker's getUnpaidInvoices already shared this same cache slot (5-min TTL) before this feature; it now reuses the same accessor — behavior unchanged.
 
 ### 4.2 Policy engine (server/paymentPolicy.ts)
 
