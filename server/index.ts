@@ -388,8 +388,22 @@ app.post('/api/auth/link', globalLoginLimiter, loginLimiter, (req, res) => {
     res.status(401).json({ error: 'הקישור אינו תקף — בקשו קישור חדש' });
     return;
   }
+  // Session rotation: a login always issues a fresh token; any session already on
+  // this browser is revoked so the old cookie value dies with it.
+  const oldToken = tokenFromRequest(req);
+  if (oldToken) destroySession(oldToken);
   const sessionToken = createSession(hit.userId, 'customer', req.ip, req.headers['user-agent'] as string | undefined);
   setSessionCookie(res, sessionToken, 'customer');
+  db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(hit.userId);
+  // Warm the finance snapshot in the background so the first dashboard load is instant.
+  const linkUser = db.prepare(`SELECT custname FROM users WHERE id = ?`).get(hit.userId) as
+    | { custname: string | null }
+    | undefined;
+  if (linkUser?.custname) {
+    warmFinance(linkUser.custname);
+    // Fire-and-forget: first catalog paint uses whatever is cached; this refreshes for next time.
+    refreshCustomerDiscounts(linkUser.custname).catch(() => {});
+  }
   res.json({ ok: true });
 });
 
@@ -1564,7 +1578,7 @@ app.delete('/api/admin/users/:id', requireAdmin, sensitiveLimiter, (req: AuthedR
 app.post('/api/admin/users/:id/login-link', requireAdmin, sensitiveLimiter, (req: AuthedRequest, res) => {
   const target = db.prepare(`SELECT id, role, status FROM users WHERE id = ?`).get(Number(req.params.id)) as
     | { id: number; role: string; status: string } | undefined;
-  if (!target || target.role !== 'customer') {
+  if (!target || target.role !== 'customer' || target.status !== 'active') {
     res.status(404).json({ error: 'not_found' });
     return;
   }
