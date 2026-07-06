@@ -1,7 +1,7 @@
 // Payment-policy engine. PURE decision helpers here have NO DB/IO so they are unit-
 // testable; the DB-backed resolve/evaluate live in later tasks. Spec: 2026-06-28-payment-policy.
 import { db, getSetting, getSettingBool } from './db.js';
-import { getAccountSummary } from './finance.js';
+import { getAccountSummary, getUnpaidInvoicesCached } from './finance.js';
 import { paidDebtCardTotal } from './cardPayments.js';
 import { withVat } from './money.js';
 
@@ -12,6 +12,7 @@ export interface Policy {
   blockOnOpenDebt: boolean;              // net → true
   openDebtThreshold: number;             // block when netDebt > threshold
   allowOrderWithOpenDebt: boolean;       // per-customer exemption
+  blockOverdueOnly: boolean;             // per-customer: only overdue invoices count toward the block
 }
 export interface PolicyDecision {
   allowOrder: boolean;
@@ -128,12 +129,12 @@ function globalThreshold(): number {
   return isFinite(v) && v >= 0 ? v : 0;
 }
 
-interface PolicyRow { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number }
+interface PolicyRow { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number; block_overdue_only: number }
 
 /** Resolve a customer's effective policy: auto-derive from PAYDES, then apply the
  *  per-customer customer_policies override (kind + threshold + exemption). */
 export function resolvePolicy(custname: string, paymentTerms: string | null): Policy {
-  const row = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt FROM customer_policies WHERE custname = ?').get(custname) as PolicyRow | undefined;
+  const row = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt, block_overdue_only FROM customer_policies WHERE custname = ?').get(custname) as PolicyRow | undefined;
   const overrideKind = row && row.kind !== 'auto' && (row.kind === 'cash' || row.kind === 'net') ? (row.kind as PolicyKind) : null;
   const kind = overrideKind ?? derivePolicyKind(paymentTerms, cashMatchList());
   return {
@@ -142,6 +143,7 @@ export function resolvePolicy(custname: string, paymentTerms: string | null): Po
     blockOnOpenDebt: kind === 'net',
     openDebtThreshold: row && row.open_debt_threshold != null ? row.open_debt_threshold : globalThreshold(),
     allowOrderWithOpenDebt: !!(row && row.allow_order_with_open_debt),
+    blockOverdueOnly: !!(row && row.block_overdue_only),
   };
 }
 
@@ -160,6 +162,31 @@ export function pendingSettlement(custname: string): number {
   return Math.round(((card + (chq.s || 0)) + Number.EPSILON) * 100) / 100;
 }
 
+/** The single source of the net-debt figure used for blocking. Standard mode:
+ *  openTotal − pendingSettlement. Overdue-only mode (block_overdue_only): only
+ *  invoices strictly past their computed due date count, capped by openTotal
+ *  (on-account payments reduce the cap first). Fail-open: if the unpaid list is
+ *  unavailable and uncached, the overdue refinement yields 0 (no block) — the
+ *  same conservative direction as the M2 balance fail-open. */
+export async function computeBlockingNetDebt(
+  custname: string,
+  policy: Policy,
+  openTotal: number,
+  paymentTerms: string | null
+): Promise<number> {
+  let blockingDebt = openTotal;
+  if (policy.blockOverdueOnly) {
+    const unpaid = await getUnpaidInvoicesCached(custname);
+    if (unpaid === null) {
+      console.warn('[policy] unpaid invoices unavailable for ' + custname + ' — overdue block skipped (fail-open)');
+      blockingDebt = 0;
+    } else {
+      blockingDebt = Math.min(overdueSum(unpaid, paymentTerms, israelTodayYmd()), openTotal);
+    }
+  }
+  return Math.max(0, blockingDebt - pendingSettlement(custname));
+}
+
 /** Async order-time evaluation: resolve policy, compute net debt, decide. */
 export async function evaluate(custname: string, cartTotal: number): Promise<PolicyDecision & { kind: PolicyKind }> {
   const summary = await getAccountSummary(custname);
@@ -167,6 +194,6 @@ export async function evaluate(custname: string, cartTotal: number): Promise<Pol
   // M2: fail-open on Priority outage — bypass block but log it
   if (!summary.balanceOk) console.warn('[policy] balance unavailable for ' + custname + ' — open-debt block bypassed (fail-open)');
   const openTotal = summary.balanceOk ? summary.balance.openTotal : 0;
-  const netDebt = Math.max(0, openTotal - pendingSettlement(custname));
+  const netDebt = await computeBlockingNetDebt(custname, policy, openTotal, summary.profile?.paymentTerms ?? null);
   return { ...decide(policy, netDebt, cartTotal), kind: policy.kind };
 }

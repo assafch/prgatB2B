@@ -8,7 +8,7 @@ import { getAccountSummary, type BalanceSummary } from './finance.js';
 import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
 import { activePromotions } from './promotions.js';
 import { getProduct } from './catalog.js';
-import { resolvePolicy, enforcedFor, pendingSettlement } from './paymentPolicy.js';
+import { resolvePolicy, enforcedFor, computeBlockingNetDebt } from './paymentPolicy.js';
 import { installmentsRange } from './cardPayments.js';
 import { tokenVaultReady } from './tokenVault.js';
 
@@ -106,7 +106,9 @@ export async function getHomeData(
   // Finance can be slow / unavailable; the rest is instant local SQLite.
   const summary = await getAccountSummary(custname);
   const pol = enforcedFor(custname) ? resolvePolicy(custname, summary.profile?.paymentTerms ?? null) : null;
-  const netDebt = pol && summary.balanceOk ? Math.max(0, summary.balance.openTotal - pendingSettlement(custname)) : 0;
+  const netDebt = pol && summary.balanceOk
+    ? await computeBlockingNetDebt(custname, pol, summary.balance.openTotal, summary.profile?.paymentTerms ?? null)
+    : 0;
 
   const lastRow = db
     .prepare(

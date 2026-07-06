@@ -47,3 +47,20 @@ assert.equal(overdueSum(fixture, 'שוטף', '2026-06-15'), 10739 + 14 + 4894 + 
 // Rounding + junk rows ignored
 assert.equal(overdueSum([{ IVDATE: undefined, TOTPRICE: 100 }, { IVDATE: '2026-01-05T00:00:00Z', TOTPRICE: undefined }], 'שוטף', '2026-07-06'), 0);
 console.log('overdue-block pure helpers: ALL PASS');
+
+// resolvePolicy picks up the new column; computeBlockingNetDebt fails open with no
+// Priority config (getUnpaidInvoicesCached → null) for an overdue-only customer.
+import Database from 'better-sqlite3';
+import path from 'node:path';
+const db = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));
+db.prepare("INSERT OR REPLACE INTO customer_policies (custname, kind, allow_order_with_open_debt, enforced, block_overdue_only) VALUES ('C-OVERDUE','net',0,1,1)").run();
+db.close();
+const { resolvePolicy, computeBlockingNetDebt } = await import('../dist/server/paymentPolicy.js');
+const pol = resolvePolicy('C-OVERDUE', 'שוטף');
+assert.equal(pol.blockOverdueOnly, true);
+assert.equal(resolvePolicy('NO-SUCH', 'שוטף').blockOverdueOnly, false);
+// No PRIORITY_* env in this test run → accessor returns null → fail-open → 0
+assert.equal(await computeBlockingNetDebt('C-OVERDUE', pol, 5000, 'שוטף'), 0);
+// Standard mode unchanged: blocking = openTotal (no pending settlements in scratch DB)
+assert.equal(await computeBlockingNetDebt('C-STD', resolvePolicy('NO-SUCH', 'שוטף'), 5000, 'שוטף'), 5000);
+console.log('resolvePolicy + computeBlockingNetDebt: ALL PASS');
