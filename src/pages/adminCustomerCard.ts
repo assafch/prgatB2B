@@ -23,6 +23,7 @@ interface CustomerCardPolicy {
   open_debt_threshold: number | null;
   allow_order_with_open_debt: number;
   enforced: number; // 0 or 1 — per-customer policy enforcement flag
+  block_overdue_only: number; // 0 or 1 — only overdue invoices count toward the block
 }
 
 interface CustomerCard {
@@ -171,6 +172,11 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
             <input type="checkbox" id="cc-exempt" ${d.policy.allow_order_with_open_debt ? 'checked' : ''}/>
             מורשה להזמין עם חוב פתוח
           </label>
+          <label style="display:flex;align-items:center;gap:0.45rem;margin-top:0.5rem;cursor:pointer">
+            <input type="checkbox" id="cc-overdue" ${d.policy.block_overdue_only ? 'checked' : ''}/>
+            <span>חסימה רק לפי תאריך תשלום (שוטף)</span>
+          </label>
+          <div class="muted" style="font-size:0.8rem;margin:0.15rem 0 0 1.6rem">חשבוניות שטרם הגיע מועד פירעונן לא חוסמות הזמנה</div>
         </div>
         <div>
           <button id="cc-save">שמור מדיניות</button>
@@ -255,6 +261,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
         open_debt_threshold: thrVal === '' ? null : Number(thrVal),
         allow_order_with_open_debt: exemptChk.checked,
         enforced: enforceChk.checked,
+        block_overdue_only: (shell.querySelector('#cc-overdue') as HTMLInputElement).checked,
       });
       toast('המדיניות נשמרה ✓', 'ok');
       msgEl.textContent = '';
