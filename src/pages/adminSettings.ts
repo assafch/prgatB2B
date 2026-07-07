@@ -108,6 +108,11 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         <button type="button" id="s-discount" class="adm-toggle${on('discount_pricing_enabled') ? ' on' : ''}" aria-label="מחיר מחירון + הנחת לקוח"></button>
       </div>
 
+      <div class="set-row" style="margin-top:0.6rem">
+        <span>מוצרים שאזלו מהמלאי בתחתית הקבוצה שלהם בקטלוג</span>
+        <button type="button" id="s-oos-bottom" class="adm-toggle${on('oos_sort_bottom_enabled', true) ? ' on' : ''}" aria-label="מוצרים שאזלו מהמלאי בתחתית הקבוצה"></button>
+      </div>
+
       <div class="set-row" style="margin-top:0.6rem"><span>סף תשלומים בחשבון — סכום מינימלי (₪)</span></div>
       <input id="s-installments-min" type="number" min="0" placeholder="1000" value="${escapeHtml(txt('installments_min_amount') || '1000')}" style="width:100%;box-sizing:border-box"/>
 
@@ -197,6 +202,8 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
   // ---- Prefs panel: plain toggle (no confirm), one combined save ----
   const discToggle = c.querySelector('#s-discount') as HTMLButtonElement;
   discToggle.onclick = () => discToggle.classList.toggle('on');
+  const oosBottomToggle = c.querySelector('#s-oos-bottom') as HTMLButtonElement;
+  oosBottomToggle.onclick = () => oosBottomToggle.classList.toggle('on');
 
   (c.querySelector('#s-prefs-save') as HTMLButtonElement).onclick = async () => {
     const msgEl = c.querySelector('#s-prefs-msg') as HTMLDivElement;
@@ -206,6 +213,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       const announcementEnabled = (c.querySelector('#s-ann') as HTMLInputElement).checked;
       const announcementText = (c.querySelector('#s-ann-text') as HTMLTextAreaElement).value;
       const discountEnabled = discToggle.classList.contains('on');
+      const oosBottomEnabled = oosBottomToggle.classList.contains('on');
       const maintenanceMessage = (c.querySelector('#s-maint-text') as HTMLTextAreaElement).value;
       // Blank/non-numeric/non-positive falls back to the server default rather than
       // saving a value that would make installments apply to every payment (a min of
@@ -225,6 +233,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         announcement_enabled: announcementEnabled,
         announcement_text: announcementText,
         discount_pricing_enabled: discountEnabled,
+        oos_sort_bottom_enabled: oosBottomEnabled,
         maintenance_message: maintenanceMessage,
         installments_min_amount: installmentsMin,
         installments_max: installmentsMax,
@@ -232,6 +241,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       s.announcement_enabled = String(announcementEnabled);
       s.announcement_text = announcementText;
       s.discount_pricing_enabled = String(discountEnabled);
+      s.oos_sort_bottom_enabled = String(oosBottomEnabled);
       s.maintenance_message = maintenanceMessage;
       s.installments_min_amount = installmentsMin;
       s.installments_max = installmentsMax;

@@ -1499,6 +1499,7 @@ const SETTABLE = new Set([
   'priority_receipt_terminal',
   'priority_receipts_test_custname',
   'discount_pricing_enabled',
+  'oos_sort_bottom_enabled',
   'unified_checkout_enabled',
   'installments_enabled',
   'installments_min_amount',
@@ -1506,7 +1507,7 @@ const SETTABLE = new Set([
   'saved_cards_enabled',
   'saved_card_charge_enabled',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled']);
 
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
   res.json({ settings: getAllSettings() });

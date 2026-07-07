@@ -242,10 +242,16 @@ export interface CatalogItem {
 /** Single source of truth for product availability. Today: the manual admin
  *  override only. FUTURE (out of scope): also treat Priority numeric `stock` <= 0
  *  as out of stock, with the manual override winning. Keep this the only place the
- *  rule lives, so that change is local. */
+ *  rule lives — together with its SQL twin OOS_SQL below — so that change is local. */
 export function isOutOfStock(row: { b2b_out_of_stock: number }): boolean {
   return row.b2b_out_of_stock === 1;
 }
+
+/** SQL twin of isOutOfStock() for ORDER BY in queryCatalog (catalog_cache alias `c`).
+ *  Evaluates to 0/1 and must express the same rule — when the FUTURE numeric-stock
+ *  clause lands in isOutOfStock(), OR it in here too, or sorting will silently
+ *  disagree with what the product card shows. */
+export const OOS_SQL = '(c.b2b_out_of_stock = 1)';
 
 export function queryCatalog(
   custname: string | null,
@@ -300,6 +306,13 @@ export function queryCatalog(
     .get(...params) as { c: number };
   const total = totalRow.c;
 
+  // "אזל מהמלאי" sinks to the end of its family group (grouped view) / the end of
+  // the list (flat + family-filtered views). Placed after the family keys — including
+  // the family CODE tiebreaker, which keeps codes contiguous even if two codes share
+  // a description (the client groups by code) — and after the search score, so a
+  // relevant-but-out-of-stock hit still shows near its match rank.
+  const oosLast = getSettingBool('oos_sort_bottom_enabled', true) ? `${OOS_SQL} ASC, ` : '';
+
   const rows = db
     .prepare(
       `SELECT c.partname, c.partdes, c.family, c.family_desc, c.barcode, c.list_price, c.image_url, c.box_size,
@@ -309,7 +322,7 @@ export function queryCatalog(
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
        WHERE ${where}
-       ORDER BY ${orderPrefix}${q.sort === 'family' ? 'c.family_desc IS NULL, c.family_desc COLLATE NOCASE ASC, c.partdes COLLATE NOCASE ASC' : 'c.b2b_sort_priority DESC, c.partdes ASC'}
+       ORDER BY ${orderPrefix}${q.sort === 'family' ? `c.family_desc IS NULL, c.family_desc COLLATE NOCASE ASC, c.family ASC, ${oosLast}c.partdes COLLATE NOCASE ASC` : `${oosLast}c.b2b_sort_priority DESC, c.partdes ASC`}
        LIMIT ? OFFSET ?`
     )
     .all(...scoreParams, custname, ...params, pageSize, offset) as Array<{
