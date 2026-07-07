@@ -99,7 +99,10 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
   // reliable "open the camera" path and works in every browser.
   function openScanner(): void {
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+      // width/height are `ideal` (non-required) hints: browsers never reject the call
+      // over them, they just pick the closest supported mode. Without them the stream
+      // defaults to 640×480 and cheque handwriting arrives too small for the OCR.
+      .getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1920 } }, audio: false })
       .then((stream) => showScanner(stream))
       .catch(() => cam.click());
   }
