@@ -211,6 +211,21 @@ export function deleteImage(partname: string): void {
   ).run(partname);
 }
 
+/** Promotion card image: same transcode pipeline as product images, but
+ *  content-addressed and not tied to a product row — the URL lives in the
+ *  promotion's params.imageUrl. Re-uploading identical content is a no-op. */
+export async function savePromoImage(buffer: Buffer): Promise<{ url: string }> {
+  const out = await sharp(buffer)
+    .rotate()
+    .resize({ width: 800, withoutEnlargement: true })
+    .webp({ quality: 82 })
+    .toBuffer();
+  const hash = crypto.createHash('sha1').update(out).digest('hex').slice(0, 16);
+  const filename = `promo_${hash}.webp`;
+  await fs.promises.writeFile(path.join(UPLOADS_DIR, filename), out);
+  return { url: `/uploads/${filename}` };
+}
+
 export interface BulkPayload {
   partnames: string[];
   action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature' | 'mark_out_of_stock' | 'mark_in_stock';

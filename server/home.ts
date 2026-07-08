@@ -95,11 +95,12 @@ function promoCards(custname: string): HomePromo[] {
       }
     }
     const prod = part ? getProduct(part, custname) : null;
+    // Admin display overrides (set in the promo form): custom card title + image.
     cards.push({
       id: p.id,
-      title: p.name,
+      title: String(pr.cardTitle || '') || p.name,
       subtitle: prod?.partdes && !subtitle.includes(prod.partdes) ? `${subtitle} · ${prod.partdes}` : subtitle,
-      image_url: prod?.image_url ?? null,
+      image_url: String(pr.imageUrl || '') || (prod?.image_url ?? null),
       href: prod ? `#product/${encodeURIComponent(prod.partname)}` : '#catalog',
     });
   }

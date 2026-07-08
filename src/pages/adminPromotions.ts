@@ -2,7 +2,7 @@
 // src/pages/adminCustomers.ts. Row click → drawer (details, active toggle, danger
 // zone). FAB → creation drawer (the old full-page form, re-parented unchanged).
 import { api } from '../api.js';
-import { escapeHtml, formatDate } from '../format.js';
+import { escapeAttr, escapeHtml, formatDate } from '../format.js';
 import { confirmDialog, openDrawer, toast } from '../ui.js';
 
 interface Promo {
@@ -34,7 +34,7 @@ export async function renderPromotionsAdmin(shell: HTMLElement): Promise<void> {
     </div>
     <div id="promo-list" class="adm-card" style="padding:0;overflow:hidden"></div>
     <button type="button" id="promo-fab" class="adm-fab" aria-label="מבצע חדש">+</button>`;
-  (shell.querySelector('#promo-fab') as HTMLButtonElement).onclick = () => openPromoCreateDrawer(shell);
+  (shell.querySelector('#promo-fab') as HTMLButtonElement).onclick = () => openPromoFormDrawer(shell);
   await loadPromoList(shell);
 }
 
@@ -50,7 +50,7 @@ async function loadPromoList(shell: HTMLElement): Promise<void> {
         <div class="adm-empty">מבצעים שתגדיר יופיעו כאן ויוצגו ללקוחות בקטלוג ובעגלה<br/>
           <button type="button" id="promo-empty-cta" class="adm-btn-ghost" style="margin-top:10px">+ מבצע חדש</button>
         </div>`;
-      (wrap.querySelector('#promo-empty-cta') as HTMLButtonElement).onclick = () => openPromoCreateDrawer(shell);
+      (wrap.querySelector('#promo-empty-cta') as HTMLButtonElement).onclick = () => openPromoFormDrawer(shell);
       return;
     }
 
@@ -96,6 +96,7 @@ async function openPromoDrawer(p: Promo, shell: HTMLElement): Promise<void> {
       <div class="adm-sect-label">סטטוס</div>
       <label class="adm-toggle-line"><button type="button" id="pd-active" class="adm-toggle ${p.active ? 'on' : ''}"></button>מבצע פעיל</label>
     </div>
+    <button type="button" id="pd-edit" class="adm-btn-ghost" style="width:100%">✏️ עריכת המבצע (תנאים, כותרת, תמונה)</button>
     <details class="adm-danger"><summary>אזור מסוכן ▾</summary>
       <button type="button" id="pd-delete" class="adm-btn-ghost" style="margin-top:8px;color:var(--err);border-color:#f0c9c5">מחיקת המבצע</button>
     </details>`;
@@ -104,6 +105,11 @@ async function openPromoDrawer(p: Promo, shell: HTMLElement): Promise<void> {
     title: p.name,
     sub: escapeHtml(TYPE_HE[p.type] || p.type),
   });
+
+  (body.querySelector('#pd-edit') as HTMLButtonElement).onclick = () => {
+    drawer.close();
+    openPromoFormDrawer(shell, p);
+  };
 
   (body.querySelector('#pd-active') as HTMLButtonElement).onclick = async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
@@ -134,14 +140,17 @@ async function openPromoDrawer(p: Promo, shell: HTMLElement): Promise<void> {
   };
 }
 
-// FAB → creation drawer. The form fields + type-switching logic + POST payload
-// assembly below are the previous full-page form, re-parented into the drawer
-// body unchanged.
-function openPromoCreateDrawer(shell: HTMLElement): void {
+// FAB / "עריכה" → one shared form drawer. Without `existing` it creates (POST);
+// with it, every field is prefilled and saving PATCHes the same id.
+function openPromoFormDrawer(shell: HTMLElement, existing?: Promo): void {
+  const isEdit = !!existing;
+  const x = (existing?.params || {}) as Record<string, unknown>;
+  let imgUrl = String(x.imageUrl || '');
+
   const body = document.createElement('div');
   body.className = 'adm-drawer-body';
   body.innerHTML = `
-    <div><div class="adm-sect-label">שם המבצע</div><input id="pm-name" placeholder="שם המבצע (יוצג ללקוח)" style="width:100%"/></div>
+    <div><div class="adm-sect-label">שם המבצע</div><input id="pm-name" placeholder="שם פנימי (וגם כותרת ברירת המחדל)" style="width:100%"/></div>
     <div><div class="adm-sect-label">סוג מבצע</div>
       <select id="pm-type" style="width:100%">
         <option value="percent">אחוז הנחה</option>
@@ -151,6 +160,18 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
       </select>
     </div>
     <div id="pm-fields"></div>
+    <div><div class="adm-sect-label">כותרת תצוגה בכרטיס (אופציונלי)</div>
+      <input id="pm-cardtitle" placeholder="אם ריק — יוצג שם המבצע" style="width:100%"/>
+    </div>
+    <div><div class="adm-sect-label">תמונת המבצע (אופציונלי)</div>
+      <div id="pm-img-box" style="height:112px;border:1px dashed var(--border);border-radius:12px;display:grid;place-items:center;overflow:hidden;background:#f3f5f7;font-size:2rem"></div>
+      <input id="pm-img-file" type="file" accept="image/*" hidden/>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button type="button" id="pm-img-up" class="adm-btn-ghost" style="flex:1">📷 העלאת תמונה</button>
+        <button type="button" id="pm-img-rm" class="adm-btn-ghost" style="display:none">הסרה ✕</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:4px">מומלץ 800×400 פיקסלים (רוחב×גובה), JPG/PNG/WebP עד 4MB. מוצגת בלי חיתוך; בלי תמונה יוצג המוצר שבמבצע.</div>
+    </div>
     <div style="display:flex;gap:10px">
       <div style="flex:1"><div class="adm-sect-label">תאריך התחלה</div><input id="pm-start" type="date" style="width:100%"/></div>
       <div style="flex:1"><div class="adm-sect-label">תאריך סיום</div><input id="pm-end" type="date" style="width:100%"/></div>
@@ -158,10 +179,13 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
 
   const foot = document.createElement('div');
   foot.className = 'adm-drawer-foot';
-  foot.innerHTML = `<button type="button" class="save" id="pm-create">יצירת מבצע</button>`;
+  foot.innerHTML = `<button type="button" class="save" id="pm-save">${isEdit ? 'שמירת שינויים' : 'יצירת מבצע'}</button>`;
   body.append(foot);
 
-  const drawer = openDrawer(body, { title: 'מבצע חדש', sub: 'המבצע יוצג ללקוחות בקטלוג ובעגלה' });
+  const drawer = openDrawer(body, {
+    title: isEdit ? `עריכה: ${existing.name}` : 'מבצע חדש',
+    sub: 'המבצע יוצג ללקוחות במסך הבית, בקטלוג ובעגלה',
+  });
 
   const fieldsFor = (t: string): string => {
     if (t === 'percent' || t === 'fixed')
@@ -193,8 +217,72 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
 
   const v = (id: string) => (body.querySelector('#' + id) as HTMLInputElement | HTMLSelectElement | null)?.value || '';
   const n = (id: string) => Number(v(id)) || 0;
+  const setVal = (id: string, val: unknown) => {
+    const el = body.querySelector('#' + id) as HTMLInputElement | HTMLSelectElement | null;
+    if (el && val != null && val !== '') el.value = String(val);
+  };
 
-  (body.querySelector('#pm-create') as HTMLButtonElement).onclick = async (e) => {
+  // ---- prefill (edit mode) ----
+  if (isEdit) {
+    setVal('pm-name', existing.name);
+    typeSel.value = existing.type;
+    renderFields();
+    if (existing.type === 'percent' || existing.type === 'fixed') {
+      setVal('pf-scope', x.scope);
+      setVal('pf-target', x.target);
+      setVal('pf-value', existing.type === 'percent' ? x.percent : x.amount);
+      setVal('pf-min', x.minSubtotal);
+    } else if (existing.type === 'bogo') {
+      setVal('pf-part', x.partname);
+      setVal('pf-buy', x.buy);
+      setVal('pf-free', x.free);
+    } else {
+      setVal('pf-gift', x.giftPartname);
+      setVal('pf-gqty', x.giftQty);
+      setVal('pf-min', x.minSubtotal);
+      setVal('pf-cond', x.condPartname);
+      setVal('pf-cqty', x.condQty);
+    }
+    setVal('pm-cardtitle', x.cardTitle);
+    setVal('pm-start', existing.startsAt);
+    setVal('pm-end', existing.endsAt);
+  }
+
+  // ---- promo image: upload / preview / remove ----
+  const imgBox = body.querySelector('#pm-img-box') as HTMLElement;
+  const imgFile = body.querySelector('#pm-img-file') as HTMLInputElement;
+  const imgRm = body.querySelector('#pm-img-rm') as HTMLButtonElement;
+  const renderImg = () => {
+    imgBox.innerHTML = imgUrl ? `<img src="${escapeAttr(imgUrl)}" alt="" style="width:100%;height:100%;object-fit:contain"/>` : '🎁';
+    imgRm.style.display = imgUrl ? '' : 'none';
+  };
+  renderImg();
+  (body.querySelector('#pm-img-up') as HTMLButtonElement).onclick = () => imgFile.click();
+  imgRm.onclick = () => {
+    imgUrl = '';
+    renderImg();
+  };
+  imgFile.onchange = async () => {
+    const f = imgFile.files?.[0];
+    imgFile.value = '';
+    if (!f) return;
+    imgBox.innerHTML = '<span class="muted" style="font-size:13px">מעלה…</span>';
+    try {
+      const fd = new FormData();
+      fd.append('image', f);
+      const res = await fetch('/api/admin/promotions/image', { method: 'POST', body: fd, credentials: 'include' });
+      const j = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !j.url) throw new Error(j.error || `HTTP ${res.status}`);
+      imgUrl = j.url;
+      toast('התמונה הועלתה ✓', 'ok');
+    } catch (ex) {
+      toast(ex instanceof Error ? ex.message : 'העלאת התמונה נכשלה', 'error');
+    }
+    renderImg();
+  };
+
+  // ---- save (POST new / PATCH existing) ----
+  (body.querySelector('#pm-save') as HTMLButtonElement).onclick = async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
     const type = typeSel.value;
     let params: Record<string, unknown> = {};
@@ -202,20 +290,18 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
     else if (type === 'fixed') params = { scope: v('pf-scope'), target: v('pf-target') || undefined, amount: n('pf-value'), minSubtotal: n('pf-min') || undefined };
     else if (type === 'bogo') params = { partname: v('pf-part'), buy: n('pf-buy'), free: n('pf-free') };
     else params = { minSubtotal: n('pf-min'), giftPartname: v('pf-gift'), giftQty: n('pf-gqty'), condPartname: v('pf-cond') || undefined, condQty: n('pf-cqty') || undefined };
+    params.cardTitle = v('pm-cardtitle').trim() || undefined;
+    params.imageUrl = imgUrl || undefined;
+    const payload = { name: v('pm-name'), type, params, startsAt: v('pm-start') || null, endsAt: v('pm-end') || null };
     btn.disabled = true;
     try {
-      await api.post('/api/admin/promotions', {
-        name: v('pm-name'),
-        type,
-        params,
-        startsAt: v('pm-start') || null,
-        endsAt: v('pm-end') || null,
-      });
-      toast('המבצע נוצר ✓', 'ok');
+      if (isEdit) await api.patch(`/api/admin/promotions/${existing.id}`, payload);
+      else await api.post('/api/admin/promotions', payload);
+      toast(isEdit ? 'המבצע עודכן ✓' : 'המבצע נוצר ✓', 'ok');
       drawer.close();
       void loadPromoList(shell);
     } catch (ex) {
-      toast(ex instanceof Error ? ex.message : 'היצירה נכשלה', 'error');
+      toast(ex instanceof Error ? ex.message : 'השמירה נכשלה', 'error');
     }
     btn.disabled = false;
   };

@@ -88,6 +88,7 @@ import {
   listProductsAdmin,
   patchProduct,
   saveImage,
+  savePromoImage,
   upload,
   UPLOADS_DIR,
 } from './products.js';
@@ -1330,6 +1331,24 @@ app.delete('/api/admin/promotions/:id', requireAdmin, (req, res) => {
   const ok = deletePromotion(Number(req.params.id));
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });
+// Promo card image (id-less: the returned URL is saved into params.imageUrl on submit).
+app.post(
+  '/api/admin/promotions/image',
+  requireAdmin,
+  imageUploadLimiter,
+  upload.single('image'),
+  ah(async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ error: 'no_file' });
+      return;
+    }
+    try {
+      res.json(await savePromoImage(req.file.buffer));
+    } catch (err) {
+      res.status(400).json({ error: redactedError(req.reqId, 'admin/promo-image', err) });
+    }
+  })
+);
 
 function parsePaidItems(raw: string | null): string[] | null {
   if (!raw) return null;
