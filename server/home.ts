@@ -83,8 +83,16 @@ function promoCards(custname: string): HomePromo[] {
       const min = num(pr.minSubtotal);
       subtitle = scope === 'order' ? `${what} על כל ההזמנה${min ? ` מעל ₪${min}` : ''}` : what;
     } else if (p.type === 'gift') {
-      part = String(pr.giftPartname || '') || null;
-      subtitle = `מתנה בקנייה מעל ₪${num(pr.minSubtotal)}`;
+      const condPart = String(pr.condPartname || '');
+      if (condPart) {
+        // Qty-conditional gift: the card shows the product to BUY; the gift is named in the subtitle.
+        part = condPart;
+        const gift = getProduct(String(pr.giftPartname || ''), custname);
+        subtitle = `קנו ${Math.max(1, num(pr.condQty, 1))} יח׳ וקבלו ${Math.max(1, num(pr.giftQty, 1))} יח׳ ${gift?.partdes || 'מתנה'} חינם`;
+      } else {
+        part = String(pr.giftPartname || '') || null;
+        subtitle = `מתנה בקנייה מעל ₪${num(pr.minSubtotal)}`;
+      }
     }
     const prod = part ? getProduct(part, custname) : null;
     cards.push({

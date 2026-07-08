@@ -16,14 +16,14 @@ interface Promo {
   endsAt: string | null;
 }
 
-const TYPE_HE: Record<string, string> = { percent: 'אחוז הנחה', fixed: 'הנחה בש"ח', bogo: '1+1 / קנה-קבל', gift: 'מתנה מעל סכום' };
+const TYPE_HE: Record<string, string> = { percent: 'אחוז הנחה', fixed: 'הנחה בש"ח', bogo: '1+1 / קנה-קבל', gift: 'מתנה (סכום/כמות)' };
 
 function describe(p: Promo): string {
   const x = p.params;
   if (p.type === 'percent') return `${x.percent}% הנחה על ${x.scope === 'order' ? 'כל ההזמנה' : x.scope === 'family' ? 'משפחה ' + x.target : 'מק"ט ' + x.target}${x.minSubtotal ? ` (מעל ₪${x.minSubtotal})` : ''}`;
   if (p.type === 'fixed') return `₪${x.amount} הנחה על ${x.scope === 'order' ? 'כל ההזמנה' : x.scope === 'family' ? 'משפחה ' + x.target : 'מק"ט ' + x.target}${x.minSubtotal ? ` (מעל ₪${x.minSubtotal})` : ''}`;
   if (p.type === 'bogo') return `קנה ${x.buy} קבל ${x.free} חינם · מק"ט ${x.partname}`;
-  if (p.type === 'gift') return `מעל ₪${x.minSubtotal} → מתנה ${x.giftPartname} ×${x.giftQty}`;
+  if (p.type === 'gift') return x.condPartname ? `כל ${x.condQty} יח׳ ${x.condPartname} → מתנה ${x.giftPartname} ×${x.giftQty}` : `מעל ₪${x.minSubtotal} → מתנה ${x.giftPartname} ×${x.giftQty}`;
   return JSON.stringify(x);
 }
 
@@ -147,7 +147,7 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
         <option value="percent">אחוז הנחה</option>
         <option value="fixed">הנחה בש"ח</option>
         <option value="bogo">1+1 / קנה-קבל</option>
-        <option value="gift">מתנה מעל סכום</option>
+        <option value="gift">מתנה (מעל סכום או לפי כמות ממוצר)</option>
       </select>
     </div>
     <div id="pm-fields"></div>
@@ -178,9 +178,11 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
         <input id="pf-free" type="number" placeholder="קבל חינם (כמות)" value="1"/>
       </div>`;
     return `<div class="form-grid">
-        <input id="pf-min" type="number" step="0.01" placeholder="מעל סכום ₪"/>
         <input id="pf-gift" placeholder='מק"ט המתנה'/>
         <input id="pf-gqty" type="number" placeholder="כמות מתנה" value="1"/>
+        <input id="pf-min" type="number" step="0.01" placeholder="תנאי: מעל סכום ₪"/>
+        <input id="pf-cond" placeholder='או תנאי כמות: מק"ט שקונים (אופציונלי)'/>
+        <input id="pf-cqty" type="number" placeholder="כמות שקונים (למשל 60)"/>
       </div>`;
   };
   const typeSel = body.querySelector('#pm-type') as HTMLSelectElement;
@@ -199,7 +201,7 @@ function openPromoCreateDrawer(shell: HTMLElement): void {
     if (type === 'percent') params = { scope: v('pf-scope'), target: v('pf-target') || undefined, percent: n('pf-value'), minSubtotal: n('pf-min') || undefined };
     else if (type === 'fixed') params = { scope: v('pf-scope'), target: v('pf-target') || undefined, amount: n('pf-value'), minSubtotal: n('pf-min') || undefined };
     else if (type === 'bogo') params = { partname: v('pf-part'), buy: n('pf-buy'), free: n('pf-free') };
-    else params = { minSubtotal: n('pf-min'), giftPartname: v('pf-gift'), giftQty: n('pf-gqty') };
+    else params = { minSubtotal: n('pf-min'), giftPartname: v('pf-gift'), giftQty: n('pf-gqty'), condPartname: v('pf-cond') || undefined, condQty: n('pf-cqty') || undefined };
     btn.disabled = true;
     try {
       await api.post('/api/admin/promotions', {

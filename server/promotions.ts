@@ -150,7 +150,19 @@ export function applyPromotions(lines: PromoLine[], custname: string): PromoResu
       const giftQty = Math.max(1, num(pr.giftQty, 1));
       const prod = getProduct(giftPart, custname);
       if (!prod) continue;
-      if (subtotal >= min) {
+      const condPart = String(pr.condPartname || '');
+      if (condPart) {
+        // Qty-conditional gift: every condQty units of condPart in the cart grant
+        // giftQty gift units ("buy 60 of X → get 24 of Y"), multiplicatively.
+        // No ₪-nudge here — giftProgress is money-based and would render wrong.
+        const condQty = Math.max(1, num(pr.condQty, 1));
+        const line = lines.find((l) => l.partname === condPart);
+        const mult = line ? Math.floor(line.quantity / condQty) : 0;
+        if (mult > 0 && !gifts.find((g) => g.partname === giftPart)) {
+          gifts.push({ partname: giftPart, partdes: prod.partdes, qty: giftQty * mult, price: prod.price ?? 0 });
+          applied.push({ id: p.id, name: p.name, type: p.type, savings: round2((prod.price ?? 0) * giftQty * mult) });
+        }
+      } else if (subtotal >= min) {
         if (!gifts.find((g) => g.partname === giftPart)) {
           gifts.push({ partname: giftPart, partdes: prod.partdes, qty: giftQty, price: prod.price ?? 0 });
           applied.push({ id: p.id, name: p.name, type: p.type, savings: round2((prod.price ?? 0) * giftQty) });
