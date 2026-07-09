@@ -1790,8 +1790,9 @@ app.get('/api/admin/orders', requireAdmin, (req, res) => {
   const scope = req.query.scope === 'open' ? 'open' : 'all';
   const where = scope === 'open' ? 'WHERE priority_ordname IS NULL' : '';
   const orders = db.prepare(
-    `SELECT id, custname, status, payment_status, total, payment_required_amount, priority_ordname, error, created_at
-       FROM orders_local ${where} ORDER BY created_at DESC LIMIT 200`
+    `SELECT o.id, o.custname, o.status, o.payment_status, o.total, o.payment_required_amount, o.priority_ordname, o.error, o.created_at,
+            (SELECT MAX(u.cust_desc) FROM users u WHERE u.custname = o.custname) AS cust_desc
+       FROM orders_local o ${where} ORDER BY o.created_at DESC LIMIT 200`
   ).all();
   res.json({ orders });
 });

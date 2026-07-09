@@ -10,7 +10,7 @@ import { refreshOpsBadges } from './adminShell.js';
 interface StuckOrder { id: number; custname: string; status: string; total: number; payment_status: string; created_at: string; error?: string }
 
 interface OrderRow {
-  id: number; custname: string; status: string; payment_status: string; total: number;
+  id: number; custname: string; cust_desc: string | null; status: string; payment_status: string; total: number;
   payment_required_amount: number | null; priority_ordname: string | null; error?: string | null; created_at: string;
 }
 
@@ -175,7 +175,7 @@ function orderRowHtml(o: OrderRow): string {
   return `
     <div class="ord-grid">
       <span class="muted tabnum">#${o.id}</span>
-      <span class="cust-name">${escapeHtml(o.custname)}</span>
+      <span class="cust-name">${o.cust_desc ? `${escapeHtml(o.cust_desc)} <span class="muted tabnum">${escapeHtml(o.custname)}</span>` : escapeHtml(o.custname)}</span>
       <span class="muted">${escapeHtml(relativeDate(o.created_at))}</span>
       <span>${statusPillHtml(o)}</span>
       <span class="money">${formatMoney(o.total)}</span>
