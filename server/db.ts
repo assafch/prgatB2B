@@ -388,6 +388,10 @@ ensureColumn('catalog_cache', 'b2b_category_override', 'TEXT');
 // Manual admin "out of stock" override (אזל מהמלאי). 1 = out of stock (grayed,
 // un-orderable); 0 = in stock. Independent of the unused Priority `stock` column.
 ensureColumn('catalog_cache', 'b2b_out_of_stock', 'INTEGER NOT NULL DEFAULT 0');
+// "מוצר חדש" home-rail flag (manual admin, like out-of-stock). b2b_new_since is
+// stamped on the 0→1 transition only — it orders the rail newest-first.
+ensureColumn('catalog_cache', 'b2b_is_new', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('catalog_cache', 'b2b_new_since', 'TEXT');
 // Payment policy / order approval (Phase 1 foundation — inert until the engine ships).
 ensureColumn('orders_local', 'payment_status', "TEXT NOT NULL DEFAULT 'not_required'");
 ensureColumn('orders_local', 'payment_required_amount', 'REAL');

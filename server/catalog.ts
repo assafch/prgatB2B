@@ -237,6 +237,8 @@ export interface CatalogItem {
   /** true → "אזל מהמלאי": shown grayed, cannot be added to the cart. The customer
    *  never sees a numeric stock level — only this boolean. */
   outOfStock: boolean;
+  /** true → admin flagged "מוצר חדש": shows the catalog pill + the home rail. */
+  isNew: boolean;
 }
 
 /** Single source of truth for product availability. Today: the manual admin
@@ -317,7 +319,7 @@ export function queryCatalog(
     .prepare(
       `SELECT c.partname, c.partdes, c.family, c.family_desc, c.barcode, c.list_price, c.image_url, c.box_size,
               c.b2b_partdes_override, c.b2b_image_path, c.b2b_min_qty, c.b2b_featured, c.b2b_description,
-              c.b2b_category_override, c.b2b_out_of_stock,
+              c.b2b_category_override, c.b2b_out_of_stock, c.b2b_is_new,
               p.price AS personal_price${scoreSelect}
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
@@ -341,6 +343,7 @@ export function queryCatalog(
       b2b_description: string | null;
       b2b_category_override: string | null;
       b2b_out_of_stock: number;
+      b2b_is_new: number;
       personal_price: number | null;
     }>;
 
@@ -358,6 +361,7 @@ export function queryCatalog(
     description: r.b2b_description,
     price: usePersonal ? r.personal_price ?? r.list_price : effectivePrice(r.list_price, discountPct),
     outOfStock: isOutOfStock(r),
+    isNew: r.b2b_is_new === 1,
   }));
 
   return { items, total };
@@ -368,7 +372,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     .prepare(
       `SELECT c.partname, c.partdes, c.family, c.family_desc, c.barcode, c.list_price, c.image_url, c.box_size,
               c.b2b_partdes_override, c.b2b_image_path, c.b2b_min_qty, c.b2b_featured, c.b2b_description,
-              c.b2b_category_override, c.b2b_out_of_stock, c.b2b_visible, c.active,
+              c.b2b_category_override, c.b2b_out_of_stock, c.b2b_is_new, c.b2b_visible, c.active,
               p.price AS personal_price
        FROM catalog_cache c
        LEFT JOIN customer_pricing p ON p.partname = c.partname AND p.custname = ?
@@ -391,6 +395,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
         b2b_description: string | null;
         b2b_category_override: string | null;
         b2b_out_of_stock: number;
+        b2b_is_new: number;
         b2b_visible: number;
         active: number;
         personal_price: number | null;
@@ -414,6 +419,7 @@ export function getProduct(partname: string, custname: string | null): CatalogIt
     description: row.b2b_description,
     price: usePersonal ? row.personal_price ?? row.list_price : effectivePrice(row.list_price, discountPct),
     outOfStock: isOutOfStock(row),
+    isNew: row.b2b_is_new === 1,
   };
 }
 
@@ -446,4 +452,26 @@ export function listFamiliesLocal(): Array<{ family: string; family_desc: string
        ORDER BY family_desc, family`
     )
     .all() as Array<{ family: string; family_desc: string | null; count: number }>;
+}
+
+/** Home-rail "מוצרים חדשים": admin-flagged products, newest stamp first. Runs each
+ *  candidate through getProduct so pricing/visibility/OOS rules stay in ONE place.
+ *  Scans all flagged candidates in order until limit eligible ones are found. The set
+ *  of flagged products is admin-curated and small, so an unbounded candidate scan is fine. */
+export function listNewProducts(custname: string | null, limit = 12): CatalogItem[] {
+  const rows = db
+    .prepare(
+      `SELECT partname FROM catalog_cache
+       WHERE b2b_is_new = 1 AND active = 1 AND b2b_visible = 1
+       ORDER BY b2b_new_since DESC, updated_at DESC`
+    )
+    .all() as { partname: string }[];
+  const out: CatalogItem[] = [];
+  for (const r of rows) {
+    const p = getProduct(r.partname, custname);
+    if (!p || p.outOfStock || typeof p.price !== 'number' || p.price <= 0) continue;
+    out.push(p);
+    if (out.length >= limit) break;
+  }
+  return out;
 }

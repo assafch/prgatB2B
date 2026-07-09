@@ -15,6 +15,7 @@ interface CatalogItem {
   image_url: string | null;
   box_size: number;
   outOfStock?: boolean; // "אזל מהמלאי" — grayed, cannot be added
+  isNew?: boolean;
 }
 
 interface Family {
@@ -586,7 +587,7 @@ function gridCard(it: CatalogItem): string {
       <button class="fav fav-card ${favSet.has(it.partname) ? 'on' : ''}" data-part="${p}" type="button" aria-label="מועדף">${favSet.has(it.partname) ? '♥' : '♡'}</button>
       <div class="cat-card-top">
         <a class="cat-card-info" href="#product/${enc}">
-          <div class="nm">${escapeHtml(it.partdes || it.partname)}</div>
+          <div class="nm">${it.isNew ? '<span class="new-pill">חדש</span> ' : ''}${escapeHtml(it.partdes || it.partname)}</div>
           <div class="sku">מק"ט: ${escapeHtml(it.partname)} · ארגז ${it.box_size}</div>
         </a>
         <a class="cat-card-thumb" href="#product/${enc}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt=""/>` : '<span>—</span>'}</a>

@@ -7,7 +7,7 @@ import { db, getSetting, getSettingBool } from './db.js';
 import { getAccountSummary, type BalanceSummary } from './finance.js';
 import { getReorderSuggestions, type ReorderSuggestion } from './reorder.js';
 import { activePromotions } from './promotions.js';
-import { getProduct } from './catalog.js';
+import { getProduct, listNewProducts, type CatalogItem } from './catalog.js';
 import { resolvePolicy, enforcedFor, computeBlockingNetDebt } from './paymentPolicy.js';
 import { installmentsRange } from './cardPayments.js';
 import { tokenVaultReady } from './tokenVault.js';
@@ -41,6 +41,8 @@ export interface HomeData {
   lastOrder: LastOrderView | null;
   suggestions: ReorderSuggestion[];
   promotions: HomePromo[];
+  /** admin-flagged "מוצרים חדשים" for the home rail (visible, in-stock, priced; max 12) */
+  newProducts: CatalogItem[];
   /** server-owned feature flags so the client never shows dead CTAs */
   features: {
     payments: boolean;
@@ -164,6 +166,7 @@ export async function getHomeData(
     lastOrder,
     suggestions: getReorderSuggestions(userId, custname),
     promotions: promoCards(custname),
+    newProducts: listNewProducts(custname),
     features: {
       // Admin-toggleable (settings table), with the original env/default as fallback.
       payments: getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true'),

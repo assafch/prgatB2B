@@ -20,6 +20,7 @@ interface AdminProduct {
   b2b_featured: number;
   b2b_category_override: string | null;
   b2b_out_of_stock: number;
+  b2b_is_new: number;
   updated_at: string;
 }
 
@@ -47,6 +48,7 @@ function chipStyle(field: string, on: boolean): string {
   if (!on) return 'background:#f3f4f6;color:#9aa0a6;border-color:#e5e7eb';
   if (field === 'b2b_out_of_stock') return 'background:#ffe3e3;color:#c0341e;border-color:#f3b0a8';
   if (field === 'b2b_featured') return 'background:#ffeed1;color:#9c5500;border-color:#e8c98f';
+  if (field === 'b2b_is_new') return 'background:#dcfce7;color:#15803d;border-color:#86efac';
   return 'background:#e7e9f5;color:#3a3f7a;border-color:#c4c8ec'; // מוסתר (b2b_visible inverted)
 }
 function statusToggle(part: string, label: string, on: boolean, field: string, invert = false): string {
@@ -111,6 +113,8 @@ export async function renderAdminProducts(shell: HTMLElement): Promise<void> {
           <button class="ghost" data-bulk="unfeature">בטל מומלצים</button>
           <button class="ghost" data-bulk="mark_out_of_stock">סמן כאזל מהמלאי</button>
           <button class="ghost" data-bulk="mark_in_stock">סמן כקיים במלאי</button>
+          <button class="ghost" data-bulk="mark_new">סמן כחדשים</button>
+          <button class="ghost" data-bulk="unmark_new">בטל חדשים</button>
           <button class="ghost" data-bulk="set_box_size">עדכן גודל ארגז…</button>
           <button class="ghost" data-bulk="set_min_qty">עדכן מינ׳ הזמנה…</button>
         </div>
@@ -351,7 +355,9 @@ function renderRow(p: AdminProduct): string {
     ' ' +
     statusToggle(p.partname, 'אזל', !!p.b2b_out_of_stock, 'b2b_out_of_stock') +
     ' ' +
-    statusToggle(p.partname, '⭐', !!p.b2b_featured, 'b2b_featured');
+    statusToggle(p.partname, '⭐', !!p.b2b_featured, 'b2b_featured') +
+    ' ' +
+    statusToggle(p.partname, 'חדש', !!p.b2b_is_new, 'b2b_is_new');
   return `
     <tr data-part="${part}" style="border-bottom:1px solid var(--border);cursor:pointer">
       <td style="padding:0.5rem"><input type="checkbox" class="row-check" data-part="${part}"/></td>
@@ -529,6 +535,9 @@ async function openDrawer(shell: HTMLElement, partname: string): Promise<void> {
         <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
           <input type="checkbox" name="b2b_out_of_stock" ${p.b2b_out_of_stock ? 'checked' : ''}/> 🚫 אזל מהמלאי (לא ניתן להזמנה)
         </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+          <input type="checkbox" name="b2b_is_new" ${p.b2b_is_new ? 'checked' : ''}/> ✨ מוצר חדש (מופיע במסך הבית)
+        </label>
         <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
           <button type="submit">שמור</button>
           <button type="button" class="ghost" id="drawer-cancel">סגור</button>
@@ -591,6 +600,7 @@ async function openDrawer(shell: HTMLElement, partname: string): Promise<void> {
         b2b_visible: fd.get('b2b_visible') === 'on',
         b2b_featured: fd.get('b2b_featured') === 'on',
         b2b_out_of_stock: fd.get('b2b_out_of_stock') === 'on',
+        b2b_is_new: fd.get('b2b_is_new') === 'on',
       };
       try {
         await api.patch(`/api/admin/products/${encodeURIComponent(p.partname)}`, patch);

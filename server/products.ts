@@ -36,6 +36,8 @@ export interface AdminProductRow {
   b2b_featured: number;
   b2b_category_override: string | null;
   b2b_out_of_stock: number;
+  b2b_is_new: number;
+  b2b_new_since: string | null;
   updated_at: string;
 }
 
@@ -93,7 +95,8 @@ export function listProductsAdmin(q: ListQuery): { items: AdminProductRow[]; tot
     .prepare(
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
-              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock, updated_at
+              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock,
+              b2b_is_new, b2b_new_since, updated_at
        FROM catalog_cache
        ${where}
        ORDER BY b2b_sort_priority DESC, partdes ASC
@@ -109,7 +112,8 @@ export function getProductAdmin(partname: string): AdminProductRow | null {
     .prepare(
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
-              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock, updated_at
+              b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock,
+              b2b_is_new, b2b_new_since, updated_at
        FROM catalog_cache WHERE partname = ?`
     )
     .get(partname) as AdminProductRow | undefined) ?? null;
@@ -125,6 +129,7 @@ const PATCHABLE_COLUMNS = new Set([
   'b2b_featured',
   'b2b_category_override',
   'b2b_out_of_stock',
+  'b2b_is_new',
   'box_size',
 ]);
 
@@ -141,6 +146,17 @@ export function patchProduct(partname: string, patch: Record<string, unknown>): 
       vals.push(null);
     } else {
       vals.push(v);
+    }
+  }
+  // Flipping b2b_is_new manages its companion stamp: 0→1 stamps b2b_new_since
+  // (orders the home rail newest-first), 1→0 clears it. Same-value saves leave
+  // the stamp alone so an edited product doesn't jump to the front of the rail.
+  if ('b2b_is_new' in patch) {
+    const cur = db.prepare('SELECT b2b_is_new FROM catalog_cache WHERE partname = ?').get(partname) as
+      | { b2b_is_new: number } | undefined;
+    const next = patch.b2b_is_new ? 1 : 0;
+    if (cur && cur.b2b_is_new !== next) {
+      cols.push(next ? "b2b_new_since = datetime('now')" : 'b2b_new_since = NULL');
     }
   }
   if (cols.length === 0) return getProductAdmin(partname);
@@ -228,7 +244,7 @@ export async function savePromoImage(buffer: Buffer): Promise<{ url: string }> {
 
 export interface BulkPayload {
   partnames: string[];
-  action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature' | 'mark_out_of_stock' | 'mark_in_stock';
+  action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature' | 'mark_out_of_stock' | 'mark_in_stock' | 'mark_new' | 'unmark_new';
   value?: number;
 }
 
@@ -255,6 +271,12 @@ export function bulkUpdate(payload: BulkPayload): number {
       break;
     case 'mark_in_stock':
       setClause = 'b2b_out_of_stock = 0';
+      break;
+    case 'mark_new':
+      setClause = "b2b_is_new = 1, b2b_new_since = datetime('now')";
+      break;
+    case 'unmark_new':
+      setClause = 'b2b_is_new = 0, b2b_new_since = NULL';
       break;
     case 'set_box_size':
       if (!Number.isFinite(payload.value) || (payload.value ?? 0) <= 0) return 0;
