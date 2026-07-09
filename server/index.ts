@@ -837,9 +837,9 @@ app.post('/api/favorites', requireCustomer, cartLimiter, (req: AuthedRequest, re
 });
 
 app.post('/api/orders', requireCustomer, blockIfMaintenance, ordersMinuteLimiter, ordersDailyLimiter, ah(async (req, res) => {
-  const { details } = (req.body || {}) as { details?: string };
+  const { details, track } = (req.body || {}) as { details?: string; track?: string };
   try {
-    const result = await submitOrder(req.user!.id, req.user!.custname!, details);
+    const result = await submitOrder(req.user!.id, req.user!.custname!, details, track === 'fast' ? 'fast' : 'regular');
     if (result.needsPayment) {
       notifyUser(req.user!.id, { title: 'ההזמנה ממתינה לתשלום', body: 'השלימו תשלום כדי שההזמנה תאושר ותישלח', url: '#order-pay/' + result.orderId });
     } else {
@@ -1525,8 +1525,10 @@ const SETTABLE = new Set([
   'installments_max',
   'saved_cards_enabled',
   'saved_card_charge_enabled',
+  'fast_track_enabled',
+  'fast_track_discount_pct',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled', 'fast_track_enabled']);
 
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
   res.json({ settings: getAllSettings() });

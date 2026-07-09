@@ -5,6 +5,7 @@ import { createOrder, findOrderByBookNum, getPriorityConfig, listOrdersForCustom
 import { getProduct } from './catalog.js';
 import { applyPromotions, type PromoResult } from './promotions.js';
 import { enforcedFor, evaluate } from './paymentPolicy.js';
+import { fastTrackQualifies, fastTrackAmounts, fastTrackDiscountPct, type FastTrackAmounts } from './fastTrack.js';
 import { notifyUser } from './push.js';
 import { getCheckForUser } from './payments.js';
 
@@ -153,12 +154,13 @@ const inFlightSubmits = new Set<number>();
 export async function submitOrder(
   userId: number,
   custname: string,
-  details?: string
+  details?: string,
+  track?: 'fast' | 'regular'
 ): Promise<SubmitResult> {
   if (inFlightSubmits.has(userId)) throw new OrderError('ההזמנה כבר נשלחת — המתינו רגע');
   inFlightSubmits.add(userId);
   try {
-    return await submitOrderInner(userId, custname, details);
+    return await submitOrderInner(userId, custname, details, track);
   } finally {
     inFlightSubmits.delete(userId);
   }
@@ -167,7 +169,8 @@ export async function submitOrder(
 async function submitOrderInner(
   userId: number,
   custname: string,
-  details?: string
+  details?: string,
+  track?: 'fast' | 'regular'
 ): Promise<SubmitResult> {
   const { lines, total, promotions } = getCart(userId, custname);
   if (lines.length === 0) throw new OrderError('הסל ריק');
@@ -187,9 +190,6 @@ async function submitOrderInner(
   if (autoPromos.length) {
     noteParts.push('מבצע ' + autoPromos.map((a) => a.name).join('; ') + ' — שורות חינם במחיר 0 כבר בהזמנה');
   }
-  const promoNote = noteParts.join(' | ');
-  const fullDetails = [details, promoNote].filter(Boolean).join(' | ') || null;
-
   // Free units per product (bogo) — split off the paid line below.
   const freeQty = new Map<string, number>();
   for (const f of promotions.freebies) freeQty.set(f.partname, (freeQty.get(f.partname) || 0) + f.qty);
@@ -230,16 +230,33 @@ async function submitOrderInner(
     }
   }
 
+  // Fast-track (מסלול מהיר): the customer CHOSE to prepay in exchange for the
+  // discount + instant approval + priority shipping. Honored only when the policy
+  // didn't already force a full-price cash hold (policy wins) — and re-validated
+  // server-side (flag + opt-out + שוטף terms) so a stale or tampered client can't
+  // self-grant a discount.
+  let fast: FastTrackAmounts | null = null;
+  if (track === 'fast' && !cashHold && (await fastTrackQualifies(custname))) {
+    fast = fastTrackAmounts(promotions.total, fastTrackDiscountPct());
+    cashHold = true; // reuse the held-order machinery: pending_payment → pay → approveOrder
+    requiredAmount = fast.payable;
+    noteParts.push(
+      `מסלול מהיר 🚀 שולם מראש בהנחת ${fast.discountPct}% — נא ליישם את ההנחה בחשבונית — למשלוח בעדיפות`
+    );
+  }
+  const fullDetails = [details, noteParts.join(' | ')].filter(Boolean).join(' | ') || null;
+
   const config = getPriorityConfig();
   if (!config) throw new Error('Priority not configured');
 
   // Insert local order in 'submitting' state
   const localOrderId = (db
     .prepare(
-      `INSERT INTO orders_local (user_id, custname, status, total, details)
-       VALUES (?, ?, 'submitting', ?, ?)`
+      `INSERT INTO orders_local (user_id, custname, status, total, details, fast_track, fast_track_discount_pct)
+       VALUES (?, ?, 'submitting', ?, ?, ?, ?)`
     )
-    .run(userId, custname, promotions.total, fullDetails).lastInsertRowid as number);
+    .run(userId, custname, promotions.total, fullDetails, fast ? 1 : 0, fast ? fast.discountPct : null)
+    .lastInsertRowid as number);
 
   const insertLine = db.prepare(
     `INSERT INTO order_lines (order_id, partname, pdes, quantity, price, is_promotion_freebie, promotion_id)

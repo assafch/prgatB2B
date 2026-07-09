@@ -20,6 +20,36 @@
 - Discount % is admin-config (`fast_track_discount_pct`, default 3, clamped 0–20).
 - Tests import from `dist/server/*.js` → run `npm run build` before `node scripts/test-*.mjs`, with a scratch `DATA_DIR`.
 - Node >= 20. Typecheck gate: `npm run typecheck`.
+- **שוטף-only (amendment, user decision 2026-07-09):** the offer is restricted to genuine net-terms customers. Qualification = explicit `customer_policies.kind = 'net'` override, OR (`kind` auto/absent AND the customer's Priority PAYDES contains "שוטף"). An explicit `'cash'` override, unknown/empty terms, or an unreachable Priority all DISQUALIFY — `derivePolicyKind`'s net-default is a fail-open for ordering, not for granting discounts.
+
+## Amendment: שוטף-only qualification
+
+Task 1 additionally exports this async gate (used by Tasks 2 & 3 **instead of** the bare `fastTrackAvailable` in their availability checks; `fastTrackAvailable` remains the sync flag+opt-out core it composes):
+
+```ts
+import { getAccountSummary } from './finance.js';
+
+/** Full qualification: flag on, company not opted out, AND genuinely on net terms
+ *  (שוטף). Explicit per-customer kind override wins both ways; otherwise PAYDES must
+ *  actually say שוטף. Terms unknown / Priority down → no offer (regular flow works). */
+export async function fastTrackQualifies(custname: string): Promise<boolean> {
+  if (!fastTrackAvailable(custname)) return false;
+  const row = db.prepare('SELECT kind FROM customer_policies WHERE custname = ?').get(custname) as
+    | { kind?: string } | undefined;
+  if (row?.kind === 'net') return true;
+  if (row?.kind === 'cash') return false;
+  try {
+    const summary = await getAccountSummary(custname);
+    return /שוטף/.test(summary.profile?.paymentTerms ?? '');
+  } catch {
+    return false;
+  }
+}
+```
+
+- Task 2 Step 2 condition becomes: `if (track === 'fast' && !cashHold && (await fastTrackQualifies(custname)))`.
+- Task 3's `offerFast` helper becomes async and awaits `fastTrackQualifies(custname)` in place of `fastTrackAvailable(custname)`; both call sites `await` it.
+- Task 1's test additionally covers `fastTrackQualifies`: flag off → false even for a `kind='net'` override; flag on → `net` override true, `cash` override false, auto kind with Priority unreachable (no config in the scratch env) → false.
 
 ---
 

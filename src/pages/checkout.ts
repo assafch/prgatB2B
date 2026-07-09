@@ -46,6 +46,7 @@ interface CheckoutPreview {
   savedCards: boolean;
   savedCardCharge: boolean;
   installments: { min: number; max: number } | null;
+  fastTrack: { discountPct: number; discountedTotal: number; payable: number; saving: number } | null;
 }
 interface SavedCardInfo {
   id: string;
@@ -110,11 +111,16 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
   const unified = !!preview?.enabled;
   const payNow = unified && !!preview!.requiresPayment;
 
+  // Fast-track offer: server already nulls it for cash-forced / blocked / opted-out /
+  // non-שוטף customers; re-guard on the client debt block anyway (belt and braces).
+  const fastOffer = (!home?.paymentPolicy?.blocksOnDebt && preview?.fastTrack) || null;
+  let fastSelected = !!fastOffer; // pre-selected: choosing "regular" means giving up the discount
+
   // One-tap saved-card charge: fetch the card only when the flag is on, so a customer
   // who never opted in (or the office hasn't enabled the feature) never pays the
   // extra round-trip.
   let savedCard: SavedCardInfo | null = null;
-  if (payNow && preview!.savedCardCharge) {
+  if ((payNow || fastOffer) && preview!.savedCardCharge) {
     try {
       const r = await api.get<{ card: SavedCardInfo | null }>('/api/payments/saved-card');
       savedCard = r.card;
@@ -193,6 +199,30 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     ${debtBlock}
     ${creditWarn}
 
+    ${
+      fastOffer
+        ? `<div class="card" id="track-card">
+             <div style="font-weight:700;margin-bottom:0.55rem">בחרו מסלול</div>
+             <div class="track-opt" data-track="fast" style="border:2px solid var(--brand);border-radius:12px;padding:0.7rem 0.8rem;cursor:pointer;background:rgba(37,99,235,0.05)">
+               <div style="display:flex;justify-content:space-between;align-items:center">
+                 <span style="font-weight:800">🚀 מסלול מהיר</span>
+                 <span style="font-weight:800;color:var(--brand)">${formatMoney(fastOffer.payable)}</span>
+               </div>
+               <div class="muted" style="font-size:0.84rem;margin-top:0.2rem">משלמים עכשיו (אשראי או צילום צ׳ק) — ההזמנה מאושרת מיד ויוצאת למשלוח בעדיפות</div>
+               <div style="color:var(--ok);font-weight:700;font-size:0.88rem;margin-top:0.2rem">הנחת ${fastOffer.discountPct}% — חיסכון של ${formatMoney(fastOffer.saving)}</div>
+             </div>
+             <div class="track-opt" data-track="regular" style="border:2px solid var(--border);border-radius:12px;padding:0.7rem 0.8rem;cursor:pointer;margin-top:0.5rem">
+               <div style="display:flex;justify-content:space-between;align-items:center">
+                 <span style="font-weight:700">מסלול רגיל</span>
+                 <span style="font-weight:700">${formatMoney(preview!.payable)}</span>
+               </div>
+               <div class="muted" style="font-size:0.84rem;margin-top:0.2rem">תשלום לפי תנאי התשלום הקיימים שלכם — אספקה רגילה</div>
+             </div>
+             <div class="muted" style="font-size:0.75rem;margin-top:0.4rem">המחירים כוללים מע״מ</div>
+           </div>`
+        : ''
+    }
+
     <div class="card">
       <div style="font-weight:700;margin-bottom:0.5rem">מועד אספקה מבוקש</div>
       <div class="date-chips" id="date-chips">
@@ -211,13 +241,17 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     </div>
 
     ${
-      payNow
-        ? `<div class="card">
+      payNow || fastOffer
+        ? `<div class="card" id="pay-methods" style="${payNow || fastSelected ? '' : 'display:none'}">
              <div style="font-weight:700;margin-bottom:0.35rem">אמצעי תשלום</div>
-             <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">לקוחות מזומן משלמים בעת ההזמנה — ההזמנה תישלח מיד עם אישור התשלום.</p>
+             <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">${
+               payNow
+                 ? 'לקוחות מזומן משלמים בעת ההזמנה — ההזמנה תישלח מיד עם אישור התשלום.'
+                 : 'התשלום מאשר את ההזמנה מיד ושולח אותה בעדיפות.'
+             }</p>
              ${
                savedCard
-                 ? `<button type="button" class="pay-method" data-method="saved" style="width:100%;padding:0.75rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:#fff;color:var(--text);margin-bottom:0.6rem">שלם ב${escapeHtml(savedCard.brand)} ••${escapeHtml(savedCard.fourDigits)} · ${formatMoney(preview!.payable)}</button>`
+                 ? `<button type="button" class="pay-method" data-method="saved" style="width:100%;padding:0.75rem;font-weight:700;border:2px solid var(--brand);border-radius:10px;background:#fff;color:var(--text);margin-bottom:0.6rem">שלם ב${escapeHtml(savedCard.brand)} ••${escapeHtml(savedCard.fourDigits)} · ${formatMoney(fastOffer ? fastOffer.payable : preview!.payable)}</button>`
                  : ''
              }
              <div style="display:flex;gap:0.5rem">
@@ -239,7 +273,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     }
 
     <button id="submit" style="width:100%;padding:0.9rem;font-size:1.05rem;font-weight:700;margin-top:0.25rem">${
-      payNow ? `שלח ושלם ${formatMoney(preview!.payable)} ←` : 'שלח הזמנה'
+      fastOffer ? `שלח ושלם ${formatMoney(fastOffer.payable)} ←` : payNow ? `שלח ושלם ${formatMoney(preview!.payable)} ←` : 'שלח הזמנה'
     }</button>
     <div id="msg" style="margin-top:0.5rem;text-align:center"></div>
   `;
@@ -271,6 +305,24 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
   const note = shell.querySelector('#order-note') as HTMLTextAreaElement;
   const msg = shell.querySelector('#msg') as HTMLDivElement;
 
+  // Track selector: toggling updates the visuals, the payment picker's visibility,
+  // and the submit CTA. Fast is pre-selected — switching away shows the plain CTA.
+  if (fastOffer) {
+    const payCard = shell.querySelector('#pay-methods') as HTMLElement | null;
+    shell.querySelectorAll<HTMLElement>('.track-opt').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        fastSelected = opt.dataset.track === 'fast';
+        shell.querySelectorAll<HTMLElement>('.track-opt').forEach((o) => {
+          const on = o === opt;
+          o.style.borderColor = on ? 'var(--brand)' : 'var(--border)';
+          o.style.background = on ? 'rgba(37,99,235,0.05)' : '';
+        });
+        if (payCard) payCard.style.display = fastSelected ? '' : 'none';
+        submitBtn.textContent = fastSelected ? `שלח ושלם ${formatMoney(fastOffer.payable)} ←` : 'שלח הזמנה';
+      });
+    });
+  }
+
   if (home?.paymentPolicy?.blocksOnDebt || preview?.blocked) {
     submitBtn.disabled = true;
     submitBtn.textContent = 'סגור חוב כדי להזמין';
@@ -281,15 +333,19 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
     msg.textContent = 'שולח…';
     msg.className = 'muted';
     const details = [`אספקה: ${selectedLabel}`, note.value.trim()].filter(Boolean).join(' · ');
+    const payingNow = payNow || (!!fastOffer && fastSelected);
     try {
-      const result = await api.post<{ ordname: string; orderId: number; needsPayment?: boolean; amount?: number }>('/api/orders', { details });
+      const result = await api.post<{ ordname: string; orderId: number; needsPayment?: boolean; amount?: number }>('/api/orders', {
+        details,
+        track: fastOffer && fastSelected ? 'fast' : 'regular',
+      });
       await refreshCartCount();
       if (result.needsPayment) {
         // Unified flow: continue straight to the chosen payment method only when the
         // picker was shown (payNow = true). Any failure in the pay step falls back to
         // the interstitial (#order-pay) — the order is already safely recorded as
         // pending_payment; nothing is lost.
-        if (payNow && payMethod === 'saved') {
+        if (payingNow && payMethod === 'saved') {
           msg.textContent = 'מחייב את הכרטיס השמור…';
           try {
             const chargeResult = await api.post<{ id: string; status: string; amount: number }>('/api/payments/card/charge-saved', { orderId: result.orderId });
@@ -318,7 +374,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
           }
           return;
         }
-        if (payNow && payMethod === 'card') {
+        if (payingNow && payMethod === 'card') {
           msg.textContent = 'מעביר לעמוד תשלום מאובטח…';
           try {
             const saveCard = !!(shell.querySelector('#save-card') as HTMLInputElement | null)?.checked;
@@ -329,7 +385,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
           }
           return;
         }
-        if (payNow && payMethod === 'check') {
+        if (payingNow && payMethod === 'check') {
           location.hash = '#pay-check/' + result.orderId;
           return;
         }

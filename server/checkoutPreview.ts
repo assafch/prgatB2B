@@ -7,6 +7,7 @@ import { vatBreakdown } from './money.js';
 import { getSettingBool } from './db.js';
 import { installmentsRange } from './cardPayments.js';
 import { tokenVaultReady } from './tokenVault.js';
+import { fastTrackQualifies, fastTrackAmounts, fastTrackDiscountPct, type FastTrackAmounts } from './fastTrack.js';
 
 export interface CheckoutPreview {
   enabled: boolean; // unified_checkout_enabled flag — client renders new UI only when true
@@ -26,6 +27,10 @@ export interface CheckoutPreview {
   savedCardCharge: boolean;
   /** installments window; non-null only when the feature is on AND payable ≥ min */
   installments: { min: number; max: number } | null;
+  /** Fast-track (מסלול מהיר) offer — null when the flag is off, the company is opted
+   *  out, the customer isn't on שוטף terms, must prepay anyway (cash policy — full
+   *  price, no discount), or the order is debt-blocked. payable/saving are VAT-inclusive. */
+  fastTrack: FastTrackAmounts | null;
 }
 
 export async function buildCheckoutPreview(userId: number, custname: string): Promise<CheckoutPreview> {
@@ -41,8 +46,11 @@ export async function buildCheckoutPreview(userId: number, custname: string): Pr
   };
   const instRange = installmentsRange();
   const installments = instRange && base.payable >= instRange.min ? instRange : null;
+  const qualifies = promotions.total > 0 && (await fastTrackQualifies(custname));
+  const offerFast = (requiresPayment: boolean, blocked: boolean): FastTrackAmounts | null =>
+    qualifies && !requiresPayment && !blocked ? fastTrackAmounts(promotions.total, fastTrackDiscountPct()) : null;
   if (!enforcedFor(custname)) {
-    return { ...base, installments, requiresPayment: false, kind: null, blocked: false, blockedReason: null };
+    return { ...base, installments, requiresPayment: false, kind: null, blocked: false, blockedReason: null, fastTrack: offerFast(false, false) };
   }
   const d = await evaluate(custname, promotions.total);
   return {
@@ -52,5 +60,6 @@ export async function buildCheckoutPreview(userId: number, custname: string): Pr
     kind: d.kind,
     blocked: !d.allowOrder,
     blockedReason: d.reason === 'open_debt' ? 'open_debt' : null,
+    fastTrack: offerFast(d.requiresPayment, !d.allowOrder),
   };
 }
