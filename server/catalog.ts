@@ -455,17 +455,17 @@ export function listFamiliesLocal(): Array<{ family: string; family_desc: string
 }
 
 /** Home-rail "מוצרים חדשים": admin-flagged products, newest stamp first. Runs each
- *  candidate through getProduct so pricing/visibility/OOS rules stay in ONE place;
- *  over-fetches because OOS/unpriced rows are filtered after the fact. */
+ *  candidate through getProduct so pricing/visibility/OOS rules stay in ONE place.
+ *  Scans all flagged candidates in order until limit eligible ones are found. The set
+ *  of flagged products is admin-curated and small, so an unbounded candidate scan is fine. */
 export function listNewProducts(custname: string | null, limit = 12): CatalogItem[] {
   const rows = db
     .prepare(
       `SELECT partname FROM catalog_cache
        WHERE b2b_is_new = 1 AND active = 1 AND b2b_visible = 1
-       ORDER BY b2b_new_since DESC, updated_at DESC
-       LIMIT ?`
+       ORDER BY b2b_new_since DESC, updated_at DESC`
     )
-    .all(limit * 2) as { partname: string }[];
+    .all() as { partname: string }[];
   const out: CatalogItem[] = [];
   for (const r of rows) {
     const p = getProduct(r.partname, custname);

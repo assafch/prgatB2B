@@ -58,4 +58,14 @@ db2.close();
 assert.deepEqual(listNewProducts(null).map((p) => p.partname), ['N-OK', 'N-OLD'], 'ordered b2b_new_since DESC');
 assert.deepEqual(listNewProducts(null, 1).map((p) => p.partname), ['N-OK'], 'limit respected');
 
+// under-fill regression: newest candidates ineligible must not mask older eligible ones
+const db3 = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));
+db3.prepare("INSERT INTO catalog_cache (partname, partdes, list_price, active) VALUES ('N-TOP1','עליון אזל',50,1)").run();
+db3.prepare("INSERT INTO catalog_cache (partname, partdes, list_price, active) VALUES ('N-TOP2','עליון בלי מחיר',null,1)").run();
+db3.prepare("UPDATE catalog_cache SET b2b_is_new=1, b2b_new_since='2031-01-01', b2b_out_of_stock=1 WHERE partname='N-TOP1'").run();
+db3.prepare("UPDATE catalog_cache SET b2b_is_new=1, b2b_new_since='2031-01-02' WHERE partname='N-TOP2'").run();
+db3.close();
+assert.deepEqual(listNewProducts(null, 1).map((p) => p.partname), ['N-OK'], 'ineligible newest rows must not starve the limit window');
+console.log('under-fill regression: PASS');
+
 console.log('new-products data layer: ALL PASS');
