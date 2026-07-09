@@ -1,7 +1,7 @@
 // Unit checks for fast-track checkout. Run: npm run build && DATA_DIR=<scratch> node scripts/test-fast-track.mjs
 import assert from 'node:assert/strict';
-import { fastTrackAmounts, fastTrackCustomerEligible, fastTrackQualifies } from '../dist/server/fastTrack.js';
-import { setSettingBool } from '../dist/server/db.js';
+import { fastTrackAmounts, fastTrackCustomerEligible, fastTrackQualifies, fastTrackDiscountPct } from '../dist/server/fastTrack.js';
+import { setSettingBool, setSetting } from '../dist/server/db.js';
 import Database from 'better-sqlite3';
 import path from 'node:path';
 
@@ -16,6 +16,22 @@ assert.equal(r.discountedTotal, 32.33);
 assert.equal(r.payable, 38.15);
 assert.equal(r.saving, 1.18);
 console.log('fastTrackAmounts: ALL PASS');
+
+// --- discount % config: unset/blank/garbage → default 3; clamp; explicit 0 honored ---
+assert.equal(fastTrackDiscountPct(), 3);        // unset → default (regression: Number(null)=0)
+setSetting('fast_track_discount_pct', '5');
+assert.equal(fastTrackDiscountPct(), 5);
+setSetting('fast_track_discount_pct', '50');
+assert.equal(fastTrackDiscountPct(), 20);       // server-side clamp
+setSetting('fast_track_discount_pct', '-1');
+assert.equal(fastTrackDiscountPct(), 3);        // negative → default
+setSetting('fast_track_discount_pct', 'abc');
+assert.equal(fastTrackDiscountPct(), 3);        // garbage → default
+setSetting('fast_track_discount_pct', '0');
+assert.equal(fastTrackDiscountPct(), 0);        // explicit zero honored
+setSetting('fast_track_discount_pct', '');
+assert.equal(fastTrackDiscountPct(), 3);        // blank → default
+console.log('fastTrackDiscountPct: ALL PASS');
 
 // --- DB-backed eligibility (mirrors test-payment-policy.mjs style) ---
 const db = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));

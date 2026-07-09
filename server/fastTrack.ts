@@ -16,10 +16,13 @@ export function fastTrackEnabled(): boolean {
   return getSettingBool(FAST_TRACK_KEYS.enabled, false);
 }
 
-/** Admin-config discount %. Default 3, clamped to 0–20 so a fat-fingered "30" can
- *  never give away a third of an order. */
+/** Admin-config discount %. Unset/blank/invalid → default 3; clamped to 0–20 so a
+ *  fat-fingered "30" can never give away a third of an order. An explicit "0" is
+ *  honored (admin deliberately runs the fast track without a discount). */
 export function fastTrackDiscountPct(): number {
-  const v = Number(getSetting(FAST_TRACK_KEYS.discountPct));
+  const raw = getSetting(FAST_TRACK_KEYS.discountPct);
+  if (raw == null || String(raw).trim() === '') return 3;
+  const v = Number(raw);
   if (!isFinite(v) || v < 0) return 3;
   return Math.min(v, 20);
 }
