@@ -438,28 +438,30 @@ input:focus, select:focus, textarea:focus {
 
 .cart-lines { display: flex; flex-direction: column; gap: 7px; }
 
-/* Line row — image + full-width 2-line name + bold line total, SKU row with the
-   shared two-storey price block, compact stepper row. Deleting is a swipe (below),
-   NOT a per-row button — the stepper's "−" to 0 and "רוקן סל" are the fallbacks. */
-.cart-line { background: #fff; border: 1px solid #e7e9ee; border-radius: 13px; padding: 9px 10px; }
-.cart-line-top { display: flex; gap: 9px; }
-.cart-line-thumb { width: 44px; height: 44px; flex: none; border-radius: 8px; background: #eef1f5; border: 1px solid #e7e9ee; display: grid; place-items: center; color: #b4bcc7; font-size: 0.85rem; overflow: hidden; }
+/* Line row V2 (Stage 7c) — ONE flex row ~72px: thumb · (2-line name + single
+   meta line: SKU · struck list · net ליח׳) · (line total over a compact stepper).
+   Deleting is a swipe (below), NOT a per-row button — the stepper's "−" to 0 and
+   "רוקן סל" are the fallbacks. */
+.cart-line { background: #fff; border: 1px solid #e7e9ee; border-radius: 12px; padding: 8px 10px; display: flex; gap: 9px; }
+.cart-line-thumb { width: 38px; height: 38px; flex: none; border-radius: 8px; background: #eef1f5; border: 1px solid #e7e9ee; display: grid; place-items: center; color: #b4bcc7; font-size: 0.8rem; overflow: hidden; }
 .cart-line-thumb img { width: 100%; height: 100%; object-fit: contain; }
-.cart-line-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; color: #1a2230; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-/* Two-storey UNIT price at the top-row end — same block as the catalog (Stage 7b). */
-.cart-line-price { flex: none; align-self: flex-start; text-align: left; }
-.cart-line-price .price-was { font-size: 10.5px; }
-.cart-line-price .price-net { font-size: 14.5px; font-weight: 800; color: var(--brand); line-height: 1.25; }
-.cart-line-price .price-unit { font-size: 9.5px; color: #9aa1ab; }
-.cart-line-sku { font-size: 10.5px; color: #9aa1ab; margin-top: 2px; }
-.cart-line-bottom { display: flex; align-items: center; gap: 8px; margin-top: 7px; min-height: 36px; }
-.cart-line-units { font-size: 10.5px; color: #6b7280; }
-/* Line total beside the stepper — re-rendered with every qty change (Stage 7b). */
-.cart-line-sum { margin-inline-start: auto; display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
-.cart-line-sum-label { font-size: 10px; font-weight: 700; color: #9aa1ab; }
-.cart-line-sum b { font-size: 16px; font-weight: 800; color: #1a2230; font-variant-numeric: tabular-nums; }
+.cart-line-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 3px; }
+.cart-line-name { font-weight: 600; font-size: 14px; color: #1a2230; line-height: 1.22; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+/* The meta line replaces the SKU row AND the unit-price storey of 7b. */
+.cart-line-meta { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: #9aa1ab; white-space: nowrap; overflow: hidden; }
+.cart-line-meta .price-block { min-width: 0; gap: 6px; }
+.cart-line-meta .price-was { font-size: 11.5px; }
+.cart-line-meta .price-net { font-size: 15.5px; }
+.cart-line-meta .price-unit { font-size: 10px; }
+.cart-line-sku { flex: none; }
+/* Row-end column: line total on top (re-rendered with every qty change), compact
+   stepper below. */
+.cart-line-end { flex: none; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 4px; }
+.cart-line-sum { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.cart-line-sum-label { font-size: 9.5px; font-weight: 700; color: #9aa1ab; }
+.cart-line-sum b { font-size: 17px; font-weight: 800; color: #1a2230; line-height: 1; font-variant-numeric: tabular-nums; }
 .cart-line-unavail-note { font-size: 11px; color: var(--err); font-weight: 700; }
-.cart-line-remove { margin-inline-start: auto; min-height: 34px; padding: 0 12px; font-size: 12px; font-weight: 700; color: var(--err); background: none; border: 1px solid #f0c9c5; border-radius: 9px; }
+.cart-line-remove { min-height: 34px; padding: 0 12px; font-size: 12px; font-weight: 700; color: var(--err); background: none; border: 1px solid #f0c9c5; border-radius: 9px; align-self: center; margin: auto 0; }
 .cart-line-remove:hover { background: #fdf2f1; }
 /* Unavailable (deactivated or "אזל מהמלאי") cart line — same muted OOS palette as
    the catalog, no stepper (nothing to adjust); swipe or shrink-to-zero to remove. */
@@ -467,27 +469,46 @@ input:focus, select:focus, textarea:focus {
 .cart-line-unavail .cart-line-name { color: #6b7280; }
 .cart-line-unavail .price-net { color: #9aa1ab; }
 
-/* Compact 36px stepper (vs. the 40-44px default `.stepper`) — just enough for a
-   thumb, per the board's line-row anatomy note. */
-.cart-stepper-compact .stepper { border-radius: 9px; border-color: #dfe3e8; }
-.cart-stepper-compact .stepper button { width: 34px; min-height: 36px; font-size: 1.05rem; }
-.cart-stepper-compact .stepper .st-qty { width: 44px; padding: 0; font-size: 0.875rem; }
+/* Compact stepper — 28px visual, ≥44px touch: each button's hit area is expanded
+   with a transparent ::after (can't use padding; it would grow the visual box). */
+.cart-stepper-compact .stepper { border-radius: 8px; border-color: #dfe3e8; }
+.cart-stepper-compact .stepper button { width: 30px; min-height: 28px; height: 28px; font-size: 15px; font-weight: 700; position: relative; }
+.cart-stepper-compact .stepper button::after { content: ''; position: absolute; inset: -8px; }
+.cart-stepper-compact .stepper .st-qty { width: 34px; padding: 0; font-size: 15px; font-weight: 800; }
 
 /* Swipe-to-delete — reuses .swipe-wrap/.swipe-bg/.swipe-card from the catalog's
    A2 axis-lock mechanic (src/pages/catalog.ts), just recolored + Undo instead of
    a green add. */
-.cart-swipe-wrap { border-radius: 13px; }
-.cart-swipe-bg { background: #d43c2e; border-radius: 13px; font-size: 13px; padding-inline-start: 18px; }
+/* Descendant selectors: the base .swipe-wrap/.swipe-bg rules are defined LATER
+   in this file (catalog A2 block), so single-class overrides here silently lose
+   the specificity tie — the delete reveal rendered green until 7c. */
+.cart-swipe-wrap { border-radius: 12px; }
+.cart-swipe-wrap .swipe-bg { background: #d43c2e; border-radius: 12px; font-size: 13px; padding-inline-start: 18px; }
 
 .cart-tpl-row { display: flex; justify-content: center; align-items: center; gap: 10px; font-size: 11px; color: #9aa1ab; font-weight: 700; padding: 4px 0 2px; }
 .cart-tpl-link { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; }
 .cart-tpl-link:hover { color: #6b7280; text-decoration: none; }
 
-/* Sticky summary — extends the shared .thumb-bar (Phase 0) with the discount-
-   pricing rows (Discount Pricing board) restyled to the Cart board's sticky bar:
-   מחירון struck → הנחת לקוח red → savings pill → bold navy total → CTA →
-   green certainty line (replaces "המחיר הסופי ייקבע ב-Priority"). */
-.cart-summary-bar { display: flex; flex-direction: column; }
+/* Dynamic sticky summary (Stage 7c) — the fixed .thumb-bar collapses to
+   grabber + CTA (~96px, the amount lives inside the CTA); the full breakdown
+   (מחירון → הנחת לקוח → חסכת pill → מע״מ → total → certainty line) is a sheet
+   that opens OVER the list: absolutely positioned above the bar, so the list's
+   scroll geometry never changes. Animated via grid-template-rows 0fr↔1fr. */
+.cart-summary-bar { display: flex; flex-direction: column; padding-top: 0; }
+.cart-sheet-wrap { position: absolute; inset-inline: 0; bottom: 100%; overflow: hidden; pointer-events: none; }
+.cart-summary-bar.sheet-open .cart-sheet-wrap { pointer-events: auto; }
+.cart-sheet { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 350ms ease; }
+.cart-summary-bar.sheet-open .cart-sheet { grid-template-rows: 1fr; }
+.cart-sheet-inner { min-height: 0; overflow: hidden; }
+.cart-sheet-card { margin: 14px 10px 0; background: #fff; border: 1px solid #eef0f3; border-bottom: none; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 26px rgba(16, 24, 40, 0.14); padding: 12px 14px 6px; }
+.cart-summary-bar .cart-sheet-grabber { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 0; padding: 8px 0 6px; background: none; border: none; border-radius: 0; font-size: 10.5px; font-weight: 700; color: #9aa1ab; cursor: pointer; }
+.cart-summary-bar .cart-sheet-grabber:hover { background: none; color: #6b7280; }
+.cart-sheet-chevron { font-weight: 800; transition: transform 200ms ease; }
+.cart-summary-bar.sheet-open .cart-sheet-chevron { transform: rotate(180deg); }
+.cart-summary-bar.sheet-noanim .cart-sheet, .cart-summary-bar.sheet-noanim .cart-sheet-chevron { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cart-sheet, .cart-sheet-chevron { transition: none; }
+}
 .cart-summary-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #5b6573; padding: 2px 0; }
 .cart-summary-row .price-was { font-size: 12px; }
 .cart-summary-row.discount { color: #c2362b; font-weight: 700; }
