@@ -837,9 +837,9 @@ app.post('/api/favorites', requireCustomer, cartLimiter, (req: AuthedRequest, re
 });
 
 app.post('/api/orders', requireCustomer, blockIfMaintenance, ordersMinuteLimiter, ordersDailyLimiter, ah(async (req, res) => {
-  const { details } = (req.body || {}) as { details?: string };
+  const { details, track } = (req.body || {}) as { details?: string; track?: string };
   try {
-    const result = await submitOrder(req.user!.id, req.user!.custname!, details);
+    const result = await submitOrder(req.user!.id, req.user!.custname!, details, track === 'fast' ? 'fast' : 'regular');
     if (result.needsPayment) {
       notifyUser(req.user!.id, { title: 'ההזמנה ממתינה לתשלום', body: 'השלימו תשלום כדי שההזמנה תאושר ותישלח', url: '#order-pay/' + result.orderId });
     } else {
