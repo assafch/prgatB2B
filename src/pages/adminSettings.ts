@@ -31,6 +31,7 @@ const SWITCH_ROWS: SwitchRow[] = [
   { key: 'installments_enabled', name: 'תשלומים באשראי', desc: 'חלוקה לתשלומים בעמוד PayPlus מעל סף שנקבע', def: false, dangerousValue: true },
   { key: 'saved_cards_enabled', name: 'שמירת כרטיס (טוקן)', desc: 'שמירת כרטיס בהסכמה לתשלומים הבאים — דורש אישור PayPlus', def: false, dangerousValue: true },
   { key: 'saved_card_charge_enabled', name: 'תשלום בלחיצה בכרטיס שמור', desc: 'חיוב טוקן ללא הזנת כרטיס — דורש אישור PayPlus בכתב', def: false, dangerousValue: true },
+  { key: 'fast_track_enabled', name: 'מסלול מהיר (תשלום מראש)', desc: 'ללקוחות שוטף בלבד: בחירת מסלול בסיום הזמנה — תשלום מיידי בהנחה + אישור מיידי ומשלוח בעדיפות. אחוז ההנחה בהגדרות מתקדמות.', def: false, dangerousValue: true },
   { key: 'priority_receipts_enabled', name: 'קבלות Priority אוטומטיות', desc: 'קבלה נרשמת מיד עם אישור תשלום', def: false, dangerousValue: false },
   { key: 'maintenance_enabled', name: 'מצב תחזוקה', desc: '⚠ חוסם את כל הלקוחות מהאפליקציה', def: false, dangerousValue: true, maint: true },
 ];
@@ -137,6 +138,8 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         <input id="s-policy-cash" type="text" placeholder="מזומן" value="${escapeHtml(txt('policy_cash_paydes_match') || 'מזומן')}" style="width:100%;box-sizing:border-box"/>
         <div class="set-row" style="margin-top:0.6rem"><span>סף חוב פתוח לחסימת שוטף (₪, 0 = כל חוב לא-מכוסה חוסם)</span></div>
         <input id="s-policy-debt" type="number" min="0" placeholder="0" value="${escapeHtml(txt('policy_net_debt_threshold') || '0')}" style="width:100%;box-sizing:border-box"/>
+        <div class="set-row" style="margin-top:0.6rem"><span>הנחת מסלול מהיר (%) — ברירת מחדל 3, מוגבל ל-20 בצד השרת</span></div>
+        <input id="s-fast-pct" type="number" min="0" max="20" step="0.5" placeholder="3" value="${escapeHtml(txt('fast_track_discount_pct') || '3')}" style="width:100%;box-sizing:border-box"/>
       </fieldset>
 
       <hr style="margin:1rem 0;border:none;border-top:1px solid var(--border)"/>
@@ -264,6 +267,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         payment_policy_enabled: (c.querySelector('#s-policy') as HTMLInputElement).checked,
         policy_cash_paydes_match: (c.querySelector('#s-policy-cash') as HTMLInputElement).value,
         policy_net_debt_threshold: (c.querySelector('#s-policy-debt') as HTMLInputElement).value,
+        fast_track_discount_pct: (c.querySelector('#s-fast-pct') as HTMLInputElement).value,
         priority_receipts_enabled: receiptsEnabled,
         priority_receipt_cashname: (c.querySelector('#s-receipt-cashname') as HTMLInputElement).value,
         priority_receipt_ownerlogin: (c.querySelector('#s-receipt-ownerlogin') as HTMLInputElement).value,
