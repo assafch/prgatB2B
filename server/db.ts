@@ -416,6 +416,12 @@ ensureColumn('users', 'customer_role', "TEXT NOT NULL DEFAULT 'owner'");
 // 0 = exempt (master flag must also be on for the policy to fire).
 ensureColumn('customer_policies', 'enforced', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('customer_policies', 'block_overdue_only', 'INTEGER NOT NULL DEFAULT 0');
+// Fast-track checkout (מסלול מהיר): per-customer opt-OUT. NULL / 1 = the customer is
+// offered the fast track (default — it's a benefit); 0 = admin excluded this company.
+ensureColumn('customer_policies', 'fast_track', 'INTEGER');
+// Which track the order took + the % actually granted (audit + office reconciliation).
+ensureColumn('orders_local', 'fast_track', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('orders_local', 'fast_track_discount_pct', 'REAL');
 
 // Installments: number of payments from PayPlus transaction (null = single payment).
 try {
