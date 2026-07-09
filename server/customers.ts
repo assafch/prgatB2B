@@ -69,13 +69,13 @@ export function listCustomersAdmin(q: string, page: number, pageSize: number): {
   return { items, total };
 }
 
-const PATCHABLE = new Set(['kind', 'open_debt_threshold', 'allow_order_with_open_debt', 'enforced']);
+const PATCHABLE = new Set(['kind', 'open_debt_threshold', 'allow_order_with_open_debt', 'enforced', 'fast_track']);
 
 /** Upsert a company's policy. Read-merge-write so a field absent from `patch` is
  *  preserved and an explicit null threshold is honored. */
 export function patchCustomer(custname: string, patch: Record<string, unknown>): void {
-  const cur = (db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt, enforced, block_overdue_only FROM customer_policies WHERE custname = ?').get(custname)
-    || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0, enforced: 0, block_overdue_only: 0 }) as { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number; enforced: number; block_overdue_only: number };
+  const cur = (db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt, enforced, block_overdue_only, fast_track FROM customer_policies WHERE custname = ?').get(custname)
+    || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0, enforced: 0, block_overdue_only: 0, fast_track: null }) as { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number; enforced: number; block_overdue_only: number; fast_track: number | null };
   let kind = cur.kind;
   if (patch.kind != null && ['auto', 'cash', 'net'].includes(String(patch.kind))) kind = String(patch.kind);
   let thr = cur.open_debt_threshold;
@@ -89,11 +89,13 @@ export function patchCustomer(custname: string, patch: Record<string, unknown>):
   if ('enforced' in patch) enforced = patch.enforced ? 1 : 0;
   let overdueOnly = cur.block_overdue_only;
   if ('block_overdue_only' in patch) overdueOnly = patch.block_overdue_only ? 1 : 0;
+  let fastTrack = cur.fast_track;
+  if ('fast_track' in patch) fastTrack = patch.fast_track ? 1 : 0;
   db.prepare(
-    `INSERT INTO customer_policies (custname, kind, open_debt_threshold, allow_order_with_open_debt, enforced, block_overdue_only, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(custname) DO UPDATE SET kind = excluded.kind, open_debt_threshold = excluded.open_debt_threshold, allow_order_with_open_debt = excluded.allow_order_with_open_debt, enforced = excluded.enforced, block_overdue_only = excluded.block_overdue_only, updated_at = datetime('now')`
-  ).run(custname, kind, thr, allow, enforced, overdueOnly);
+    `INSERT INTO customer_policies (custname, kind, open_debt_threshold, allow_order_with_open_debt, enforced, block_overdue_only, fast_track, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(custname) DO UPDATE SET kind = excluded.kind, open_debt_threshold = excluded.open_debt_threshold, allow_order_with_open_debt = excluded.allow_order_with_open_debt, enforced = excluded.enforced, block_overdue_only = excluded.block_overdue_only, fast_track = excluded.fast_track, updated_at = datetime('now')`
+  ).run(custname, kind, thr, allow, enforced, overdueOnly, fastTrack);
 }
 
 export function batchUpdateCustomers(items: Array<Record<string, unknown>>): number {
@@ -138,8 +140,8 @@ export function resetCustomerPortal(custname: string): { ok: true; orders: numbe
 }
 
 export async function getCustomerAdmin(custname: string): Promise<Record<string, unknown>> {
-  const policy = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt, enforced, block_overdue_only FROM customer_policies WHERE custname = ?').get(custname)
-    || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0, enforced: 0, block_overdue_only: 0 };
+  const policy = db.prepare('SELECT kind, open_debt_threshold, allow_order_with_open_debt, enforced, block_overdue_only, fast_track FROM customer_policies WHERE custname = ?').get(custname)
+    || { kind: 'auto', open_debt_threshold: null, allow_order_with_open_debt: 0, enforced: 0, block_overdue_only: 0, fast_track: null };
   const users = db.prepare('SELECT id, username, customer_role, status, last_login_at FROM users WHERE custname = ? ORDER BY username').all(custname);
   const cust_desc = (db.prepare('SELECT cust_desc FROM users WHERE custname = ? AND cust_desc IS NOT NULL LIMIT 1').get(custname) as { cust_desc?: string } | undefined)?.cust_desc ?? null;
   let finance: Record<string, unknown> = { priorityOk: false };

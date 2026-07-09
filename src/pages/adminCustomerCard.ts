@@ -24,6 +24,7 @@ interface CustomerCardPolicy {
   allow_order_with_open_debt: number;
   enforced: number; // 0 or 1 — per-customer policy enforcement flag
   block_overdue_only: number; // 0 or 1 — only overdue invoices count toward the block
+  fast_track?: number | null; // NULL/1 = fast track offered (default), 0 = opted out
 }
 
 interface CustomerCard {
@@ -178,6 +179,11 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
             <span>חסימה רק לפי תאריך תשלום (שוטף)</span>
           </label>
           <div class="muted" style="font-size:0.8rem;margin:0.15rem 0 0 1.6rem">חשבוניות שטרם הגיע מועד פירעונן לא חוסמות הזמנה</div>
+          <label style="display:flex;align-items:center;gap:0.45rem;margin-top:0.5rem;cursor:pointer">
+            <input type="checkbox" id="cc-fasttrack" ${d.policy.fast_track === 0 ? '' : 'checked'}/>
+            <span>מסלול מהיר מוצע ללקוח (הנחת תשלום מראש)</span>
+          </label>
+          <div class="muted" style="font-size:0.8rem;margin:0.15rem 0 0 1.6rem">פעיל רק כשהמתג הראשי דולק בהגדרות, וללקוחות שוטף בלבד</div>
         </div>
         <div>
           <button id="cc-save">שמור מדיניות</button>
@@ -263,6 +269,7 @@ function renderCard(shell: HTMLElement, d: CustomerCard): void {
         allow_order_with_open_debt: exemptChk.checked,
         enforced: enforceChk.checked,
         block_overdue_only: (shell.querySelector('#cc-overdue') as HTMLInputElement).checked,
+        fast_track: (shell.querySelector('#cc-fasttrack') as HTMLInputElement).checked,
       });
       toast('המדיניות נשמרה ✓', 'ok');
       msgEl.textContent = '';

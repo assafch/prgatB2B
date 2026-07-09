@@ -42,3 +42,19 @@ assert.equal(await fastTrackQualifies('C-NULL'), false);
 setSettingBool('fast_track_enabled', false);
 assert.equal(await fastTrackQualifies('C-NETOVR'), false); // flag back off
 console.log('fastTrackQualifies: ALL PASS');
+
+// --- patchCustomer round-trip: opt out, back in, and preservation ---
+import { patchCustomer } from '../dist/server/customers.js';
+const db2 = new Database(path.join(process.env.DATA_DIR || './data', 'app.db'));
+patchCustomer('C-RT', { fast_track: false });
+assert.equal(db2.prepare("SELECT fast_track FROM customer_policies WHERE custname='C-RT'").get().fast_track, 0);
+assert.equal(fastTrackCustomerEligible('C-RT'), false);
+patchCustomer('C-RT', { fast_track: true });
+assert.equal(fastTrackCustomerEligible('C-RT'), true);
+// patching an unrelated field must PRESERVE the opt-out (read-merge-write)
+patchCustomer('C-RT2', { fast_track: false });
+patchCustomer('C-RT2', { enforced: true });
+assert.equal(fastTrackCustomerEligible('C-RT2'), false);
+assert.equal(db2.prepare("SELECT enforced FROM customer_policies WHERE custname='C-RT2'").get().enforced, 1);
+db2.close();
+console.log('patchCustomer fast_track: ALL PASS');
