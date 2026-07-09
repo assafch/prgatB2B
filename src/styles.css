@@ -616,6 +616,8 @@ input:focus, select:focus, textarea:focus {
 .rail-item .pr { margin-top: 0.2rem; }
 .rail-item .add-mini { width: 100%; margin-top: 0.35rem; padding: 0.4rem 0; font-size: 0.8rem; font-weight: 700; border-radius: 8px; }
 
+.new-pill { background: #dcfce7; color: #15803d; border: 1px solid #86efac; border-radius: 999px; font-size: 0.68rem; padding: 0 6px; font-weight: 700; vertical-align: middle; }
+
 /* ---- A3 · Usual-basket checklist ---- */
 .usual-list { display: flex; flex-direction: column; }
 .usual-item { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.15rem; border-bottom: 1px solid #f0f2f5; cursor: pointer; min-height: var(--tap); }
