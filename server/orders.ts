@@ -247,9 +247,13 @@ async function submitOrderInner(
   );
   const tx = db.transaction(() => {
     for (const ln of lines) {
-      const free = freeQty.get(ln.partname) || 0;
-      insertLine.run(localOrderId, ln.partname, ln.partdes, ln.quantity - free, ln.price ?? 0, 0, null);
-      if (free > 0) insertLine.run(localOrderId, ln.partname, ln.partdes, free, 0, 1, null); // bogo freebie
+      // Clamp: overlapping bogo promos on one SKU must never free more units than were
+      // ordered, or the paid line (and its ERP TQUANT below) would go negative. Skip the
+      // paid line entirely when everything is free, so no zero-qty row is written.
+      const freeCapped = Math.min(freeQty.get(ln.partname) || 0, ln.quantity);
+      const paidQty = ln.quantity - freeCapped;
+      if (paidQty > 0) insertLine.run(localOrderId, ln.partname, ln.partdes, paidQty, ln.price ?? 0, 0, null);
+      if (freeCapped > 0) insertLine.run(localOrderId, ln.partname, ln.partdes, freeCapped, 0, 1, null); // bogo freebie
     }
     for (const g of promotions.gifts) {
       insertLine.run(localOrderId, g.partname, g.partdes, g.qty, 0, 1, null); // promo gift, free
@@ -280,11 +284,13 @@ async function submitOrderInner(
       custname,
       [
         ...lines.flatMap((ln) => {
-          const free = freeQty.get(ln.partname) || 0;
-          const out: { PARTNAME: string; TQUANT: number; PRICE?: number }[] = [
-            { PARTNAME: ln.partname, TQUANT: ln.quantity - free },
-          ];
-          if (free > 0) out.push({ PARTNAME: ln.partname, TQUANT: free, PRICE: 0 });
+          // Same clamp as the local insert: never POST a negative paid TQUANT, and skip
+          // the paid line when it would be zero so no zero-qty ERP line is created.
+          const freeCapped = Math.min(freeQty.get(ln.partname) || 0, ln.quantity);
+          const paidQty = ln.quantity - freeCapped;
+          const out: { PARTNAME: string; TQUANT: number; PRICE?: number }[] = [];
+          if (paidQty > 0) out.push({ PARTNAME: ln.partname, TQUANT: paidQty });
+          if (freeCapped > 0) out.push({ PARTNAME: ln.partname, TQUANT: freeCapped, PRICE: 0 });
           return out;
         }),
         ...promotions.gifts.map((g) => ({ PARTNAME: g.partname, TQUANT: g.qty, PRICE: 0 })),
@@ -373,16 +379,24 @@ export function reorderToCart(userId: number, custname: string, orderId: number)
     .prepare('SELECT id FROM orders_local WHERE id = ? AND user_id = ?')
     .get(orderId, userId) as { id: number } | undefined;
   if (!order) throw new OrderError('הזמנה לא נמצאה');
+  // A bogo order stores the same partname as TWO rows (paid + freebie) and a gift order
+  // stores a freebie row for a DIFFERENT product. Reconstruct the customer's real ordered
+  // quantity by summing ALL rows per partname, but re-add ONLY products they genuinely
+  // bought — i.e. partnames with at least one paid (non-freebie) row — so pure-gift
+  // products are excluded. Promotions re-apply naturally at the next submit; don't split here.
   const lines = db
-    .prepare('SELECT partname, quantity FROM order_lines WHERE order_id = ?')
-    .all(orderId) as Array<{ partname: string; quantity: number }>;
+    .prepare(
+      `SELECT partname, SUM(quantity) AS qty FROM order_lines WHERE order_id = ?
+       GROUP BY partname HAVING SUM(CASE WHEN is_promotion_freebie = 0 THEN 1 ELSE 0 END) > 0`
+    )
+    .all(orderId) as Array<{ partname: string; qty: number }>;
   let added = 0;
   for (const ln of lines) {
     // Skip items that have since been hidden/deactivated/lost their price instead
     // of failing the whole reorder.
     const prod = getProduct(ln.partname, custname);
     if (!prod || prod.outOfStock || typeof prod.price !== 'number' || prod.price <= 0) continue;
-    setCartLine(userId, custname, ln.partname, ln.quantity);
+    setCartLine(userId, custname, ln.partname, ln.qty);
     added++;
   }
   return added;
@@ -519,6 +533,22 @@ export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolea
   if (!order) return { ok: false, error: 'not found' };
   if (order.priority_ordname) return { ok: true, ordname: order.priority_ordname };
   if (order.payment_status !== 'approved') return { ok: false, error: 'not paid' };
+  // Atomically CLAIM the order (→ 'submitting') so two concurrent resends — or a resend
+  // racing an in-flight approveOrder — can't both POST the same B2B-<id> and create a
+  // DUPLICATE ERP order. Only the caller whose UPDATE flips the row proceeds; boot-time
+  // recoverStuckSubmittingOrders resolves a row left in 'submitting' by a mid-send crash.
+  const claimed = db.prepare(
+    `UPDATE orders_local SET status = 'submitting'
+     WHERE id = ? AND priority_ordname IS NULL AND payment_status = 'approved' AND status != 'submitting'`
+  ).run(orderId);
+  if (claimed.changes !== 1) {
+    // Someone else is (or already finished) sending it: adopt their ORDNAME if committed,
+    // otherwise report it's already in progress rather than firing a second POST.
+    const cur = db.prepare(`SELECT priority_ordname FROM orders_local WHERE id = ?`).get(orderId) as
+      | { priority_ordname: string | null } | undefined;
+    if (cur?.priority_ordname) return { ok: true, ordname: cur.priority_ordname };
+    return { ok: false, error: 'already in progress' };
+  }
   try {
     // Idempotency check: look for an existing Priority order with our BOOKNUM reference
     // before creating a new one. This handles the case where the original POST reached
@@ -544,7 +574,13 @@ export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolea
     db.prepare(`UPDATE orders_local SET status = 'submitted', priority_ordname = ?, submitted_at = datetime('now'), error = NULL WHERE id = ?`).run(ordname, orderId);
     return { ok: true, ordname };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    const msg = err instanceof Error ? err.message : String(err);
+    // Send failed — release the 'submitting' claim to a recoverable 'failed' (payment_status
+    // stays 'approved', priority_ordname still NULL) so the order returns to the resend queue,
+    // mirroring approveOrder's send-failure handling. Guard on status='submitting' so we don't
+    // stomp a state a concurrent adopt/boot-recovery may have already advanced.
+    db.prepare(`UPDATE orders_local SET status = 'failed', error = ? WHERE id = ? AND status = 'submitting'`).run(msg, orderId);
+    return { ok: false, error: msg };
   }
 }
 
@@ -599,6 +635,7 @@ export async function recoverStuckSubmittingOrders(): Promise<void> {
 export function listStuckOrders(): Array<Record<string, unknown>> {
   return db.prepare(
     `SELECT id, custname, status, total, payment_status, created_at, error FROM orders_local
-     WHERE payment_status = 'approved' AND priority_ordname IS NULL ORDER BY created_at DESC LIMIT 100`
+     WHERE payment_status = 'approved' AND priority_ordname IS NULL AND status != 'submitting'
+     ORDER BY created_at DESC LIMIT 100`
   ).all() as Array<Record<string, unknown>>;
 }

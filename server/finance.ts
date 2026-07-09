@@ -243,7 +243,11 @@ export async function getAccountSummary(custname: string): Promise<AccountSummar
     obligo && typeof obligo.ACC_DEBIT === 'number' ? Math.max(0, round2(obligo.ACC_DEBIT)) : null;
   const openSum = open ? round2(open.reduce((sum, iv) => sum + (Number(iv.TOTPRICE) || 0), 0)) : null;
   const openTotal = accDebit ?? openSum ?? 0;
-  const balanceOk = accDebit !== null || openSum !== null;
+  // The debt TOTAL is AUTHORITATIVE only when OBLIGO.ACC_DEBIT is present. OPENINVOICES
+  // is documented-unreliable (returns [] for a real debtor), so an empty/null open list
+  // must NOT assert "₪0 owed" — that would wrongly lift the net-terms debt block. openSum
+  // still feeds openTotal as a best-effort display value, but never marks the balance known.
+  const balanceOk = accDebit !== null;
 
   const balance: BalanceSummary = {
     openTotal,

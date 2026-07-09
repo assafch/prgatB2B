@@ -148,10 +148,41 @@ export interface ConfirmInput {
 const localToday = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 
 /** Customer confirms the (human-verified) details → promise-to-pay recorded.
- *  is_postdated is derived server-side from check_date (never trusted from the
- *  client), and account is re-masked. */
+ *  The confirmed amount/date are NOT taken on trust: the draft row still holds
+ *  the AI-extracted values (createCheckDraft prefilled amount/check_date/
+ *  is_postdated from OCR, and this UPDATE is the first thing to overwrite them),
+ *  so we read that OCR baseline first and let the customer only CORRECT a misread
+ *  DOWNWARD — never inflate the cheque beyond what the photo shows, nor downgrade
+ *  an OCR-asserted post-dated cheque to current-dated. is_postdated is always
+ *  derived server-side (never trusted from the client) and account is re-masked. */
 export function confirmCheck(userId: number, id: string, input: ConfirmInput): boolean {
-  const isPostdated = input.checkDate > localToday() ? 1 : 0;
+  const draft = db
+    .prepare(
+      `SELECT amount AS aiAmount, check_date AS aiDate, is_postdated AS aiPostdated
+         FROM payment_checks WHERE id = ? AND user_id = ? AND status = 'draft'`
+    )
+    .get(id, userId) as { aiAmount: number | null; aiDate: string | null; aiPostdated: number } | undefined;
+  if (!draft) return false;
+
+  const today = localToday();
+
+  // Amount: cap to the AI-extracted value. At/below the extracted amount is a
+  // legitimate correction; above it is treated as inflation and clamped down to
+  // what the photo shows — so a ₪1 (or illegible) cheque photo can never drive a
+  // ₪12,000 auto-approval / debt-offset. If OCR read no amount (aiAmount null),
+  // there is nothing to cap against (see follow-up note in the report).
+  let amount = input.amount;
+  if (draft.aiAmount != null && draft.aiAmount > 0 && amount > draft.aiAmount + 0.01) {
+    amount = draft.aiAmount;
+  }
+
+  // Post-dated: derive from the confirmed date, but never let the client clear an
+  // OCR-asserted post-dated flag (or a future date the model read). A post-dated
+  // cheque presented as current-dated must stay flagged so it can't cover a held
+  // order or offset an overdue-debt block.
+  const aiPostdated = draft.aiPostdated === 1 || (draft.aiDate != null && draft.aiDate > today);
+  const isPostdated = input.checkDate > today || aiPostdated ? 1 : 0;
+
   const info = db
     .prepare(
       `UPDATE payment_checks
@@ -162,7 +193,7 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
        WHERE id = ? AND user_id = ? AND status = 'draft'`
     )
     .run(
-      input.amount,
+      amount,
       input.checkDate,
       isPostdated,
       input.bank?.slice(0, 80) ?? null,

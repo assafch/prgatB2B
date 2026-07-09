@@ -147,21 +147,48 @@ export async function createReceipt(cardPaymentId: string): Promise<string> {
   return ivnum;
 }
 
+// Serialize sweeps within this single Node process: both the 5-min timer and the admin
+// retry route call this same function. Without a guard two invocations can overlap (a
+// 25-row batch with ~30s/row Priority calls outlives the 5-min interval, or an admin
+// double-click) and each would POST a *second* TINVOICES receipt for the same payment.
+let sweepInFlight = false;
+
 /** Background worker: create receipts for pending/failed rows. Never runs in a request. */
 export async function sweepPendingReceipts(): Promise<void> {
   if (!getSettingBool('priority_receipts_enabled', false)) return;
-  const rows = db.prepare(
-    "SELECT card_payment_id FROM priority_receipts WHERE status IN ('pending','failed') AND attempts < 20 ORDER BY created_at LIMIT 25"
-  ).all() as { card_payment_id: string }[];
-  for (const r of rows) {
-    try {
-      const ivnum = await createReceipt(r.card_payment_id);
-      db.prepare("UPDATE priority_receipts SET status='created', receipt_ivnum=?, error=NULL, updated_at=datetime('now') WHERE card_payment_id=?").run(ivnum, r.card_payment_id);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      db.prepare("UPDATE priority_receipts SET status='failed', error=?, attempts=attempts+1, updated_at=datetime('now') WHERE card_payment_id=?").run(msg, r.card_payment_id);
-      console.warn('[receipts] create failed (left for manual handling):', r.card_payment_id, msg);
+  if (sweepInFlight) return; // a sweep is already running in this process — no-op
+  sweepInFlight = true;
+  try {
+    // Selectable = pending/failed, plus any 'processing' row orphaned by a crash mid-sweep
+    // (stale updated_at) so a paid receipt never gets stuck invisibly. The 15-min staleness
+    // window far exceeds a single row's real processing time, so an actively-processing row
+    // is never reclaimed — even by a hypothetical concurrent sweep.
+    const SELECTABLE =
+      "(status IN ('pending','failed') OR (status='processing' AND updated_at < datetime('now','-15 minutes'))) AND attempts < 20";
+    const rows = db.prepare(
+      `SELECT card_payment_id FROM priority_receipts WHERE ${SELECTABLE} ORDER BY created_at LIMIT 25`
+    ).all() as { card_payment_id: string }[];
+    for (const r of rows) {
+      // Atomically claim the row before the async work: flip it to 'processing' (and bump
+      // attempts) in one conditional UPDATE. If another logical pass already claimed it,
+      // .changes is 0 and we skip — so no two passes can POST a receipt for the same row.
+      const claimed = db.prepare(
+        `UPDATE priority_receipts SET status='processing', attempts=attempts+1, updated_at=datetime('now') WHERE card_payment_id=? AND ${SELECTABLE}`
+      ).run(r.card_payment_id);
+      if (claimed.changes !== 1) continue;
+      try {
+        const ivnum = await createReceipt(r.card_payment_id);
+        db.prepare("UPDATE priority_receipts SET status='created', receipt_ivnum=?, error=NULL, updated_at=datetime('now') WHERE card_payment_id=?").run(ivnum, r.card_payment_id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // attempts was already bumped at claim; restore to the retryable 'failed' status so
+        // the attempts<20 give-up budget and the admin retry (failed→attempts=0) both apply.
+        db.prepare("UPDATE priority_receipts SET status='failed', error=?, updated_at=datetime('now') WHERE card_payment_id=?").run(msg, r.card_payment_id);
+        console.warn('[receipts] create failed (left for manual handling):', r.card_payment_id, msg);
+      }
     }
+  } finally {
+    sweepInFlight = false;
   }
 }
 

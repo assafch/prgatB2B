@@ -193,8 +193,17 @@ export async function computeBlockingNetDebt(
 export async function evaluate(custname: string, cartTotal: number): Promise<PolicyDecision & { kind: PolicyKind }> {
   const summary = await getAccountSummary(custname);
   const policy = resolvePolicy(custname, summary.profile?.paymentTerms ?? null);
-  // M2: fail-open on Priority outage — bypass block but log it
-  if (!summary.balanceOk) console.warn('[policy] balance unavailable for ' + custname + ' — open-debt block bypassed (fail-open)');
+  // Unknown balance must fail SAFE: the authoritative AR balance (OBLIGO.ACC_DEBIT) is
+  // unavailable, so we cannot prove the customer is debt-free. A net-terms customer subject
+  // to the open-debt block must NOT be auto-approved (a real debtor could otherwise slip
+  // through). Cash customers are unaffected (they always pre-pay via the cash branch below);
+  // exempt customers (allowOrderWithOpenDebt) keep their exemption.
+  if (!summary.balanceOk) {
+    console.warn('[policy] balance unavailable for ' + custname + ' — open-debt block held (fail-safe)');
+    if (policy.blockOnOpenDebt && !policy.allowOrderWithOpenDebt) {
+      return { allowOrder: false, requiresPayment: false, amount: null, reason: 'open_debt', kind: policy.kind };
+    }
+  }
   const openTotal = summary.balanceOk ? summary.balance.openTotal : 0;
   const netDebt = await computeBlockingNetDebt(custname, policy, openTotal, summary.profile?.paymentTerms ?? null);
   return { ...decide(policy, netDebt, cartTotal), kind: policy.kind };
