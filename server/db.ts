@@ -354,9 +354,11 @@ db.prepare(
    WHERE datetime(expires_at) > datetime('now', '+14 days')
      AND user_id IN (SELECT id FROM users WHERE role <> 'admin')`
 ).run();
+// Admin cap relaxed 12h → 90 days (2026-07-09, owner request) — mirrors
+// ADMIN_ABSOLUTE_DAYS in auth.ts; keep the two in sync.
 db.prepare(
-  `UPDATE sessions SET expires_at = datetime('now', '+12 hours')
-   WHERE datetime(expires_at) > datetime('now', '+12 hours')
+  `UPDATE sessions SET expires_at = datetime('now', '+90 days')
+   WHERE datetime(expires_at) > datetime('now', '+90 days')
      AND user_id IN (SELECT id FROM users WHERE role = 'admin')`
 ).run();
 

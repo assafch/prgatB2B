@@ -16,8 +16,12 @@ const BCRYPT_COST = 12;
 
 const CUSTOMER_ABSOLUTE_DAYS = 14;
 const CUSTOMER_IDLE = '-3 days';
-const ADMIN_ABSOLUTE_HOURS = 12;
-const ADMIN_IDLE = '-30 minutes';
+// Admin = the owner on his own devices. The original 12h/30min hardening forced
+// several logins a day; relaxed 2026-07-09 (owner request). Sessions are httpOnly
+// cookies hashed at rest, and "התנתק מכל המכשירים" in the account screen remains
+// the revocation lever. Keep db.ts's boot clamp aligned with ADMIN_ABSOLUTE_DAYS.
+const ADMIN_ABSOLUTE_DAYS = 90;
+const ADMIN_IDLE = '-30 days';
 // last_seen_at is bumped lazily, at most once per 5 minutes, to keep writes cheap.
 const LAST_SEEN_GRANULARITY = '-5 minutes';
 
@@ -131,7 +135,7 @@ export function createSession(
   const token = newToken();
   const expiresAt =
     role === 'admin'
-      ? new Date(Date.now() + ADMIN_ABSOLUTE_HOURS * 3600_000).toISOString()
+      ? new Date(Date.now() + ADMIN_ABSOLUTE_DAYS * 86400_000).toISOString()
       : new Date(Date.now() + CUSTOMER_ABSOLUTE_DAYS * 86400_000).toISOString();
   db.prepare(
     'INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent) VALUES (?, ?, ?, ?, ?)'
@@ -227,7 +231,7 @@ export function userFromSession(token: string): SessionLookup | null {
 export function setSessionCookie(res: Response, token: string, role: 'customer' | 'admin'): void {
   const secure = process.env.NODE_ENV === 'production';
   const maxAge =
-    role === 'admin' ? ADMIN_ABSOLUTE_HOURS * 3600 : CUSTOMER_ABSOLUTE_DAYS * 86400;
+    role === 'admin' ? ADMIN_ABSOLUTE_DAYS * 86400 : CUSTOMER_ABSOLUTE_DAYS * 86400;
   res.setHeader(
     'Set-Cookie',
     cookie.serialize(COOKIE_NAME, token, {
