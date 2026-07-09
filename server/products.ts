@@ -244,7 +244,7 @@ export async function savePromoImage(buffer: Buffer): Promise<{ url: string }> {
 
 export interface BulkPayload {
   partnames: string[];
-  action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature' | 'mark_out_of_stock' | 'mark_in_stock';
+  action: 'hide' | 'show' | 'set_box_size' | 'set_min_qty' | 'feature' | 'unfeature' | 'mark_out_of_stock' | 'mark_in_stock' | 'mark_new' | 'unmark_new';
   value?: number;
 }
 
@@ -271,6 +271,12 @@ export function bulkUpdate(payload: BulkPayload): number {
       break;
     case 'mark_in_stock':
       setClause = 'b2b_out_of_stock = 0';
+      break;
+    case 'mark_new':
+      setClause = "b2b_is_new = 1, b2b_new_since = datetime('now')";
+      break;
+    case 'unmark_new':
+      setClause = 'b2b_is_new = 0, b2b_new_since = NULL';
       break;
     case 'set_box_size':
       if (!Number.isFinite(payload.value) || (payload.value ?? 0) <= 0) return 0;
