@@ -50,10 +50,12 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 // due date (IVPAY_SUBFORM verified empty on final invoices), so we compute it the way
 // Priority displays it: end of invoice month + N days from the customer's PAYDES.
 
-/** "שוטף" → 0, "שוטף+30"/"שוטף +30"/"שוטף30" → 30. Anything else (מזומן, null,
- *  unparseable) → 0 — strictest common terms; matches plain שוטף. */
+/** "שוטף" → 0, "שוטף+30"/"שוטף +30"/"שוטף30" → 30, and the tenant's short form
+ *  "ש60"/"ש+60" → 60 (verified on real customers, e.g. 11387 PAYDES="ש60").
+ *  Anything else (מזומן, null, unparseable) → 0 — strictest common terms. */
 export function parseNetTermsDays(paydes: string | null): number {
-  const m = (paydes || '').match(/שוטף\s*\+?\s*(\d+)/);
+  const s = (paydes || '').trim();
+  const m = s.match(/שוטף\s*\+?\s*(\d+)/) || s.match(/^ש\s*\+?\s*(\d+)$/);
   if (m) return parseInt(m[1], 10);
   return 0;
 }

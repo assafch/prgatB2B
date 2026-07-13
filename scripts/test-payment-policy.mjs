@@ -24,6 +24,18 @@ assert.equal(decide({ ...net, allowOrderWithOpenDebt: true }, 9999, 500).allowOr
 assert.equal(decide({ ...net, openDebtThreshold: 200 }, 120, 500).allowOrder, true);
 console.log('payment-policy engine: ALL PASS');
 
+// parseNetTermsDays — both the long form and the tenant's short "ש60" form
+import { parseNetTermsDays } from '../dist/server/paymentPolicy.js';
+assert.equal(parseNetTermsDays('שוטף+30'), 30);
+assert.equal(parseNetTermsDays('שוטף +45'), 45);
+assert.equal(parseNetTermsDays('שוטף'), 0);
+assert.equal(parseNetTermsDays('ש60'), 60);   // real tenant form (customer 11387)
+assert.equal(parseNetTermsDays('ש+30'), 30);
+assert.equal(parseNetTermsDays('מזומן'), 0);
+assert.equal(parseNetTermsDays('שיק דחוי'), 0); // "ש" prefix without digits-only tail must NOT match
+assert.equal(parseNetTermsDays(null), 0);
+console.log('parseNetTermsDays: ALL PASS');
+
 // DB-backed resolve (runs against the temp DATA_DIR the runner sets)
 import { resolvePolicy } from '../dist/server/paymentPolicy.js';
 import Database from 'better-sqlite3';

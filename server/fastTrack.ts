@@ -55,7 +55,10 @@ export async function fastTrackQualifies(custname: string): Promise<boolean> {
   if (row?.kind === 'cash') return false;
   try {
     const summary = await getAccountSummary(custname);
-    return /שוטף/.test(summary.profile?.paymentTerms ?? '');
+    const paydes = (summary.profile?.paymentTerms ?? '').trim();
+    // This tenant writes net terms both long ("שוטף+30") and short ("ש60") —
+    // verified on real customers (11387 PAYDES="ש60"). Both are שוטף.
+    return /שוטף/.test(paydes) || /^ש\s*\+?\s*\d+$/.test(paydes);
   } catch {
     return false;
   }
