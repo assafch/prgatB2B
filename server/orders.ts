@@ -230,6 +230,15 @@ async function submitOrderInner(
     }
   }
 
+  // Nothing to collect → no hold. A promo that zeroes the cart total (100% percent /
+  // fixed ≥ subtotal) would otherwise create a pending_payment order that can NEVER
+  // complete: deriveOrderCharge rejects amount ≤ 0, so the card path bricks and the
+  // order sits unpayable forever. A zero-payable order just submits normally.
+  if (cashHold && requiredAmount <= 0.005) {
+    cashHold = false;
+    requiredAmount = 0;
+  }
+
   // Fast-track (מסלול מהיר): the customer CHOSE to prepay in exchange for the
   // discount + instant approval + priority shipping. Honored only when the policy
   // didn't already force a full-price cash hold (policy wins) — and re-validated
@@ -237,12 +246,17 @@ async function submitOrderInner(
   // self-grant a discount.
   let fast: FastTrackAmounts | null = null;
   if (track === 'fast' && !cashHold && (await fastTrackQualifies(custname))) {
-    fast = fastTrackAmounts(promotions.total, fastTrackDiscountPct());
-    cashHold = true; // reuse the held-order machinery: pending_payment → pay → approveOrder
-    requiredAmount = fast.payable;
-    noteParts.push(
-      `מסלול מהיר 🚀 שולם מראש בהנחת ${fast.discountPct}% — נא ליישם את ההנחה בחשבונית — למשלוח בעדיפות`
-    );
+    const amounts = fastTrackAmounts(promotions.total, fastTrackDiscountPct());
+    // Same zero-payable guard as the cash hold above: a zero-total cart has nothing
+    // to prepay, so it must not enter the unpayable pending_payment state.
+    if (amounts.payable > 0.005) {
+      fast = amounts;
+      cashHold = true; // reuse the held-order machinery: pending_payment → pay → approveOrder
+      requiredAmount = fast.payable;
+      noteParts.push(
+        `מסלול מהיר 🚀 שולם מראש בהנחת ${fast.discountPct}% — נא ליישם את ההנחה בחשבונית — למשלוח בעדיפות`
+      );
+    }
   }
   const fullDetails = [details, noteParts.join(' | ')].filter(Boolean).join(' | ') || null;
 
@@ -529,6 +543,20 @@ export function sweepPendingOrders(): number {
          SELECT 1 FROM payment_checks pc
          WHERE pc.order_id = CAST(orders_local.id AS TEXT)
            AND pc.status NOT IN ('cancelled','bounced')
+       )
+       AND NOT EXISTS (
+         -- A live UNLINKED cheque from the same customer, photographed after the order
+         -- was placed and large enough to settle it, is very likely the payment for
+         -- this order whose /pay/check link step never completed (app crash / network).
+         -- Deleting the order would silently strand a customer who believes they paid —
+         -- keep it so the link can be completed (customer resume banner / office).
+         SELECT 1 FROM payment_checks pc2
+         WHERE pc2.custname = orders_local.custname
+           AND pc2.order_id IS NULL
+           AND pc2.status IN ('submitted','received','deposited')
+           AND pc2.is_postdated = 0
+           AND pc2.submitted_at >= orders_local.created_at
+           AND pc2.amount + 0.01 >= COALESCE(orders_local.payment_required_amount, 0)
        )`
   ).all(PENDING_TTL) as { id: number }[];
   const delLines = db.prepare('DELETE FROM order_lines WHERE order_id = ?');
@@ -612,8 +640,8 @@ export async function resendApprovedOrder(orderId: number): Promise<{ ok: boolea
  *  function exists to prevent. */
 export async function recoverStuckSubmittingOrders(): Promise<void> {
   const stuck = db.prepare(
-    `SELECT id, custname, user_id FROM orders_local WHERE status = 'submitting'`
-  ).all() as { id: number; custname: string; user_id: number }[];
+    `SELECT id, custname, user_id, created_at FROM orders_local WHERE status = 'submitting'`
+  ).all() as { id: number; custname: string; user_id: number; created_at: string }[];
   if (!stuck.length) return;
   const config = getPriorityConfig();
   if (!config) {
@@ -633,7 +661,17 @@ export async function recoverStuckSubmittingOrders(): Promise<void> {
         ).run(existing, o.id);
         // The interrupted submit never reached its clearCart — without this, the
         // still-full cart invites a resubmit of an order the ERP already holds.
-        clearCart(o.user_id);
+        // BUT only when the cart is still the stale one: if any line was touched
+        // AFTER the stuck order was created, the customer has started a new cart
+        // since the crash and wiping it would destroy their current work.
+        const touched = db
+          .prepare('SELECT 1 FROM cart_lines WHERE user_id = ? AND updated_at > ? LIMIT 1')
+          .get(o.user_id, o.created_at);
+        if (!touched) {
+          clearCart(o.user_id);
+        } else {
+          console.warn(`[orders] boot recovery: order ${o.id} adopted but cart was modified since — leaving cart intact`);
+        }
         console.log(`[orders] boot recovery: order ${o.id} adopted Priority ${existing}`);
       } else {
         db.prepare(
