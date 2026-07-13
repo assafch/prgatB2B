@@ -95,7 +95,13 @@ async function load(shell: HTMLElement): Promise<void> {
   const promoLinesHtml = hasDiscount
     ? promo!.applied
         .filter((a) => a.savings > 0)
-        .map((a) => `<div class="cart-promo-line"><span>🏷️ ${escapeHtml(a.name)}</span><span>−${formatMoney(a.savings)}</span></div>`)
+        // Gift value is NOT deducted from the total (the gift rides along free) —
+        // render it as received value, not as a −₪ line, so the breakdown sums.
+        .map((a) =>
+          a.type === 'gift'
+            ? `<div class="cart-promo-line"><span>🎁 ${escapeHtml(a.name)}</span><span>מתנה בשווי ${formatMoney(a.savings)}</span></div>`
+            : `<div class="cart-promo-line"><span>🏷️ ${escapeHtml(a.name)}</span><span>−${formatMoney(a.savings)}</span></div>`
+        )
         .join('')
     : '';
   const giftNudge =

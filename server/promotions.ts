@@ -109,22 +109,41 @@ export function applyPromotions(lines: PromoLine[], custname: string): PromoResu
     return familyOf.get(partname) ?? null;
   };
 
+  // PASS 1 — bogo first, regardless of promo ordering: the value of the units bogo
+  // gives away must be known before percent/fixed run, so a "10% off" promo doesn't
+  // also discount units the customer isn't paying for.
+  const freeValueByPart = new Map<string, number>();
+  for (const p of activePromotions()) {
+    if (p.type !== 'bogo') continue;
+    const pr = p.params;
+    const partname = String(pr.partname || '');
+    const buy = Math.max(1, num(pr.buy, 1));
+    const free = Math.max(1, num(pr.free, 1));
+    const line = lines.find((l) => l.partname === partname);
+    if (!line) continue;
+    const group = buy + free;
+    const freeUnits = Math.floor(line.quantity / group) * free;
+    if (freeUnits > 0) {
+      const savings = round2(freeUnits * line.price);
+      discount += savings;
+      applied.push({ id: p.id, name: p.name, type: p.type, savings });
+      freebies.push({ partname: line.partname, partdes: line.partdes, qty: freeUnits });
+      freeValueByPart.set(partname, round2((freeValueByPart.get(partname) || 0) + savings));
+    }
+  }
+  // Paid (net-of-bogo) value per line and for the whole cart — the ONLY base
+  // percent/fixed promos may discount. Clamped at 0: overlapping bogos can nominally
+  // free more than the line (submit clamps the real units later).
+  const paidLineTotal = (l: PromoLine): number =>
+    Math.max(0, round2(l.line_total - (freeValueByPart.get(l.partname) || 0)));
+  const paidSubtotal = round2(lines.reduce((s, l) => s + paidLineTotal(l), 0));
+
+  // PASS 2 — everything else. minSubtotal thresholds still use the GROSS subtotal
+  // (what the customer put in the cart); only the discount base is net-of-bogo.
   for (const p of activePromotions()) {
     const pr = p.params;
     if (p.type === 'bogo') {
-      const partname = String(pr.partname || '');
-      const buy = Math.max(1, num(pr.buy, 1));
-      const free = Math.max(1, num(pr.free, 1));
-      const line = lines.find((l) => l.partname === partname);
-      if (!line) continue;
-      const group = buy + free;
-      const freeUnits = Math.floor(line.quantity / group) * free;
-      if (freeUnits > 0) {
-        const savings = round2(freeUnits * line.price);
-        discount += savings;
-        applied.push({ id: p.id, name: p.name, type: p.type, savings });
-        freebies.push({ partname: line.partname, partdes: line.partdes, qty: freeUnits });
-      }
+      continue; // handled in pass 1
     } else if (p.type === 'percent' || p.type === 'fixed') {
       const minSub = num(pr.minSubtotal, 0);
       if (subtotal < minSub) continue;
@@ -132,11 +151,11 @@ export function applyPromotions(lines: PromoLine[], custname: string): PromoResu
       const target = pr.target ? String(pr.target) : '';
       const base =
         scope === 'order'
-          ? subtotal
+          ? paidSubtotal
           : round2(
               lines
                 .filter((l) => (scope === 'product' ? l.partname === target : fam(l.partname) === target))
-                .reduce((s, l) => s + l.line_total, 0)
+                .reduce((s, l) => s + paidLineTotal(l), 0)
             );
       if (base <= 0) continue;
       const savings = round2(p.type === 'percent' ? base * (num(pr.percent) / 100) : Math.min(num(pr.amount), base));

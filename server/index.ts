@@ -340,9 +340,12 @@ app.post('/api/auth/login', globalLoginLimiter, loginLimiter, ah(async (req, res
     return;
   }
   // Per-account exponential lockout (5 failures → 1 min, doubling, capped 60 min).
-  const lockSeconds = accountLockSeconds(user);
-  if (lockSeconds > 0) {
-    res.status(429).json({ error: 'account_locked', retry_after_seconds: lockSeconds });
+  // Enforce it (no password check, no session) but answer with the SAME generic 401 as a
+  // wrong password / unknown user — a distinct 429 would reveal that this username exists,
+  // defeating the anti-enumeration timing above. Burn one bcrypt to keep timing uniform.
+  if (accountLockSeconds(user) > 0) {
+    await equalizeLoginTiming(password);
+    res.status(401).json({ error: 'invalid_credentials' });
     return;
   }
   const ok = await verifyPassword(password, user.password_hash);
@@ -1161,7 +1164,11 @@ app.post('/api/orders/:id/pay/check', requireCustomer, blockIfMaintenance, cartL
 }));
 
 // Owner-scoped status poll — re-queries UPay to confirm.
-app.get('/api/payments/card/:id', requireOwner, ah(async (req: AuthedRequest, res) => {
+// financeLimiter (same bucket as the sibling GET /api/payments/card/open-invoices): this
+// route calls confirmCard() — an outbound PSP transactions query — on every poll while the
+// intent is pending/failed/expired, so an unthrottled tight poll could exhaust the PSP quota
+// and break confirmations site-wide. 20/min/user still fits the client's ≤20-try 2s poll.
+app.get('/api/payments/card/:id', requireOwner, financeLimiter, ah(async (req: AuthedRequest, res) => {
   let row = getCardForUser(req.user!.id, req.params.id);
   if (!row) {
     res.status(404).json({ error: 'not_found' });
@@ -1315,16 +1322,53 @@ app.all('/api/payments/payplus/return', ah(async (req, res) => {
 app.get('/api/admin/promotions', requireAdmin, (_req, res) => {
   res.json({ promotions: listPromotions() });
 });
+// Bound promo params server-side before they are stored: an out-of-range percent/amount
+// makes the promo discount exceed the subtotal so applyPromotions zeroes every cart total
+// (mirrors the 0–60 customer-discount guard). Field names match promotions.ts params.
+// Returns a Hebrew error message, or null when valid.
+function validatePromoParams(type: unknown, params: unknown): string | null {
+  const p = (params || {}) as Record<string, unknown>;
+  const posInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  if (type === 'percent') {
+    const pct = Number(p.percent);
+    if (!isFinite(pct) || pct <= 0 || pct > 100) return 'אחוז הנחה חייב להיות בין 1 ל-100';
+  } else if (type === 'fixed') {
+    const amt = Number(p.amount);
+    if (!isFinite(amt) || amt <= 0) return 'סכום ההנחה חייב להיות גדול מ-0';
+  } else if (type === 'bogo') {
+    if (!posInt(p.buy) || !posInt(p.free)) return 'כמויות "קנה" ו"קבל" חייבות להיות מספרים שלמים חיוביים';
+  } else if (type === 'gift') {
+    if (!posInt(p.giftQty)) return 'כמות המתנה חייבת להיות מספר שלם חיובי';
+    // condQty only matters for the qty-conditional variant; validate it only when present.
+    if (p.condPartname != null && p.condPartname !== '' && p.condQty != null && !posInt(p.condQty))
+      return 'כמות התנאי חייבת להיות מספר שלם חיובי';
+  } else {
+    return 'סוג מבצע לא חוקי';
+  }
+  return null;
+}
 app.post('/api/admin/promotions', requireAdmin, (req, res) => {
   const b = (req.body || {}) as Partial<PromoInput>;
   if (!b.name || !b.type || !b.params) {
     res.status(400).json({ error: 'name_type_params_required' });
     return;
   }
+  const perr = validatePromoParams(b.type, b.params);
+  if (perr) { res.status(400).json({ error: perr }); return; }
   res.json({ id: createPromotion(b as PromoInput) });
 });
 app.patch('/api/admin/promotions/:id', requireAdmin, (req, res) => {
-  const ok = updatePromotion(Number(req.params.id), (req.body || {}) as Partial<PromoInput>);
+  const b = (req.body || {}) as Partial<PromoInput>;
+  // Same bounds as create — validate whenever params arrive; the quick active-toggle
+  // sends just { active } and must keep working. When the PATCH carries params but no
+  // type, validate against the promo's STORED type — otherwise a params-only PATCH
+  // would bypass the bounds entirely (e.g. percent: 500).
+  if (b.params !== undefined) {
+    const type = b.type ?? listPromotions().find((p) => p.id === Number(req.params.id))?.type;
+    const perr = validatePromoParams(type, b.params);
+    if (perr) { res.status(400).json({ error: perr }); return; }
+  }
+  const ok = updatePromotion(Number(req.params.id), b);
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'not_found' });
 });
 app.delete('/api/admin/promotions/:id', requireAdmin, (req, res) => {
@@ -1530,8 +1574,15 @@ const SETTABLE = new Set([
 ]);
 const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled', 'fast_track_enabled']);
 
+// Server-only secrets live in the settings table but must never reach the client. The WRITE
+// path is allowlisted (SETTABLE); the READ path also needs a denylist. push_vapid_private is a
+// signing secret; push_vapid_public is meant to be public and stays. The admin UI reads only
+// SETTABLE keys (none secret), so redaction is transparent. Add future PSP secrets here.
+const SECRET_SETTINGS = new Set(['push_vapid_private']);
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
-  res.json({ settings: getAllSettings() });
+  const settings = getAllSettings();
+  for (const k of SECRET_SETTINGS) delete settings[k];
+  res.json({ settings });
 });
 
 app.patch('/api/admin/settings', requireAdmin, (req, res) => {
@@ -1628,11 +1679,14 @@ app.patch('/api/admin/customers/:custname', requireAdmin, (req: AuthedRequest, r
   const body = (req.body || {}) as Record<string, unknown>;
   if ('discount_percent' in body) {
     const raw = body.discount_percent;
-    if (raw === null || raw === '') {
+    // A submitted 0 means "no manual discount" — clear the override exactly like null/empty.
+    // Storing percent=0 source='manual' would both hide any real discount (resolveDiscountPercent
+    // needs >0) AND permanently pin the customer, since the nightly Priority sync skips source='manual'.
+    if (raw === null || raw === '' || Number(raw) === 0) {
       db.prepare("DELETE FROM customer_discounts WHERE custname = ? AND source = 'manual'").run(req.params.custname);
     } else {
       const pct = Number(raw);
-      if (!isFinite(pct) || pct < 0 || pct > 60) { res.status(400).json({ error: 'אחוז הנחה חייב להיות בין 0 ל-60' }); return; }
+      if (!isFinite(pct) || pct < 0 || pct > 60) { res.status(400).json({ error: 'אחוז הנחה חייב להיות בין 1 ל-60 (0 מבטל את ההנחה)' }); return; }
       db.prepare(
         `INSERT INTO customer_discounts (custname, percent, source, updated_at) VALUES (?, ?, 'manual', datetime('now'))
          ON CONFLICT(custname) DO UPDATE SET percent = excluded.percent, source = 'manual', updated_at = datetime('now')`
