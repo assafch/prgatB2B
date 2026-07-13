@@ -137,14 +137,15 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
   const isOrderer = state.me?.customer_role === 'orderer';
   const debtBlock = home?.paymentPolicy?.blocksOnDebt
     ? `<div class="card" style="border:1px solid var(--err);background:#fdecec;margin-bottom:0.75rem">
-         <div style="font-weight:700;color:var(--err)">לא ניתן לבצע הזמנה — קיים חוב פתוח</div>
-         <div class="muted" style="font-size:0.9rem;margin-top:0.25rem">${
+         <div style="font-weight:700;color:var(--err)">רגע לפני ההזמנה — יש חוב פתוח על החשבון</div>
+         <div style="font-size:0.9rem;margin-top:0.3rem">${
            !isOrderer && home.paymentPolicy!.netDebt > 0
-             ? `יש לסגור חוב פתוח של ₪${home.paymentPolicy!.netDebt.toFixed(2)} לפני ביצוע הזמנה.`
-             : 'יש לסגור את החוב הפתוח לפני ביצוע הזמנה — פנו לבעל העסק.'
+             ? `כדי שנוכל לקלוט את ההזמנה, יש להסדיר תחילה את החוב בסך <b>₪${home.paymentPolicy!.netDebt.toFixed(2)}</b>.`
+             : 'כדי שנוכל לקלוט את ההזמנה, יש להסדיר תחילה את החוב הפתוח — פנו לבעל העסק.'
          }</div>
+         ${!isOrderer ? '<div class="muted" style="font-size:0.88rem;margin-top:0.3rem">משלמים כאן באשראי או בצילום צ׳ק — וההזמנה יוצאת לדרך מיד. הסל שלכם נשמר.</div>' : ''}
          <div class="muted" style="font-size:0.82rem;margin-top:0.35rem">שילמתם בהעברה בנקאית? החסימה תוסר אוטומטית עם קליטת התשלום במשרד.</div>
-         ${!isOrderer ? '<a class="es-cta" href="#invoices" style="display:inline-block;margin-top:0.6rem">סגור חוב ←</a>' : ''}
+         ${!isOrderer ? '<a class="es-cta" href="#invoices" style="display:inline-block;margin-top:0.6rem">לתשלום החוב ולהמשך ההזמנה ←</a>' : ''}
        </div>`
     : '';
 

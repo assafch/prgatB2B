@@ -221,7 +221,7 @@ async function submitOrderInner(
     const decision = await evaluate(custname, promotions.total);
     if (!decision.allowOrder && decision.reason === 'open_debt') {
       throw new OrderError(
-        `לא ניתן לבצע הזמנה — קיים חוב פתוח בסך ₪${(decision.amount ?? 0).toFixed(2)}. נא לסגור אותו (צ׳ק או אשראי) במסך "חשבוניות" ולנסות שוב. שילמתם בהעברה בנקאית? החסימה תוסר עם קליטת התשלום במשרד.`
+        `לפני שנקלוט הזמנה חדשה, יש להסדיר את החוב הפתוח בסך ₪${(decision.amount ?? 0).toFixed(2)}. משלמים במסך "חשבוניות" — באשראי או בצילום צ׳ק — וממשיכים להזמין מיד. שילמתם בהעברה בנקאית? החסימה תוסר אוטומטית עם קליטת התשלום במשרד.`
       );
     }
     if (decision.requiresPayment && decision.reason === 'cash_payment_required') {

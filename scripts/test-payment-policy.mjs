@@ -48,3 +48,17 @@ assert.equal(resolvePolicy('C-FORCECASH', 'שוטף').kind, 'cash');
 assert.equal(resolvePolicy('C-EXEMPT', 'שוטף').allowOrderWithOpenDebt, true);
 assert.equal(resolvePolicy('UNKNOWN', 'מזומן').kind, 'cash');
 console.log('resolvePolicy: ALL PASS');
+
+// enforce-all mode: every customer counts as enrolled; off → back to per-customer rows
+import { isEnforced, enforcedFor } from '../dist/server/paymentPolicy.js';
+import { setSettingBool } from '../dist/server/db.js';
+assert.equal(isEnforced('NEVER-ENROLLED'), false);
+setSettingBool('policy_enforce_all', true);
+assert.equal(isEnforced('NEVER-ENROLLED'), true);
+assert.equal(enforcedFor('NEVER-ENROLLED'), false); // master flag still off → policy inert
+setSettingBool('payment_policy_enabled', true);
+assert.equal(enforcedFor('NEVER-ENROLLED'), true);  // both on → fires for everyone
+setSettingBool('payment_policy_enabled', false);
+setSettingBool('policy_enforce_all', false);
+assert.equal(isEnforced('NEVER-ENROLLED'), false);
+console.log('policy_enforce_all: ALL PASS');

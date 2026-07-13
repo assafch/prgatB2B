@@ -1553,6 +1553,7 @@ const SETTABLE = new Set([
   'announcement_enabled',
   'announcement_text',
   'payment_policy_enabled',
+  'policy_enforce_all',
   'policy_cash_paydes_match',
   'policy_net_debt_threshold',
   'priority_receipts_enabled',
@@ -1572,7 +1573,7 @@ const SETTABLE = new Set([
   'fast_track_enabled',
   'fast_track_discount_pct',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled', 'fast_track_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'policy_enforce_all', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled', 'fast_track_enabled']);
 
 // Server-only secrets live in the settings table but must never reach the client. The WRITE
 // path is allowlisted (SETTABLE); the READ path also needs a denylist. push_vapid_private is a

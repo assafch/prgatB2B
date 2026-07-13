@@ -134,6 +134,8 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       <fieldset style="border:1px solid var(--border);border-radius:6px;padding:0.75rem 1rem;margin:0">
         <legend style="font-weight:600;padding:0 0.4rem">מדיניות תשלום ואישור הזמנה</legend>
         <div class="set-row"><span>הפעל מדיניות תשלום (כבוי = שום שינוי ללקוחות)</span><input type="checkbox" id="s-policy" ${on('payment_policy_enabled') ? 'checked' : ''}/></div>
+        <div class="set-row" style="margin-top:0.4rem"><span>חסימה לכל הלקוחות — חוב פתוח חוסם הזמנה אצל כולם (בלי רישום לקוח-לקוח)</span><input type="checkbox" id="s-policy-all" ${on('policy_enforce_all') ? 'checked' : ''}/></div>
+        <div class="muted" style="font-size:0.78rem;margin-top:0.15rem">חריגים דרך כרטיס הלקוח: "מורשה להזמין עם חוב פתוח", סף חוב, או חסימה לפי תאריך פירעון בלבד.</div>
         <div class="set-row" style="margin-top:0.6rem"><span>מילים ש"מזומן" (מופרד בפסיק, מ-PAYDES)</span></div>
         <input id="s-policy-cash" type="text" placeholder="מזומן" value="${escapeHtml(txt('policy_cash_paydes_match') || 'מזומן')}" style="width:100%;box-sizing:border-box"/>
         <div class="set-row" style="margin-top:0.6rem"><span>סף חוב פתוח לחסימת שוטף (₪, 0 = כל חוב לא-מכוסה חוסם)</span></div>
@@ -265,6 +267,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       const receiptsEnabled = (c.querySelector('#s-receipts-enabled') as HTMLInputElement).checked;
       await api.patch('/api/admin/settings', {
         payment_policy_enabled: (c.querySelector('#s-policy') as HTMLInputElement).checked,
+        policy_enforce_all: (c.querySelector('#s-policy-all') as HTMLInputElement).checked,
         policy_cash_paydes_match: (c.querySelector('#s-policy-cash') as HTMLInputElement).value,
         policy_net_debt_threshold: (c.querySelector('#s-policy-debt') as HTMLInputElement).value,
         fast_track_discount_pct: (c.querySelector('#s-fast-pct') as HTMLInputElement).value,

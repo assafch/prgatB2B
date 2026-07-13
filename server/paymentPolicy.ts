@@ -106,6 +106,7 @@ export function israelTodayYmd(): string {
 
 const SETTING_KEYS = {
   enabled: 'payment_policy_enabled',
+  enforceAll: 'policy_enforce_all', // ON → every customer is enrolled (no per-customer opt-in needed)
   cashMatch: 'policy_cash_paydes_match', // CSV of PAYDES substrings → cash
   netThreshold: 'policy_net_debt_threshold',
 } as const;
@@ -114,8 +115,13 @@ export function policyEnabled(): boolean {
   return getSettingBool(SETTING_KEYS.enabled, false);
 }
 
-/** Is the payment policy individually enabled for this customer? */
+/** Is the payment policy enabled for this customer? Either the global
+ *  enforce-all switch is on (2026-07-13, owner decision: block EVERYONE with
+ *  open debt), or the customer was individually enrolled. Per-customer
+ *  exceptions still work in enforce-all mode via allow_order_with_open_debt /
+ *  threshold / block_overdue_only on the customer card. */
 export function isEnforced(custname: string): boolean {
+  if (getSettingBool(SETTING_KEYS.enforceAll, false)) return true;
   const row = db.prepare('SELECT enforced FROM customer_policies WHERE custname = ?').get(custname) as { enforced?: number } | undefined;
   return !!(row && row.enforced);
 }
