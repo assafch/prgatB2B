@@ -3,6 +3,7 @@
 
 import { db } from './db.js';
 import { hashPassword, validatePassword, validateUsername, revokeOtherSessions, clearFailedLogins } from './auth.js';
+import { revokeLoginLink } from './loginLinks.js';
 
 export interface AdminUserView {
   id: number;
@@ -79,6 +80,9 @@ export async function resetUserPassword(
   clearFailedLogins(userId);
   revokeOtherSessions(userId); // no keepSessionId → kill all of the target's sessions
   db.prepare('DELETE FROM webauthn_credentials WHERE user_id = ?').run(userId);
+  // A live magic login link is a standing credential — a password reset that leaves
+  // it working defeats the rotation (the old link keeps logging into the account).
+  revokeLoginLink(userId);
   return { ok: true };
 }
 
@@ -89,7 +93,10 @@ export function setUserStatus(userId: number, status: 'active' | 'disabled'): { 
   if (!user) return { ok: false, error: 'משתמש לא נמצא' };
   if (user.role === 'admin') return { ok: false, error: 'לא ניתן לשנות סטטוס של מנהל' };
   db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, userId);
-  if (status === 'disabled') revokeOtherSessions(userId); // kill active sessions now
+  if (status === 'disabled') {
+    revokeOtherSessions(userId); // kill active sessions now
+    revokeLoginLink(userId); // and the standing magic link (same credential class)
+  }
   return { ok: true };
 }
 

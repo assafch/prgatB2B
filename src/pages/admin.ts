@@ -18,8 +18,9 @@ interface Customer {
   CUSTDES?: string;
 }
 
+// Note: no token field — invite tokens are hashed at rest; the link is copyable
+// only from the create response. Lost it? Create a fresh invite.
 interface Invite {
-  token: string;
   custname: string;
   cust_desc: string | null;
   created_at: string;
@@ -155,21 +156,20 @@ async function loadInvitesList(c: HTMLElement): Promise<void> {
               <th style="padding:0.5rem">שם</th>
               <th style="padding:0.5rem">נוצרה</th>
               <th style="padding:0.5rem">סטטוס</th>
-              <th style="padding:0.5rem">קישור</th>
+              <th style="padding:0.5rem">תוקף</th>
             </tr>
           </thead>
           <tbody>
             ${invites
               .map((i) => {
                 const used = i.used_at ? '<span class="ok">נוצל ✓</span>' : '<span class="muted">ממתין</span>';
-                const url = `${location.origin}/#invite/${i.token}`;
                 return `
                   <tr style="border-bottom:1px solid var(--border)">
                     <td style="padding:0.5rem">${escapeHtml(i.custname)}</td>
                     <td style="padding:0.5rem">${escapeHtml(i.cust_desc || '-')}</td>
                     <td style="padding:0.5rem">${new Date(i.created_at + 'Z').toLocaleString('he-IL')}</td>
                     <td style="padding:0.5rem">${used}</td>
-                    <td style="padding:0.5rem"><input value="${escapeAttr(url)}" readonly style="width:100%"/></td>
+                    <td style="padding:0.5rem" class="muted">עד ${new Date(i.expires_at).toLocaleDateString('he-IL')} · הקישור נמסר ביצירה</td>
                   </tr>`;
               })
               .join('')}

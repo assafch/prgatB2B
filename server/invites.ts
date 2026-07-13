@@ -6,6 +6,12 @@ import { hashPassword } from './auth.js';
 
 const INVITE_TTL_DAYS = 14;
 
+// Tokens are stored ONLY as sha256 (same posture as sessions and login links): a DB
+// leak must not yield working invites — an unused invite mints credentials for its
+// custname. The raw token exists only in the URL returned at creation time, so the
+// admin list cannot re-display old links (create a fresh invite instead).
+const sha256 = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
+
 export interface InviteRow {
   token: string;
   custname: string;
@@ -30,7 +36,7 @@ export function createInvite(params: {
     `INSERT INTO invites (token, custname, cust_desc, email, phone, created_by, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    token,
+    sha256(token),
     params.custname,
     params.cust_desc ?? null,
     params.email ?? null,
@@ -38,7 +44,9 @@ export function createInvite(params: {
     params.created_by ?? null,
     expiresAt
   );
-  return db.prepare('SELECT * FROM invites WHERE token = ?').get(token) as InviteRow;
+  const row = db.prepare('SELECT * FROM invites WHERE token = ?').get(sha256(token)) as InviteRow;
+  // The caller builds the invite URL from `token` — return the RAW one (its only copy).
+  return { ...row, token };
 }
 
 export function getInvite(token: string): InviteRow | null {
@@ -46,7 +54,7 @@ export function getInvite(token: string): InviteRow | null {
     .prepare(
       `SELECT * FROM invites WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')`
     )
-    .get(token) as InviteRow | undefined;
+    .get(sha256(token)) as InviteRow | undefined;
   return row ?? null;
 }
 
@@ -70,13 +78,17 @@ export async function acceptInvite(
     )
     .run(username, hash, invite.custname, invite.cust_desc, invite.email, invite.phone);
 
-  db.prepare(`UPDATE invites SET used_at = datetime('now') WHERE token = ?`).run(token);
+  db.prepare(`UPDATE invites SET used_at = datetime('now') WHERE token = ?`).run(sha256(token));
 
   return { userId: result.lastInsertRowid as number, custname: invite.custname };
 }
 
-export function listInvites(): InviteRow[] {
+/** Admin list — token hashes are deliberately NOT returned (they'd be useless for
+ *  link-building anyway; the raw token is shown once, at creation). */
+export function listInvites(): Omit<InviteRow, 'token'>[] {
   return db
-    .prepare('SELECT * FROM invites ORDER BY created_at DESC LIMIT 200')
-    .all() as InviteRow[];
+    .prepare(
+      'SELECT custname, cust_desc, email, phone, created_at, expires_at, used_at FROM invites ORDER BY created_at DESC LIMIT 200'
+    )
+    .all() as Omit<InviteRow, 'token'>[];
 }

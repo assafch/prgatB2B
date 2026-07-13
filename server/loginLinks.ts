@@ -21,6 +21,13 @@ export function createLoginLink(userId: number, createdBy: number | null): { tok
   return { token, expiresAt };
 }
 
+/** Revoke a user's login link (if any). Called on password reset / user disable —
+ *  a credential rotation must kill EVERY standing way into the account, and a live
+ *  magic link is exactly that. */
+export function revokeLoginLink(userId: number): void {
+  db.prepare('DELETE FROM login_links WHERE user_id = ?').run(userId);
+}
+
 /** Redeem (NOT consumed — reusable until expiry). Null unless the link is live
  *  and its user is an active customer. Admin accounts never redeem. */
 export function redeemLoginLink(token: string): { userId: number } | null {
