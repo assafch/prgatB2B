@@ -362,6 +362,21 @@ db.prepare(
      AND user_id IN (SELECT id FROM users WHERE role = 'admin')`
 ).run();
 
+// One-time: hash legacy plaintext invite tokens (raw = 32 hex chars from
+// randomBytes(16); sha256 = 64). Already-sent links keep working — lookups hash
+// the presented raw token, which then matches the migrated value. Idempotent.
+{
+  const legacyInvites = db.prepare('SELECT token FROM invites WHERE length(token) = 32').all() as { token: string }[];
+  if (legacyInvites.length) {
+    const up = db.prepare('UPDATE invites SET token = ? WHERE token = ?');
+    const tx = db.transaction(() => {
+      for (const r of legacyInvites) up.run(crypto.createHash('sha256').update(r.token).digest('hex'), r.token);
+    });
+    tx();
+    console.log(`[db] hashed ${legacyInvites.length} legacy invite token(s)`);
+  }
+}
+
 function ensureColumn(table: string, column: string, definition: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!cols.find((c) => c.name === column)) {

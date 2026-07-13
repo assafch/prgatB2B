@@ -178,15 +178,22 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
         unified
           ? `${preview!.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;font-size:0.9rem"><span>סכום ביניים</span><span>${formatMoney(preview!.subtotal)}</span></div>` : ''}
              ${(cart.promotions?.applied || [])
-               .filter((a) => a.savings > 0)
+               .filter((a) => a.savings > 0 && a.type !== 'gift')
                .map((a) => `<div style="display:flex;justify-content:space-between;margin-top:0.3rem;color:var(--ok);font-size:0.9rem"><span>🏷️ ${escapeHtml(a.name)}</span><span dir="ltr">−${formatMoney(a.savings)}</span></div>`)
+               .join('')}
+             ${(cart.promotions?.applied || [])
+               .filter((a) => a.savings > 0 && a.type === 'gift')
+               .map((a) => `<div style="display:flex;justify-content:space-between;margin-top:0.3rem;color:var(--ok);font-size:0.9rem"><span>🎁 ${escapeHtml(a.name)}</span><span>מתנה בשווי ${formatMoney(a.savings)}</span></div>`)
                .join('')}
              <div style="display:flex;justify-content:space-between;margin-top:0.4rem;font-size:0.9rem"><span>מע״מ ${Math.round(preview!.vatRate * 100)}%</span><span>${formatMoney(preview!.vatAmount)}</span></div>
              <div style="display:flex;justify-content:space-between;margin-top:0.6rem;font-weight:900;font-size:1.2rem"><span>לתשלום</span><span style="color:var(--brand)">${formatMoney(preview!.payable)}</span></div>`
           : `${(cart.promotions?.applied || [])
                .filter((a) => a.savings > 0)
                .map(
-                 (a) => `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:var(--ok);font-size:0.9rem">
+                 (a) => a.type === 'gift'
+                   ? `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:var(--ok);font-size:0.9rem">
+                   <span>🎁 ${escapeHtml(a.name)}</span><span>מתנה בשווי ${formatMoney(a.savings)}</span></div>`
+                   : `<div style="display:flex;justify-content:space-between;margin-top:0.4rem;color:var(--ok);font-size:0.9rem">
                    <span>🏷️ ${escapeHtml(a.name)}</span><span dir="ltr">−${formatMoney(a.savings)}</span></div>`
                )
                .join('')}
