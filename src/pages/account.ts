@@ -143,9 +143,15 @@ async function renderPasskeys(host: HTMLElement): Promise<void> {
     host.querySelectorAll<HTMLButtonElement>('.pk-del').forEach((b) =>
       b.addEventListener('click', async () => {
         if (!(await confirmDialog('להסיר את הכניסה המהירה מהמכשיר הזה?', 'הסר', 'ביטול'))) return;
-        await api.del(`/api/auth/passkeys/${b.dataset.id}`);
-        toast('הוסר', 'ok');
-        await load();
+        try {
+          await api.del(`/api/auth/passkeys/${b.dataset.id}`);
+          toast('הוסר', 'ok');
+          await load();
+        } catch (ex) {
+          // A silently-swallowed failure here leaves an auth factor the user thinks
+          // they revoked — surface it and keep the list as-is.
+          toast(ex instanceof Error ? ex.message : 'ההסרה נכשלה, נסו שוב', 'error');
+        }
       })
     );
   };

@@ -71,10 +71,19 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
       qty.value = String(Math.max(0, (Number(qty.value) || 0) - step));
     });
     btn.addEventListener('click', async () => {
+      // The server no-ops an add of qty<=0, so guard here — otherwise we'd show
+      // '✓ נוסף לסל' for an item that was never added.
+      const addQty = Number(qty.value);
+      if (!(addQty > 0)) {
+        msg.textContent = 'יש לבחור כמות גדולה מ-0';
+        msg.className = 'error';
+        qty.focus();
+        return;
+      }
       btn.disabled = true;
       try {
         await api.put(`/api/cart/lines/${encodeURIComponent(p.partname)}`, {
-          quantity: Number(qty.value),
+          quantity: addQty,
           mode: 'add',
         });
         await refreshCartCount();

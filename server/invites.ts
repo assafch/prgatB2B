@@ -70,17 +70,30 @@ export async function acceptInvite(
   const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (exists) throw new Error('שם משתמש כבר קיים');
 
+  // bcrypt yields the event loop, so do it BEFORE the atomic section (no side effects).
   const hash = await hashPassword(password);
-  const result = db
-    .prepare(
-      `INSERT INTO users (username, password_hash, role, custname, cust_desc, email, phone, status)
-       VALUES (?, ?, 'customer', ?, ?, ?, ?, 'active')`
-    )
-    .run(username, hash, invite.custname, invite.cust_desc, invite.email, invite.phone);
 
-  db.prepare(`UPDATE invites SET used_at = datetime('now') WHERE token = ?`).run(sha256(token));
+  // Claim the invite and create the user in ONE synchronous transaction so two
+  // requests racing the same token can't both create an account. The conditional
+  // UPDATE (used_at IS NULL) is the single-use gate: only the claimer with
+  // changes===1 proceeds; if the INSERT then fails (e.g. username taken) the whole
+  // transaction rolls back and the invite stays usable.
+  const tokenHash = sha256(token);
+  const claimAndCreate = db.transaction(() => {
+    const claimed = db
+      .prepare(`UPDATE invites SET used_at = datetime('now') WHERE token = ? AND used_at IS NULL`)
+      .run(tokenHash);
+    if (claimed.changes !== 1) throw new Error('ההזמנה כבר נוצלה');
+    const result = db
+      .prepare(
+        `INSERT INTO users (username, password_hash, role, custname, cust_desc, email, phone, status)
+         VALUES (?, ?, 'customer', ?, ?, ?, ?, 'active')`
+      )
+      .run(username, hash, invite.custname, invite.cust_desc, invite.email, invite.phone);
+    return result.lastInsertRowid as number;
+  });
 
-  return { userId: result.lastInsertRowid as number, custname: invite.custname };
+  return { userId: claimAndCreate(), custname: invite.custname };
 }
 
 /** Admin list — token hashes are deliberately NOT returned (they'd be useless for

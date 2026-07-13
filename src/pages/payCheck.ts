@@ -332,7 +332,17 @@ export function renderPayCheck(shell: HTMLElement, orderId?: string): void {
       renderFooter();
     };
     const retake = card.querySelector('.pc-retake') as HTMLButtonElement | null;
-    if (retake) retake.onclick = () => cam.click();
+    if (retake)
+      retake.onclick = () => {
+        // Remove this unreadable cheque BEFORE reopening the camera — otherwise in
+        // order mode addCheck's single-cheque cap rejects the replacement photo.
+        URL.revokeObjectURL(item.previewUrl);
+        const idx = items.indexOf(item);
+        if (idx >= 0) items.splice(idx, 1);
+        card.remove();
+        renderFooter();
+        cam.click();
+      };
   }
 
   function renderFooter(): void {

@@ -351,15 +351,33 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
         continue;
       }
       const patch: Record<string, unknown> = {};
-      if ('box_size' in row && row.box_size !== '') patch.box_size = Number(row.box_size);
+      // A non-numeric cell (e.g. "6 יח", "1,5") used to become NaN → SQLite binds it as
+      // NULL: silently clearing b2b_min_qty, or blowing up box_size's NOT NULL only on the
+      // real run (never in the dry run). Reject a bad number here so it's reported in BOTH
+      // passes and the rest of the import isn't aborted. `badNum` is true → skip the row.
+      let badNum = false;
+      const numCell = (raw: string, label: string): number | undefined => {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) {
+          if (errors.length < 50) errors.push(`${partname}: ערך לא מספרי בעמודה ${label}: "${raw}"`);
+          badNum = true;
+          return undefined;
+        }
+        return n;
+      };
+      if ('box_size' in row && row.box_size !== '') patch.box_size = numCell(row.box_size, 'box_size');
       if ('b2b_visible' in row && row.b2b_visible !== '')
         patch.b2b_visible = ['1', 'true', 'yes', 'y'].includes(row.b2b_visible.toLowerCase()) ? 1 : 0;
       if ('b2b_partdes_override' in row) patch.b2b_partdes_override = row.b2b_partdes_override || null;
       if ('b2b_description' in row) patch.b2b_description = row.b2b_description || null;
       if ('b2b_tags' in row) patch.b2b_tags = row.b2b_tags || null;
-      if ('b2b_min_qty' in row && row.b2b_min_qty !== '') patch.b2b_min_qty = Number(row.b2b_min_qty);
+      if ('b2b_min_qty' in row && row.b2b_min_qty !== '') patch.b2b_min_qty = numCell(row.b2b_min_qty, 'b2b_min_qty');
       if ('b2b_sort_priority' in row && row.b2b_sort_priority !== '')
-        patch.b2b_sort_priority = Number(row.b2b_sort_priority);
+        patch.b2b_sort_priority = numCell(row.b2b_sort_priority, 'b2b_sort_priority');
+      if (badNum) {
+        skipped++;
+        continue;
+      }
       if ('b2b_featured' in row && row.b2b_featured !== '')
         patch.b2b_featured = ['1', 'true', 'yes', 'y'].includes(row.b2b_featured.toLowerCase()) ? 1 : 0;
       if ('b2b_category_override' in row) patch.b2b_category_override = row.b2b_category_override || null;

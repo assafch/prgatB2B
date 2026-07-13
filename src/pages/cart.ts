@@ -34,6 +34,10 @@ interface CartResp {
 // reach; true/false = restore the user's last state without re-animating.
 let sheetState: boolean | null = null;
 let sheetTeardown: (() => void) | null = null;
+// Serializes concurrent load()s (rapid stepper taps): each captures a generation
+// and, after its GET resolves, bails if a newer load() has since started — so an
+// out-of-order response can't render a stale quantity/total. Mirrors catalog.ts.
+let loadGen = 0;
 
 export async function renderCart(shell: HTMLElement): Promise<void> {
   sheetState = null;
@@ -44,6 +48,7 @@ async function load(shell: HTMLElement): Promise<void> {
   // Stale-listener guard: kill the sheet's scroll listener before any DOM work.
   sheetTeardown?.();
   sheetTeardown = null;
+  const gen = ++loadGen;
   // Show the loading placeholder only on first paint. Re-renders (every stepper
   // tap) keep the old DOM until fresh data arrives: collapsing the page to a
   // one-line placeholder clamps the scroll position to 0, which both jumps the
@@ -53,9 +58,11 @@ async function load(shell: HTMLElement): Promise<void> {
   try {
     cart = await api.get<CartResp>('/api/cart');
   } catch (ex) {
+    if (gen !== loadGen) return; // superseded — don't clobber a newer render with our error
     shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : ex)}</div>`;
     return;
   }
+  if (gen !== loadGen) return; // a newer load() started while we awaited — discard this stale response
 
   if (cart.lines.length === 0) {
     shell.innerHTML = `<div class="card">${emptyState('🛒', 'הסל ריק', 'התחילו הזמנה חדשה מהקטלוג', '#catalog', 'לקטלוג')}</div>`;
