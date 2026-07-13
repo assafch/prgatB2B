@@ -284,7 +284,15 @@ export async function deriveDebtCharge(
 
   if (selectedNums.length) {
     const unpaid = await getUnpaidInvoices(custname).catch(() => []);
-    const chosen = unpaid.filter((u) => selectedNums.includes(u.ivnum));
+    // Dedupe by invoice number: the unpaid list may carry the same IVNUM on more than
+    // one row (credit/partial rows), and a client may repeat a number — either way the
+    // same invoice must be summed (and charged) exactly once.
+    const seen = new Set<string>();
+    const chosen = unpaid.filter((u) => {
+      if (!selectedNums.includes(u.ivnum) || seen.has(u.ivnum)) return false;
+      seen.add(u.ivnum);
+      return true;
+    });
     if (!chosen.length) throw new Error('לא נבחרו חשבוניות לתשלום');
     const sumSelected = round2(chosen.reduce((sum, u) => sum + u.amount, 0));
     amount = round2(Math.min(sumSelected, payableCap)); // never charge more than the real open balance
@@ -318,6 +326,16 @@ export async function createCardDebtIntent(
   baseUrl: string,
   saveCard?: boolean
 ): Promise<{ id: string; url: string; amount: number }> {
+  // Only the newest hosted debt/partial intent may be live: expire prior not-yet-paid
+  // ones BEFORE deriving the cap, so two open tabs can't each mint a full-cap intent
+  // and double-charge the same debt (TOCTOU on payableCap — fresh 'created' rows are
+  // not yet counted by unreconciledCardTotal). Token charges are excluded: an
+  // unconfirmed one-tap charge may already have moved money (see chargeSavedCard).
+  // confirmCard records a paid charge even on an 'expired' row, so a customer who
+  // still pays an old hosted page is never lost — mirror of the order-intent path.
+  db.prepare(
+    "UPDATE card_payments SET status='expired' WHERE custname = ? AND kind IN ('debt','debt_partial') AND status IN ('created','pending') AND COALESCE(charge_source,'') != 'token'"
+  ).run(custname);
   const { amount, label, paidItems, payplusItems, summary } = await deriveDebtCharge(custname, selection);
 
   const id = crypto.randomBytes(12).toString('hex');
@@ -378,6 +396,11 @@ export async function createCardPartialIntent(
   baseUrl: string,
   saveCard?: boolean
 ): Promise<{ id: string; url: string; amount: number }> {
+  // Same newest-intent-wins expiry as createCardDebtIntent (TOCTOU on the payable
+  // cap) — debt and partial intents charge the same balance, so both kinds expire.
+  db.prepare(
+    "UPDATE card_payments SET status='expired' WHERE custname = ? AND kind IN ('debt','debt_partial') AND status IN ('created','pending') AND COALESCE(charge_source,'') != 'token'"
+  ).run(custname);
   const { amount, summary } = await derivePartialCharge(custname, requestedAmount);
 
   const hint = Array.isArray(invoiceRefs) ? invoiceRefs.filter((s) => typeof s === 'string').slice(0, 200) : [];
