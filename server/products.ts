@@ -18,6 +18,11 @@ export const upload = multer({
   limits: { fileSize: 4 * 1024 * 1024 }, // 4MB
 });
 
+// Restocks discovered by patchProduct while a transaction is open (batchUpdate)
+// can't fire push right away — the row could still roll back. They're queued
+// here and drained by the caller once the transaction has actually committed.
+const pendingRestocks: string[] = [];
+
 export interface AdminProductRow {
   partname: string;
   partdes: string | null;
@@ -171,7 +176,15 @@ export function patchProduct(partname: string, patch: Record<string, unknown>): 
   cols.push("updated_at = datetime('now')");
   vals.push(partname);
   db.prepare(`UPDATE catalog_cache SET ${cols.join(', ')} WHERE partname = ?`).run(...vals);
-  if (restocked) fireStockAlerts([partname]);
+  // Mid-transaction (batchUpdate), don't push yet — the row could still roll
+  // back. Queue it; the transaction owner fires only after commit.
+  if (restocked) {
+    if (db.inTransaction) {
+      pendingRestocks.push(partname);
+    } else {
+      fireStockAlerts([partname]);
+    }
+  }
   return getProductAdmin(partname);
 }
 
@@ -192,7 +205,18 @@ export function batchUpdate(items: Array<Record<string, unknown>>): number {
       changed++;
     }
   });
-  tx(items.slice(0, 2000)); // backstop cap
+  // Fire restock alerts only once the transaction has committed. On failure
+  // (e.g. a later row's malformed value throws a bind error and the whole
+  // batch rolls back) drop the queue instead — no push for changes that
+  // never landed.
+  let committed = false;
+  try {
+    tx(items.slice(0, 2000)); // backstop cap
+    committed = true;
+  } finally {
+    const parts = pendingRestocks.splice(0);
+    if (committed && parts.length) fireStockAlerts(parts);
+  }
   return changed;
 }
 

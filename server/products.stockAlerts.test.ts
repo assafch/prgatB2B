@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { db, setSettingBool } from './db.js';
 import { requestAlert, listAlerts } from './stockAlerts.js';
-import { patchProduct, bulkUpdate } from './products.js';
+import { patchProduct, bulkUpdate, batchUpdate } from './products.js';
 
 function seed() {
   db.exec('DELETE FROM stock_alerts; DELETE FROM users; DELETE FROM catalog_cache;');
@@ -32,4 +32,28 @@ test('bulkUpdate mark_in_stock fires only for rows that were OOS', () => {
   bulkUpdate({ partnames: ['P1', 'P2'], action: 'mark_in_stock' });
   assert.ok(listAlerts(1).find((a) => a.partname === 'P1')!.notified_at); // P1 fired now
   assert.equal(listAlerts(1).find((a) => a.partname === 'P2')!.notified_at, before); // P2 untouched
+});
+
+test('batchUpdate restock fires once the transaction commits', () => {
+  seed();
+  requestAlert(1, '10001', 'P1');
+  batchUpdate([{ partname: 'P1', b2b_out_of_stock: false }]);
+  assert.ok(listAlerts(1).find((a) => a.partname === 'P1')!.notified_at);
+});
+
+test('batchUpdate rolls back → restock alert for an earlier row must NOT fire', () => {
+  seed();
+  requestAlert(1, '10001', 'P1');
+  assert.throws(() =>
+    batchUpdate([
+      { partname: 'P1', b2b_out_of_stock: false }, // restocks first
+      { partname: 'P2', b2b_min_qty: {} }, // bad bind value → throws, rolls back whole batch
+    ])
+  );
+  // No push fired, and the write itself rolled back — P1 still OOS, alert still unnotified.
+  assert.equal(listAlerts(1).find((a) => a.partname === 'P1')!.notified_at, null);
+  const row = db.prepare('SELECT b2b_out_of_stock FROM catalog_cache WHERE partname = ?').get('P1') as {
+    b2b_out_of_stock: number;
+  };
+  assert.equal(row.b2b_out_of_stock, 1);
 });
