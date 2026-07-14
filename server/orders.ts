@@ -498,8 +498,14 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
   // response was lost must not be told "not awaiting payment").
   if (order.linked_payment_id === checkId) return true;
   if (order.status !== 'pending_payment') throw new OrderError('ההזמנה אינה ממתינה לתשלום');
-  const chk = getCheckForUser(userId, checkId) as { status?: string; amount?: number; is_postdated?: number } | null;
+  const chk = getCheckForUser(userId, checkId) as { status?: string; amount?: number; is_postdated?: number; amount_verified?: number } | null;
   if (!chk || chk.status !== 'submitted') throw new OrderError('הצ׳ק לא נמצא או טרם אושר');
+  // Guard 0: the cheque amount must have been OCR-verified. When the photo wasn't read
+  // as a legible cheque (amount_verified = 0), the amount is unverified customer input,
+  // so it must not auto-release a held order — otherwise a non-cheque image with a typed
+  // amount would defeat the cash-before-approval / debt block. Such a cheque still stands
+  // as a debt promise for the office to reconcile; the customer pays this order by card.
+  if (!chk.amount_verified) throw new OrderError('לא ניתן לאשר את ההזמנה מול צ׳ק זה — סכום הצ׳ק לא אומת מהתמונה. שלמו בכרטיס אשראי או פנו למשרד.');
   // Guard 1: reject post-dated cheques — must be payable immediately.
   if (chk.is_postdated) throw new OrderError('צ׳ק דחוי אינו תקף לאישור הזמנה — נדרש צ׳ק לפירעון מיידי');
   // Guard 2: cheque amount must cover the order's required amount (VAT-inclusive).

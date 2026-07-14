@@ -429,6 +429,12 @@ ensureColumn('orders_local', 'linked_payment_id', 'TEXT');
 ensureColumn('orders_local', 'approved_at', 'TEXT');
 ensureColumn('card_payments', 'order_id', 'TEXT');
 ensureColumn('payment_checks', 'order_id', 'TEXT');
+// Was the confirmed amount capped against a real OCR reading? 1 only when the model
+// extracted a numeric amount at draft time (so the customer could correct it DOWN but
+// never inflate past the photo). 0 when OCR read no amount (non-cheque/illegible image,
+// or OCR unavailable) — such a cheque may still be recorded as a debt promise, but must
+// NOT auto-approve a held order (payHeldOrderByCheck enforces this). Legacy rows are 0.
+ensureColumn('payment_checks', 'amount_verified', 'INTEGER NOT NULL DEFAULT 0');
 // Promotions table predates the current engine; add the columns it needs (the old
 // x_/y_ columns stay, unused). params holds the per-type rule JSON.
 ensureColumn('promotions', 'params', "TEXT NOT NULL DEFAULT '{}'");

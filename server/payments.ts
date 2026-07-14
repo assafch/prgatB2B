@@ -97,6 +97,7 @@ export interface CheckRow {
   image_path: string | null;
   ai_raw: string | null;
   ai_confidence: number | null;
+  amount_verified: number; // 1 iff the confirmed amount was capped against a real OCR reading
   status: string;
   created_at: string;
   submitted_at: string | null;
@@ -172,8 +173,13 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
   // ₪12,000 auto-approval / debt-offset. If OCR read no amount (aiAmount null),
   // there is nothing to cap against (see follow-up note in the report).
   let amount = input.amount;
-  if (draft.aiAmount != null && draft.aiAmount > 0 && amount > draft.aiAmount + 0.01) {
-    amount = draft.aiAmount;
+  // amountVerified is 1 only when OCR extracted a real amount to cap against. When it's
+  // 0 (OCR read nothing / non-cheque image / OCR unavailable) the amount is unverified
+  // client input — still fine to record as a debt promise, but payHeldOrderByCheck must
+  // refuse to auto-approve a held order from such a cheque.
+  const amountVerified = draft.aiAmount != null && draft.aiAmount > 0 ? 1 : 0;
+  if (amountVerified && amount > draft.aiAmount! + 0.01) {
+    amount = draft.aiAmount!;
   }
 
   // Post-dated: derive from the confirmed date, but never let the client clear an
@@ -186,7 +192,7 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
   const info = db
     .prepare(
       `UPDATE payment_checks
-         SET amount = ?, check_date = ?, is_postdated = ?,
+         SET amount = ?, check_date = ?, is_postdated = ?, amount_verified = ?,
              bank = COALESCE(?, bank), branch = COALESCE(?, branch),
              account = COALESCE(?, account), check_number = COALESCE(?, check_number),
              note = ?, status = 'submitted', submitted_at = datetime('now')
@@ -196,6 +202,7 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
       amount,
       input.checkDate,
       isPostdated,
+      amountVerified,
       input.bank?.slice(0, 80) ?? null,
       input.branch?.slice(0, 40) ?? null,
       maskAccount(input.account),

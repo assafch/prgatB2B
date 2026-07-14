@@ -159,12 +159,16 @@ const RECON_WINDOW = '-3 days';
 /** Money "in flight" that should offset open debt so a fresh payment lifts the
  *  block: confirmed debt card payments + non-post-dated cheques the customer has
  *  submitted recently. Pending card intents are intentionally excluded (H2 fix) —
- *  only a confirmed 'paid' card transaction counts against the block. */
+ *  only a confirmed 'paid' card transaction counts against the block. Cheques whose
+ *  amount was never OCR-verified (amount_verified = 0) are excluded too: their amount
+ *  is unverified customer input, so counting it would let a non-cheque photo with a
+ *  typed sum lift the debt block with no real money (same bypass Guard 0 closes for
+ *  the cash-hold path). Such cheques still reconcile manually at the office. */
 export function pendingSettlement(custname: string): number {
   const card = paidDebtCardTotal(custname);
   const chq = db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS s FROM payment_checks
-     WHERE custname = ? AND status = 'submitted' AND is_postdated = 0
+     WHERE custname = ? AND status = 'submitted' AND is_postdated = 0 AND amount_verified = 1
        AND submitted_at >= datetime('now', ?)`
   ).get(custname, RECON_WINDOW) as { s: number };
   return Math.round(((card + (chq.s || 0)) + Number.EPSILON) * 100) / 100;
