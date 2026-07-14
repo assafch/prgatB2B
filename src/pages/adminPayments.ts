@@ -13,6 +13,7 @@ interface AdminCheck {
   amount: number | null;
   checkDate: string | null;
   isPostdated: boolean;
+  amountVerified?: boolean;
   bank?: string | null;
   status: string;
   createdAt: string;
@@ -120,7 +121,7 @@ function chequeRowHtml(ch: AdminCheck): string {
       <img class="chq-thumb" loading="lazy" src="${imgUrl}" alt="" onerror="this.style.visibility='hidden'"/>
       <div class="chq-row-main">
         <div class="chq-row-name">${escapeHtml(ch.custname)} <span class="money">${ch.amount != null ? formatMoney(ch.amount) : '—'}</span></div>
-        <div class="chq-row-meta">${bankLabel} · ${dateLabel}${ch.isPostdated ? ' <span class="badge warn">דחוי</span>' : ''}</div>
+        <div class="chq-row-meta">${bankLabel} · ${dateLabel}${ch.isPostdated ? ' <span class="badge warn">דחוי</span>' : ''}${ch.amountVerified === false ? ' <span class="badge warn">סכום לא אומת — בדקו בתמונה</span>' : ''}</div>
       </div>
       <span class="chq-chev">‹</span>
     </div>

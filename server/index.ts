@@ -982,6 +982,7 @@ function shapeCheck(c: CheckRow) {
     amount: c.amount,
     checkDate: c.check_date,
     isPostdated: !!c.is_postdated,
+    amountVerified: !!c.amount_verified, // false = amount is unverified customer input (OCR read no amount) — office must eyeball the photo
     bank: c.bank,
     branch: c.branch,
     account: c.account,

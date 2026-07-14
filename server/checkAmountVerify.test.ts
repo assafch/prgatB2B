@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { db } from './db.js';
 import { createCheckDraft, confirmCheck, getCheckForUser } from './payments.js';
 import { payHeldOrderByCheck } from './orders.js';
+import { pendingSettlement } from './paymentPolicy.js';
 
 function seedUser() {
   db.exec('DELETE FROM payment_checks; DELETE FROM orders_local; DELETE FROM users;');
@@ -65,4 +66,16 @@ test('payHeldOrderByCheck passes the verify guard for a verified cheque and clai
   assert.equal(result, true);
   const status = (db.prepare('SELECT status FROM orders_local WHERE id = ?').get(orderId) as { status: string }).status;
   assert.notEqual(status, 'pending_payment'); // no longer held — the verified cheque claimed it
+});
+
+test('pendingSettlement (debt-block offset) counts only OCR-verified cheques', () => {
+  seedUser();
+  // Unverified cheque with a big typed amount must NOT offset debt (the debt-block bypass).
+  const c0 = createCheckDraft(1, '10001', img, null).id;
+  confirmCheck(1, c0, { amount: 20000, checkDate: '2020-01-01' }); // amount_verified=0
+  assert.equal(pendingSettlement('10001'), 0, 'unverified cheque must not lift the debt block');
+  // A verified cheque does count.
+  const c1 = createCheckDraft(1, '10001', img, { is_check: true, amount: 500, amount_words_match: true, date: '2020-01-01', is_postdated: false, bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null }).id;
+  confirmCheck(1, c1, { amount: 500, checkDate: '2020-01-01' }); // amount_verified=1
+  assert.equal(pendingSettlement('10001'), 500);
 });
