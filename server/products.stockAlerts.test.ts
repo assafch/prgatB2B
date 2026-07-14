@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { db, setSettingBool } from './db.js';
 import { requestAlert, listAlerts } from './stockAlerts.js';
-import { patchProduct, bulkUpdate, batchUpdate } from './products.js';
+import { patchProduct, bulkUpdate, batchUpdate, importCsv } from './products.js';
 
 function seed() {
   db.exec('DELETE FROM stock_alerts; DELETE FROM users; DELETE FROM catalog_cache;');
@@ -56,4 +56,26 @@ test('batchUpdate rolls back → restock alert for an earlier row must NOT fire'
     b2b_out_of_stock: number;
   };
   assert.equal(row.b2b_out_of_stock, 1);
+});
+
+test('importCsv restock fires once the transaction commits', () => {
+  seed();
+  requestAlert(1, '10001', 'P1');
+  requestAlert(1, '10001', 'P2');
+  const csv = 'partname,b2b_out_of_stock\nP1,0\nP2,1\n'; // P1 restocks, P2 stays OOS
+  importCsv(csv, false);
+  assert.ok(listAlerts(1).find((a) => a.partname === 'P1')!.notified_at);
+  assert.equal(listAlerts(1).find((a) => a.partname === 'P2')!.notified_at, null);
+});
+
+test('importCsv dry run must NOT fire alerts', () => {
+  seed();
+  requestAlert(1, '10001', 'P1');
+  const csv = 'partname,b2b_out_of_stock\nP1,0\n';
+  importCsv(csv, true);
+  assert.equal(listAlerts(1).find((a) => a.partname === 'P1')!.notified_at, null);
+  const row = db.prepare('SELECT b2b_out_of_stock FROM catalog_cache WHERE partname = ?').get('P1') as {
+    b2b_out_of_stock: number;
+  };
+  assert.equal(row.b2b_out_of_stock, 1); // dry run never writes
 });

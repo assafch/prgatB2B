@@ -381,7 +381,11 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
   let updated = 0;
   let skipped = 0;
 
-  const exists = db.prepare('SELECT 1 FROM catalog_cache WHERE partname = ?');
+  const existing = db.prepare('SELECT b2b_out_of_stock FROM catalog_cache WHERE partname = ?');
+  // Rows whose incoming value flips b2b_out_of_stock 1→0 — snapshotted before the
+  // write (same reasoning as bulkUpdate) so alerts fire once, only after the whole
+  // import transaction has actually committed.
+  const restocking: string[] = [];
 
   const run = db.transaction((rows: Record<string, string>[]) => {
     for (const row of rows) {
@@ -390,7 +394,8 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
         skipped++;
         continue;
       }
-      if (!exists.get(partname)) {
+      const cur = existing.get(partname) as { b2b_out_of_stock: number } | undefined;
+      if (!cur) {
         skipped++;
         continue;
       }
@@ -435,6 +440,7 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
       const cols = Object.keys(patch).map((k) => `${k} = ?`);
       const vals = Object.values(patch);
       if (!dryRun) {
+        if (patch.b2b_out_of_stock === 0 && cur.b2b_out_of_stock === 1) restocking.push(partname);
         db.prepare(
           `UPDATE catalog_cache SET ${cols.join(', ')}, updated_at = datetime('now') WHERE partname = ?`
         ).run(...vals, partname);
@@ -443,6 +449,8 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
     }
   });
   run(parsed.data);
+  // Transaction committed (run() throws and skips this on failure) — safe to fire now.
+  if (!dryRun && restocking.length > 0) fireStockAlerts(restocking);
   return { updated, skipped, errors };
 }
 

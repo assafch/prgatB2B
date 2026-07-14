@@ -103,6 +103,9 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
         await refreshCartCount();
         msg.textContent = '✓ נוסף לסל';
         msg.className = 'ok';
+        // Ordering the product clears its back-in-stock rail item, if any — best
+        // effort, mirrors #restock-rail's add-mini (seen only on a successful add).
+        void api.post(`/api/stock-alerts/${encodeURIComponent(p.partname)}/seen`).catch(() => {});
         void showUpsell(p.partname);
       } catch (ex) {
         msg.textContent = ex instanceof Error ? ex.message : String(ex);

@@ -122,7 +122,9 @@ function listRestocked(userId: number, custname: string | null): CatalogItem[] {
   const out: CatalogItem[] = [];
   for (const r of rows) {
     const it = getProduct(r.partname, custname);
-    if (it) out.push(it);
+    // The alert fired when the product went back in stock, but it could have
+    // gone OOS again since — don't show a "back in stock" card for it.
+    if (it && !it.outOfStock) out.push(it);
   }
   return out;
 }
