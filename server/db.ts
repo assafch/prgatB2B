@@ -296,6 +296,18 @@ CREATE TABLE IF NOT EXISTS saved_cards (
   last_used_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_saved_cards_user ON saved_cards(user_id);
+
+CREATE TABLE IF NOT EXISTS stock_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  custname TEXT,
+  partname TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  notified_at TEXT,
+  seen_at TEXT,
+  UNIQUE(user_id, partname)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_alerts_pending ON stock_alerts(partname) WHERE notified_at IS NULL;
 `;
 
 db.exec(SCHEMA);
