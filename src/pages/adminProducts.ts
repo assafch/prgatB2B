@@ -22,6 +22,7 @@ interface AdminProduct {
   b2b_out_of_stock: number;
   b2b_is_new: number;
   updated_at: string;
+  alert_count: number;
 }
 
 interface Family {
@@ -358,6 +359,9 @@ function renderRow(p: AdminProduct): string {
     statusToggle(p.partname, '⭐', !!p.b2b_featured, 'b2b_featured') +
     ' ' +
     statusToggle(p.partname, 'חדש', !!p.b2b_is_new, 'b2b_is_new');
+  const waitChip = p.alert_count > 0
+    ? ` <span style="background:#eef;color:#33c;padding:1px 6px;border-radius:4px;font-size:0.75rem">🔔 ${p.alert_count} ממתינים</span>`
+    : '';
   return `
     <tr data-part="${part}" style="border-bottom:1px solid var(--border);cursor:pointer">
       <td style="padding:0.5rem"><input type="checkbox" class="row-check" data-part="${part}"/></td>
@@ -370,7 +374,7 @@ function renderRow(p: AdminProduct): string {
       <td style="padding:0.5rem">${p.list_price != null ? `₪${p.list_price.toFixed(2)}` : '-'}</td>
       <td style="padding:0.5rem"><input class="cell-edit" type="number" min="1" step="1" value="${p.box_size}" data-part="${part}" data-field="box_size" aria-label="ארגז"/></td>
       <td style="padding:0.5rem"><input class="cell-edit" type="number" min="0" step="1" value="${p.b2b_min_qty ?? ''}" placeholder="${p.box_size}" data-part="${part}" data-field="b2b_min_qty" aria-label="מינ׳ הזמנה"/></td>
-      <td style="padding:0.5rem;white-space:nowrap">${inactive}${toggles}</td>
+      <td style="padding:0.5rem;white-space:nowrap">${inactive}${toggles}${waitChip}</td>
     </tr>
   `;
 }
@@ -535,6 +539,7 @@ async function openDrawer(shell: HTMLElement, partname: string): Promise<void> {
         <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
           <input type="checkbox" name="b2b_out_of_stock" ${p.b2b_out_of_stock ? 'checked' : ''}/> 🚫 אזל מהמלאי (לא ניתן להזמנה)
         </label>
+        ${p.b2b_out_of_stock && p.alert_count > 0 ? '<div id="alert-waiters" class="muted" style="font-size:0.8rem">טוען ממתינים…</div>' : ''}
         <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
           <input type="checkbox" name="b2b_is_new" ${p.b2b_is_new ? 'checked' : ''}/> ✨ מוצר חדש (מופיע במסך הבית)
         </label>
@@ -552,6 +557,18 @@ async function openDrawer(shell: HTMLElement, partname: string): Promise<void> {
     (drawer.querySelector('#drawer-cancel') as HTMLButtonElement).addEventListener('click', () =>
       closeDrawer(shell)
     );
+
+    // Back-in-stock waiters list (only rendered when OOS + there are waiters)
+    const waitersEl = drawer.querySelector<HTMLElement>('#alert-waiters');
+    if (waitersEl) {
+      api.get<{ waiters: Array<{ username: string; cust_desc: string | null; custname: string | null }> }>(
+        `/api/admin/stock-alerts/${encodeURIComponent(p.partname)}`
+      ).then((r) => {
+        waitersEl.textContent = r.waiters.length
+          ? 'ממתינים: ' + r.waiters.map((w) => w.cust_desc || w.custname || w.username).join(', ')
+          : '';
+      }).catch(() => { waitersEl.textContent = ''; });
+    }
 
     // Image upload
     const imgZone = drawer.querySelector('#image-zone') as HTMLDivElement;
