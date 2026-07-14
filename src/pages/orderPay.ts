@@ -96,6 +96,6 @@ export async function renderOrderPay(shell: HTMLElement, orderId: string): Promi
     });
     shell.querySelector('#pay-check')?.addEventListener('click', () => { location.hash = '#pay-check/' + orderId; });
   } catch (ex) {
-    shell.innerHTML = `<div class="card error">${ex instanceof Error ? ex.message : String(ex)}</div>`;
+    shell.innerHTML = `<div class="card error">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
   }
 }

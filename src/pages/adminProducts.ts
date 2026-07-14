@@ -338,7 +338,7 @@ async function loadList(shell: HTMLElement): Promise<void> {
       loadList(shell);
     });
   } catch (ex) {
-    wrap.innerHTML = `<div class="error" style="padding:1rem">${ex instanceof Error ? ex.message : ex}</div>`;
+    wrap.innerHTML = `<div class="error" style="padding:1rem">${escapeHtml(ex instanceof Error ? ex.message : String(ex))}</div>`;
   }
 }
 
