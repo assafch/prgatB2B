@@ -3,6 +3,7 @@ import { escapeAttr, escapeHtml, formatMoney } from '../format.js';
 import { toast, oosBadge, priceBlock, discountChip, hasRealDiscount } from '../ui.js';
 import { refreshCartCount } from '../main.js';
 import { showUpsell } from './upsell.js';
+import { pushSupported, pushSubscribed, enablePush } from '../push.js';
 
 interface Product {
   partname: string;
@@ -23,6 +24,17 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
     const p = await api.get<Product>(`/api/catalog/${encodeURIComponent(partname)}`);
     const oos = !!p.outOfStock;
     const d = oos ? ' disabled' : '';
+    let alertsEnabled = false;
+    let armed = false;
+    if (oos) {
+      try {
+        const r = await api.get<{ enabled: boolean; alerts: Array<{ partname: string; notified_at: string | null }> }>('/api/stock-alerts');
+        alertsEnabled = r.enabled;
+        armed = r.alerts.some((a) => a.partname === p.partname && !a.notified_at);
+      } catch {
+        /* not a customer / flag off → no button */
+      }
+    }
     shell.innerHTML = `
       <div class="card${oos ? ' is-oos' : ''}" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
         <div style="aspect-ratio:1;background:#f3f4f6;border-radius:8px;display:grid;place-items:center;color:#9ca3af">
@@ -40,7 +52,9 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
             ${p.price != null
               ? `<div class="product-price-row">${priceBlock(p, { variant: 'inline', size: 'lg' })}${discountChip(p)}</div>`
               : '<span style="font-size:1.3rem;font-weight:700;color:var(--brand)">צור קשר למחיר</span>'}
-            ${oos ? '<div style="margin-top:0.4rem">' + oosBadge() + '</div>' : ''}
+            ${oos ? '<div style="margin-top:0.4rem">' + oosBadge() + (alertsEnabled
+              ? `<button id="stock-alert-btn" class="ghost" style="display:block;margin-top:0.5rem">${armed ? 'נעדכן אותך כשחוזר ✓' : 'קבל הודעה כשחוזר למלאי 🔔'}</button>`
+              : '') + '</div>' : ''}
             ${hasRealDiscount(p) ? `<div class="product-price-note">🏷️ המחיר שלך · כולל הנחת לקוח קבועה · מחירון ${formatMoney(p.list_price!)}</div>` : ''}
           </div>
           <div class="muted" style="margin-bottom:0.5rem">ארגז: ${p.box_size} יחידות</div>
@@ -97,6 +111,37 @@ export async function renderProduct(shell: HTMLElement, partname: string): Promi
         btn.disabled = false;
       }
     });
+
+    // Out-of-stock notify-me toggle
+    const alertBtn = shell.querySelector<HTMLButtonElement>('#stock-alert-btn');
+    if (alertBtn) {
+      alertBtn.addEventListener('click', async () => {
+        alertBtn.disabled = true;
+        try {
+          if (armed) {
+            await api.del(`/api/stock-alerts/${encodeURIComponent(p.partname)}`);
+            armed = false;
+            alertBtn.textContent = 'קבל הודעה כשחוזר למלאי 🔔';
+            toast('ההתראה בוטלה', 'info');
+          } else {
+            await api.post(`/api/stock-alerts/${encodeURIComponent(p.partname)}`);
+            armed = true;
+            alertBtn.textContent = 'נעדכן אותך כשחוזר ✓';
+            // Highest-intent moment: get push permission so the alert actually reaches them.
+            try {
+              if (pushSupported() && !(await pushSubscribed())) await enablePush();
+              toast('נעדכן אותך כשהמוצר יחזור למלאי ✓', 'ok');
+            } catch {
+              toast('נשמר — תראה עדכון במסך הבית כשהמוצר יחזור', 'info');
+            }
+          }
+        } catch (err) {
+          toast(err instanceof Error ? err.message : 'שגיאה', 'error');
+        } finally {
+          alertBtn.disabled = false;
+        }
+      });
+    }
 
     // Favorite heart
     const favBtn = shell.querySelector('#fav-btn') as HTMLButtonElement;
