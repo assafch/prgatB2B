@@ -7,6 +7,7 @@ import { db } from './db.js';
 import multer from 'multer';
 import sharp from 'sharp';
 import Papa from 'papaparse';
+import { fireStockAlerts } from './stockAlerts.js';
 
 const DATA_DIR = process.env.DATA_DIR || './data';
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -159,10 +160,18 @@ export function patchProduct(partname: string, patch: Record<string, unknown>): 
       cols.push(next ? "b2b_new_since = datetime('now')" : 'b2b_new_since = NULL');
     }
   }
+  // b2b_out_of_stock 1→0 is a restock: fire back-in-stock alerts after the write.
+  let restocked = false;
+  if ('b2b_out_of_stock' in patch && !patch.b2b_out_of_stock) {
+    const cur = db.prepare('SELECT b2b_out_of_stock FROM catalog_cache WHERE partname = ?').get(partname) as
+      | { b2b_out_of_stock: number } | undefined;
+    restocked = !!cur?.b2b_out_of_stock;
+  }
   if (cols.length === 0) return getProductAdmin(partname);
   cols.push("updated_at = datetime('now')");
   vals.push(partname);
   db.prepare(`UPDATE catalog_cache SET ${cols.join(', ')} WHERE partname = ?`).run(...vals);
+  if (restocked) fireStockAlerts([partname]);
   return getProductAdmin(partname);
 }
 
@@ -251,6 +260,13 @@ export interface BulkPayload {
 export function bulkUpdate(payload: BulkPayload): number {
   if (!Array.isArray(payload.partnames) || payload.partnames.length === 0) return 0;
   const placeholders = payload.partnames.map(() => '?').join(',');
+  // Snapshot which products are actually restocking so alerts fire once, post-update.
+  const restocking: string[] =
+    payload.action === 'mark_in_stock'
+      ? (db
+          .prepare(`SELECT partname FROM catalog_cache WHERE partname IN (${placeholders}) AND b2b_out_of_stock = 1`)
+          .all(...payload.partnames) as Array<{ partname: string }>).map((r) => r.partname)
+      : [];
   let setClause = '';
   const setVals: unknown[] = [];
   switch (payload.action) {
@@ -297,6 +313,7 @@ export function bulkUpdate(payload: BulkPayload): number {
        WHERE partname IN (${placeholders})`
     )
     .run(...setVals, ...payload.partnames);
+  if (restocking.length > 0) fireStockAlerts(restocking);
   return result.changes;
 }
 
