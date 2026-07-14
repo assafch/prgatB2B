@@ -45,6 +45,13 @@ interface HomeData {
     price: number | null;
     box_size: number;
   }[];
+  restocked: {
+    partname: string;
+    partdes: string | null;
+    image_url: string | null;
+    price: number | null;
+    box_size: number;
+  }[];
   features: { payments: boolean; checkPayment: boolean; unifiedCheckout?: boolean };
   banner: { text: string } | null;
   maintenance: { enabled: boolean; message: string };
@@ -185,6 +192,28 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       </div>`;
   }
 
+  // Back-in-stock rail — products the user asked about that returned.
+  let restockRail = '';
+  if (d.restocked && d.restocked.length > 0) {
+    restockRail = `
+      <h2 class="home-sec">חזרו למלאי 🎉</h2>
+      <div class="rail" id="restock-rail">
+        ${d.restocked
+          .map((it) => {
+            const enc = encodeURIComponent(it.partname);
+            return `
+          <div class="rail-item" data-part="${escapeAttr(it.partname)}">
+            <button class="rail-dismiss" data-dismiss="${escapeAttr(it.partname)}" aria-label="הסר">✕</button>
+            <a class="thumb" href="#product/${enc}">${it.image_url ? `<img src="${escapeAttr(it.image_url)}" alt="" loading="lazy"/>` : '🎉'}</a>
+            <a class="nm" href="#product/${enc}" style="display:block;color:inherit;text-decoration:none">${escapeHtml(it.partdes || it.partname)}</a>
+            <div class="pr">${it.price != null ? formatMoney(it.price) : ''}</div>
+            <button class="add-mini" data-part="${escapeAttr(it.partname)}" data-box="${it.box_size}">הוסף · ארגז ${it.box_size}</button>
+          </div>`;
+          })
+          .join('')}
+      </div>`;
+  }
+
   // Credit-utilization bar (only when we have both numbers).
   let utilBar = '';
   if (d.priorityOk && d.balance.obligo != null && d.balance.creditLimit) {
@@ -251,6 +280,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
     ${pendingPayBanner}
     ${promoRail}
     ${newRail}
+    ${restockRail}
     <div class="home-grid">
       ${tiles}
       ${debtCard}
@@ -289,6 +319,38 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
         });
         await refreshCartCount();
         toast('נוסף לעגלה ✓', 'ok');
+      } catch (ex) {
+        toast(ex instanceof Error ? ex.message : String(ex), 'error');
+      } finally {
+        b.disabled = false;
+      }
+    });
+  });
+
+  shell.querySelectorAll<HTMLButtonElement>('#restock-rail [data-dismiss]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const part = b.dataset.dismiss!;
+      b.closest('.rail-item')?.remove();
+      try {
+        await api.post(`/api/stock-alerts/${encodeURIComponent(part)}/seen`);
+      } catch {
+        /* best-effort */
+      }
+    });
+  });
+
+  shell.querySelectorAll<HTMLButtonElement>('#restock-rail .add-mini').forEach((b) => {
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api.put(`/api/cart/lines/${encodeURIComponent(b.dataset.part!)}`, {
+          quantity: Number(b.dataset.box) || 1,
+          mode: 'add',
+        });
+        await refreshCartCount();
+        toast('נוסף לעגלה ✓', 'ok');
+        // Only a successful add clears the alert — a failed add keeps the rail item.
+        void api.post(`/api/stock-alerts/${encodeURIComponent(b.dataset.part!)}/seen`).catch(() => {});
       } catch (ex) {
         toast(ex instanceof Error ? ex.message : String(ex), 'error');
       } finally {

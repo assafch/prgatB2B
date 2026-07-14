@@ -114,6 +114,12 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         <button type="button" id="s-oos-bottom" class="adm-toggle${on('oos_sort_bottom_enabled', true) ? ' on' : ''}" aria-label="מוצרים שאזלו מהמלאי בתחתית הקבוצה"></button>
       </div>
 
+      <div class="set-row" style="margin-top:0.6rem">
+        <span>התראות חזרה למלאי</span>
+        <button type="button" id="s-stock-alerts" class="adm-toggle${on('stock_alerts_enabled') ? ' on' : ''}" aria-label="התראות חזרה למלאי"></button>
+      </div>
+      <div class="muted" style="font-size:0.78rem;margin-top:0.15rem">לקוחות יכולים לבקש עדכון כשמוצר שאזל חוזר למלאי (פוש + מסך הבית)</div>
+
       <div class="set-row" style="margin-top:0.6rem"><span>סף תשלומים בחשבון — סכום מינימלי (₪)</span></div>
       <input id="s-installments-min" type="number" min="0" placeholder="1000" value="${escapeHtml(txt('installments_min_amount') || '1000')}" style="width:100%;box-sizing:border-box"/>
 
@@ -209,6 +215,8 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
   discToggle.onclick = () => discToggle.classList.toggle('on');
   const oosBottomToggle = c.querySelector('#s-oos-bottom') as HTMLButtonElement;
   oosBottomToggle.onclick = () => oosBottomToggle.classList.toggle('on');
+  const stockAlertsToggle = c.querySelector('#s-stock-alerts') as HTMLButtonElement;
+  stockAlertsToggle.onclick = () => stockAlertsToggle.classList.toggle('on');
 
   (c.querySelector('#s-prefs-save') as HTMLButtonElement).onclick = async () => {
     const msgEl = c.querySelector('#s-prefs-msg') as HTMLDivElement;
@@ -219,6 +227,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       const announcementText = (c.querySelector('#s-ann-text') as HTMLTextAreaElement).value;
       const discountEnabled = discToggle.classList.contains('on');
       const oosBottomEnabled = oosBottomToggle.classList.contains('on');
+      const stockAlertsEnabled = stockAlertsToggle.classList.contains('on');
       const maintenanceMessage = (c.querySelector('#s-maint-text') as HTMLTextAreaElement).value;
       // Blank/non-numeric/non-positive falls back to the server default rather than
       // saving a value that would make installments apply to every payment (a min of
@@ -239,6 +248,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
         announcement_text: announcementText,
         discount_pricing_enabled: discountEnabled,
         oos_sort_bottom_enabled: oosBottomEnabled,
+        stock_alerts_enabled: stockAlertsEnabled,
         maintenance_message: maintenanceMessage,
         installments_min_amount: installmentsMin,
         installments_max: installmentsMax,
@@ -247,6 +257,7 @@ export async function renderSettingsAdmin(c: HTMLElement): Promise<void> {
       s.announcement_text = announcementText;
       s.discount_pricing_enabled = String(discountEnabled);
       s.oos_sort_bottom_enabled = String(oosBottomEnabled);
+      s.stock_alerts_enabled = String(stockAlertsEnabled);
       s.maintenance_message = maintenanceMessage;
       s.installments_min_amount = installmentsMin;
       s.installments_max = installmentsMax;

@@ -222,7 +222,7 @@ function bindDelegation(shell: HTMLElement): void {
     if (t.closest('a, button, input, .stepper, .cat-stepper')) return;
     const card = t.closest('.cat-card, .cat-row') as HTMLElement | null;
     if (!card?.dataset.part) return;
-    if (card.dataset.oos === '1') { toast(OOS_LABEL, 'info'); return; } // out of stock — no keypad
+    if (card.dataset.oos === '1') { location.hash = '#product/' + encodeURIComponent(card.dataset.part!); return; } // OOS → product page (has the notify button)
     openQtyKeypad(card, shell);
   });
 }
@@ -400,7 +400,7 @@ function bindSwipe(shell: HTMLElement): void {
 }
 
 async function addBoxFromSwipe(card: HTMLElement, shell: HTMLElement): Promise<void> {
-  if (card.dataset.oos === '1') { toast(OOS_LABEL, 'info'); return; } // out of stock — swipe is a no-op
+  if (card.dataset.oos === '1') { location.hash = '#product/' + encodeURIComponent(card.dataset.part!); return; } // out of stock — swipe opens the product page (has the notify button)
   const part = card.dataset.part!;
   const box = Math.max(1, Number(card.dataset.box) || 1);
   try {

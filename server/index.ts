@@ -19,6 +19,7 @@ import { saveTemplate, listTemplates, applyTemplate, deleteTemplate, toggleFavor
 import { listStaff, createStaff, setStaffStatus, resetStaffPassword } from './staff.js';
 import { vapidPublicKey, saveSubscription, removeSubscription, notifyUser, broadcast } from './push.js';
 import { createLoginLink, redeemLoginLink } from './loginLinks.js';
+import { stockAlertsEnabled, requestAlert, cancelAlert, listAlerts, markSeen, listWaiters } from './stockAlerts.js';
 import {
   accountLockSeconds,
   bootstrapAdmin,
@@ -766,6 +767,34 @@ app.delete('/api/templates/:id', requireCustomer, (req: AuthedRequest, res) => {
 
 app.get('/api/favorites', requireCustomer, (req: AuthedRequest, res) => {
   res.json({ partnames: listFavorites(req.user!.id) });
+});
+
+// ---------- Back-in-stock alerts (התראות חזרה למלאי) ----------
+app.get('/api/stock-alerts', requireCustomer, (req: AuthedRequest, res) => {
+  const enabled = stockAlertsEnabled();
+  res.json({ enabled, alerts: enabled ? listAlerts(req.user!.id) : [] });
+});
+app.post('/api/stock-alerts/:partname', requireCustomer, cartLimiter, (req: AuthedRequest, res) => {
+  if (!stockAlertsEnabled()) return res.status(404).json({ error: 'disabled' });
+  try {
+    requestAlert(req.user!.id, req.user!.custname, String(req.params.partname));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'שגיאה' });
+  }
+});
+app.delete('/api/stock-alerts/:partname', requireCustomer, (req: AuthedRequest, res) => {
+  if (!stockAlertsEnabled()) return res.status(404).json({ error: 'disabled' });
+  cancelAlert(req.user!.id, String(req.params.partname));
+  res.json({ ok: true });
+});
+app.post('/api/stock-alerts/:partname/seen', requireCustomer, (req: AuthedRequest, res) => {
+  if (!stockAlertsEnabled()) return res.status(404).json({ error: 'disabled' });
+  markSeen(req.user!.id, String(req.params.partname));
+  res.json({ ok: true });
+});
+app.get('/api/admin/stock-alerts/:partname', requireAdmin, (req, res) => {
+  res.json({ waiters: listWaiters(String(req.params.partname)) });
 });
 
 // ---------- Push notifications ----------
@@ -1572,8 +1601,9 @@ const SETTABLE = new Set([
   'saved_card_charge_enabled',
   'fast_track_enabled',
   'fast_track_discount_pct',
+  'stock_alerts_enabled',
 ]);
-const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'policy_enforce_all', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled', 'fast_track_enabled']);
+const BOOL_SETTINGS = new Set(['payments_enabled', 'check_payment_enabled', 'maintenance_enabled', 'announcement_enabled', 'payment_policy_enabled', 'policy_enforce_all', 'priority_receipts_enabled', 'discount_pricing_enabled', 'oos_sort_bottom_enabled', 'unified_checkout_enabled', 'installments_enabled', 'saved_cards_enabled', 'saved_card_charge_enabled', 'fast_track_enabled', 'stock_alerts_enabled']);
 
 // Server-only secrets live in the settings table but must never reach the client. The WRITE
 // path is allowlisted (SETTABLE); the READ path also needs a denylist. push_vapid_private is a

@@ -7,6 +7,7 @@ import { db } from './db.js';
 import multer from 'multer';
 import sharp from 'sharp';
 import Papa from 'papaparse';
+import { fireStockAlerts } from './stockAlerts.js';
 
 const DATA_DIR = process.env.DATA_DIR || './data';
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -16,6 +17,11 @@ export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 4 * 1024 * 1024 }, // 4MB
 });
+
+// Restocks discovered by patchProduct while a transaction is open (batchUpdate)
+// can't fire push right away — the row could still roll back. They're queued
+// here and drained by the caller once the transaction has actually committed.
+const pendingRestocks: string[] = [];
 
 export interface AdminProductRow {
   partname: string;
@@ -39,6 +45,7 @@ export interface AdminProductRow {
   b2b_is_new: number;
   b2b_new_since: string | null;
   updated_at: string;
+  alert_count: number;
 }
 
 export interface ListQuery {
@@ -96,7 +103,8 @@ export function listProductsAdmin(q: ListQuery): { items: AdminProductRow[]; tot
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
               b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock,
-              b2b_is_new, b2b_new_since, updated_at
+              b2b_is_new, b2b_new_since, updated_at,
+              (SELECT COUNT(*) FROM stock_alerts sa WHERE sa.partname = catalog_cache.partname AND sa.notified_at IS NULL) AS alert_count
        FROM catalog_cache
        ${where}
        ORDER BY b2b_sort_priority DESC, partdes ASC
@@ -113,7 +121,8 @@ export function getProductAdmin(partname: string): AdminProductRow | null {
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
               b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock,
-              b2b_is_new, b2b_new_since, updated_at
+              b2b_is_new, b2b_new_since, updated_at,
+              (SELECT COUNT(*) FROM stock_alerts sa WHERE sa.partname = catalog_cache.partname AND sa.notified_at IS NULL) AS alert_count
        FROM catalog_cache WHERE partname = ?`
     )
     .get(partname) as AdminProductRow | undefined) ?? null;
@@ -159,10 +168,26 @@ export function patchProduct(partname: string, patch: Record<string, unknown>): 
       cols.push(next ? "b2b_new_since = datetime('now')" : 'b2b_new_since = NULL');
     }
   }
+  // b2b_out_of_stock 1→0 is a restock: fire back-in-stock alerts after the write.
+  let restocked = false;
+  if ('b2b_out_of_stock' in patch && !patch.b2b_out_of_stock) {
+    const cur = db.prepare('SELECT b2b_out_of_stock FROM catalog_cache WHERE partname = ?').get(partname) as
+      | { b2b_out_of_stock: number } | undefined;
+    restocked = !!cur?.b2b_out_of_stock;
+  }
   if (cols.length === 0) return getProductAdmin(partname);
   cols.push("updated_at = datetime('now')");
   vals.push(partname);
   db.prepare(`UPDATE catalog_cache SET ${cols.join(', ')} WHERE partname = ?`).run(...vals);
+  // Mid-transaction (batchUpdate), don't push yet — the row could still roll
+  // back. Queue it; the transaction owner fires only after commit.
+  if (restocked) {
+    if (db.inTransaction) {
+      pendingRestocks.push(partname);
+    } else {
+      fireStockAlerts([partname]);
+    }
+  }
   return getProductAdmin(partname);
 }
 
@@ -183,7 +208,18 @@ export function batchUpdate(items: Array<Record<string, unknown>>): number {
       changed++;
     }
   });
-  tx(items.slice(0, 2000)); // backstop cap
+  // Fire restock alerts only once the transaction has committed. On failure
+  // (e.g. a later row's malformed value throws a bind error and the whole
+  // batch rolls back) drop the queue instead — no push for changes that
+  // never landed.
+  let committed = false;
+  try {
+    tx(items.slice(0, 2000)); // backstop cap
+    committed = true;
+  } finally {
+    const parts = pendingRestocks.splice(0);
+    if (committed && parts.length) fireStockAlerts(parts);
+  }
   return changed;
 }
 
@@ -251,6 +287,13 @@ export interface BulkPayload {
 export function bulkUpdate(payload: BulkPayload): number {
   if (!Array.isArray(payload.partnames) || payload.partnames.length === 0) return 0;
   const placeholders = payload.partnames.map(() => '?').join(',');
+  // Snapshot which products are actually restocking so alerts fire once, post-update.
+  const restocking: string[] =
+    payload.action === 'mark_in_stock'
+      ? (db
+          .prepare(`SELECT partname FROM catalog_cache WHERE partname IN (${placeholders}) AND b2b_out_of_stock = 1`)
+          .all(...payload.partnames) as Array<{ partname: string }>).map((r) => r.partname)
+      : [];
   let setClause = '';
   const setVals: unknown[] = [];
   switch (payload.action) {
@@ -297,6 +340,7 @@ export function bulkUpdate(payload: BulkPayload): number {
        WHERE partname IN (${placeholders})`
     )
     .run(...setVals, ...payload.partnames);
+  if (restocking.length > 0) fireStockAlerts(restocking);
   return result.changes;
 }
 
@@ -337,7 +381,11 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
   let updated = 0;
   let skipped = 0;
 
-  const exists = db.prepare('SELECT 1 FROM catalog_cache WHERE partname = ?');
+  const existing = db.prepare('SELECT b2b_out_of_stock FROM catalog_cache WHERE partname = ?');
+  // Rows whose incoming value flips b2b_out_of_stock 1→0 — snapshotted before the
+  // write (same reasoning as bulkUpdate) so alerts fire once, only after the whole
+  // import transaction has actually committed.
+  const restocking: string[] = [];
 
   const run = db.transaction((rows: Record<string, string>[]) => {
     for (const row of rows) {
@@ -346,7 +394,8 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
         skipped++;
         continue;
       }
-      if (!exists.get(partname)) {
+      const cur = existing.get(partname) as { b2b_out_of_stock: number } | undefined;
+      if (!cur) {
         skipped++;
         continue;
       }
@@ -391,6 +440,7 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
       const cols = Object.keys(patch).map((k) => `${k} = ?`);
       const vals = Object.values(patch);
       if (!dryRun) {
+        if (patch.b2b_out_of_stock === 0 && cur.b2b_out_of_stock === 1) restocking.push(partname);
         db.prepare(
           `UPDATE catalog_cache SET ${cols.join(', ')}, updated_at = datetime('now') WHERE partname = ?`
         ).run(...vals, partname);
@@ -399,6 +449,8 @@ export function importCsv(text: string, dryRun: boolean): ImportResult {
     }
   });
   run(parsed.data);
+  // Transaction committed (run() throws and skips this on failure) — safe to fire now.
+  if (!dryRun && restocking.length > 0) fireStockAlerts(restocking);
   return { updated, skipped, errors };
 }
 

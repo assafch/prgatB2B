@@ -11,6 +11,7 @@ import { getProduct, listNewProducts, type CatalogItem } from './catalog.js';
 import { resolvePolicy, enforcedFor, computeBlockingNetDebt } from './paymentPolicy.js';
 import { installmentsRange } from './cardPayments.js';
 import { tokenVaultReady } from './tokenVault.js';
+import { stockAlertsEnabled } from './stockAlerts.js';
 
 export interface LastOrderView {
   id: number;
@@ -43,6 +44,8 @@ export interface HomeData {
   promotions: HomePromo[];
   /** admin-flagged "מוצרים חדשים" for the home rail (visible, in-stock, priced; max 12) */
   newProducts: CatalogItem[];
+  /** back-in-stock: this user's fulfilled-and-unseen alerts, for the «חזרו למלאי» rail */
+  restocked: CatalogItem[];
   /** server-owned feature flags so the client never shows dead CTAs */
   features: {
     payments: boolean;
@@ -109,6 +112,23 @@ function promoCards(custname: string): HomePromo[] {
   return cards;
 }
 
+function listRestocked(userId: number, custname: string | null): CatalogItem[] {
+  if (!stockAlertsEnabled()) return [];
+  const rows = db
+    .prepare(
+      "SELECT partname FROM stock_alerts WHERE user_id = ? AND notified_at IS NOT NULL AND seen_at IS NULL ORDER BY notified_at DESC LIMIT 12"
+    )
+    .all(userId) as Array<{ partname: string }>;
+  const out: CatalogItem[] = [];
+  for (const r of rows) {
+    const it = getProduct(r.partname, custname);
+    // The alert fired when the product went back in stock, but it could have
+    // gone OOS again since — don't show a "back in stock" card for it.
+    if (it && !it.outOfStock) out.push(it);
+  }
+  return out;
+}
+
 export async function getHomeData(
   userId: number,
   custname: string,
@@ -167,6 +187,7 @@ export async function getHomeData(
     suggestions: getReorderSuggestions(userId, custname),
     promotions: promoCards(custname),
     newProducts: listNewProducts(custname),
+    restocked: listRestocked(userId, custname),
     features: {
       // Admin-toggleable (settings table), with the original env/default as fallback.
       payments: getSettingBool('payments_enabled', process.env.PAYMENTS_ENABLED === 'true'),
