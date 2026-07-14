@@ -45,6 +45,7 @@ export interface AdminProductRow {
   b2b_is_new: number;
   b2b_new_since: string | null;
   updated_at: string;
+  alert_count: number;
 }
 
 export interface ListQuery {
@@ -102,7 +103,8 @@ export function listProductsAdmin(q: ListQuery): { items: AdminProductRow[]; tot
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
               b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock,
-              b2b_is_new, b2b_new_since, updated_at
+              b2b_is_new, b2b_new_since, updated_at,
+              (SELECT COUNT(*) FROM stock_alerts sa WHERE sa.partname = catalog_cache.partname AND sa.notified_at IS NULL) AS alert_count
        FROM catalog_cache
        ${where}
        ORDER BY b2b_sort_priority DESC, partdes ASC
@@ -119,7 +121,8 @@ export function getProductAdmin(partname: string): AdminProductRow | null {
       `SELECT partname, partdes, family, family_desc, barcode, list_price, box_size, active,
               b2b_visible, b2b_partdes_override, b2b_description, b2b_image_path, b2b_tags,
               b2b_min_qty, b2b_sort_priority, b2b_featured, b2b_category_override, b2b_out_of_stock,
-              b2b_is_new, b2b_new_since, updated_at
+              b2b_is_new, b2b_new_since, updated_at,
+              (SELECT COUNT(*) FROM stock_alerts sa WHERE sa.partname = catalog_cache.partname AND sa.notified_at IS NULL) AS alert_count
        FROM catalog_cache WHERE partname = ?`
     )
     .get(partname) as AdminProductRow | undefined) ?? null;
