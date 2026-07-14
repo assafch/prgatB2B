@@ -349,12 +349,13 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
         });
         await refreshCartCount();
         toast('נוסף לעגלה ✓', 'ok');
+        // Only a successful add clears the alert — a failed add keeps the rail item.
+        void api.post(`/api/stock-alerts/${encodeURIComponent(b.dataset.part!)}/seen`).catch(() => {});
       } catch (ex) {
         toast(ex instanceof Error ? ex.message : String(ex), 'error');
       } finally {
         b.disabled = false;
       }
-      void api.post(`/api/stock-alerts/${encodeURIComponent(b.dataset.part!)}/seen`).catch(() => {});
     });
   });
 
