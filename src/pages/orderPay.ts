@@ -40,15 +40,15 @@ export async function renderOrderPay(shell: HTMLElement, orderId: string): Promi
     const amt = Number(o.payment_required_amount || 0).toFixed(2);
     shell.innerHTML = `
       <div class="card">
-        <div style="font-weight:700">תשלום להזמנה</div>
-        <div class="muted" style="margin-top:0.25rem">כלקוח מזומן, יש לשלם ₪${amt} כדי שההזמנה תאושר ותישלח.</div>
+        <div style="font-weight:700">נשאר רק התשלום 🙂</div>
+        <div class="muted" style="margin-top:0.25rem">ההזמנה שלך נקלטה ושמורה לך ✓ עם השלמת תשלום של ₪${amt} היא תאושר ותישלח מיד.</div>
         ${
           savedCard
-            ? `<button id="pay-saved" class="es-cta" style="margin-top:0.8rem">שלם ב${escapeHtml(savedCard.brand)} ••${escapeHtml(savedCard.fourDigits)} ₪${amt}</button>`
+            ? `<button id="pay-saved" class="es-cta" style="margin-top:0.8rem">תשלום ב${escapeHtml(savedCard.brand)} ••${escapeHtml(savedCard.fourDigits)} ₪${amt}</button>`
             : ''
         }
-        <button id="pay-card" class="es-cta" style="margin-top:0.8rem">שלם באשראי ₪${amt}</button>
-        <button id="pay-check" class="es-cta" style="margin-top:0.6rem;background:var(--ok)">שלם בצ׳ק ₪${amt}</button>
+        <button id="pay-card" class="es-cta" style="margin-top:0.8rem">תשלום באשראי ₪${amt}</button>
+        <button id="pay-check" class="es-cta" style="margin-top:0.6rem;background:var(--ok)">תשלום בצ׳ק ₪${amt}</button>
       </div>`;
 
     if (savedCard) {

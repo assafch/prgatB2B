@@ -254,7 +254,7 @@ export async function renderCheckout(shell: HTMLElement): Promise<void> {
              <div style="font-weight:700;margin-bottom:0.35rem">אמצעי תשלום</div>
              <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">${
                payNow
-                 ? 'לקוחות מזומן משלמים בעת ההזמנה — ההזמנה תישלח מיד עם אישור התשלום.'
+                 ? 'ההזמנה תאושר ותישלח מיד עם השלמת התשלום.'
                  : 'התשלום מאשר את ההזמנה מיד ושולח אותה בעדיפות.'
              }</p>
              ${
