@@ -163,12 +163,16 @@ const RECON_WINDOW = '-3 days';
  *  amount was never OCR-verified (amount_verified = 0) are excluded too: their amount
  *  is unverified customer input, so counting it would let a non-cheque photo with a
  *  typed sum lift the debt block with no real money (same bypass Guard 0 closes for
- *  the cash-hold path). Such cheques still reconcile manually at the office. */
+ *  the cash-hold path). Cheques dated more than 6 months back (STALE_CHECK_DAYS) are
+ *  excluded too — banks may refuse them, so they are not bankable money in flight.
+ *  Such cheques still reconcile manually at the office. */
 export function pendingSettlement(custname: string): number {
   const card = paidDebtCardTotal(custname);
+  // -180 days = STALE_CHECK_DAYS (payments.ts): stale cheques are not money in flight.
   const chq = db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS s FROM payment_checks
      WHERE custname = ? AND status = 'submitted' AND is_postdated = 0 AND amount_verified = 1
+       AND (check_date IS NULL OR check_date >= date('now', '-180 days'))
        AND submitted_at >= datetime('now', ?)`
   ).get(custname, RECON_WINDOW) as { s: number };
   return Math.round(((card + (chq.s || 0)) + Number.EPSILON) * 100) / 100;

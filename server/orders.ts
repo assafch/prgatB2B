@@ -7,7 +7,7 @@ import { applyPromotions, type PromoResult } from './promotions.js';
 import { enforcedFor, evaluate } from './paymentPolicy.js';
 import { fastTrackQualifies, fastTrackAmounts, fastTrackDiscountPct, type FastTrackAmounts } from './fastTrack.js';
 import { notifyUser } from './push.js';
-import { getCheckForUser } from './payments.js';
+import { getCheckForUser, isStaleCheckDate } from './payments.js';
 
 export interface CartLine {
   partname: string;
@@ -546,7 +546,7 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
   // response was lost must not be told "not awaiting payment").
   if (order.linked_payment_id === checkId) return true;
   if (order.status !== 'pending_payment') throw new OrderError('ההזמנה אינה ממתינה לתשלום');
-  const chk = getCheckForUser(userId, checkId) as { status?: string; amount?: number; is_postdated?: number; amount_verified?: number } | null;
+  const chk = getCheckForUser(userId, checkId) as { status?: string; amount?: number; is_postdated?: number; amount_verified?: number; check_date?: string | null } | null;
   if (!chk || chk.status !== 'submitted') throw new OrderError('הצ׳ק לא נמצא או טרם אושר');
   // Guard 0: the cheque amount must have been OCR-verified. When the photo wasn't read
   // as a legible cheque (amount_verified = 0), the amount is unverified customer input,
@@ -556,6 +556,11 @@ export async function payHeldOrderByCheck(userId: number, custname: string, orde
   if (!chk.amount_verified) throw new OrderError('לא ניתן לאשר את ההזמנה מול צ׳ק זה — סכום הצ׳ק לא אומת מהתמונה. שלמו בכרטיס אשראי או פנו למשרד.');
   // Guard 1: reject post-dated cheques — must be payable immediately.
   if (chk.is_postdated) throw new OrderError('צ׳ק דחוי אינו תקף לאישור הזמנה — נדרש צ׳ק לפירעון מיידי');
+  // Guard 1b: a cheque dated more than 6 months back is stale — banks may refuse it,
+  // so it is not immediate payment and must not release the order.
+  if (isStaleCheckDate(chk.check_date ?? null)) {
+    throw new OrderError('תאריך הצ׳ק עבר לפני יותר מ־6 חודשים — צ׳ק כזה אינו ניתן להפקדה. שלמו בכרטיס אשראי או פנו למשרד.');
+  }
   // Guard 2: cheque amount must cover the order's required amount (VAT-inclusive).
   const required = Number(order.payment_required_amount) || 0;
   if ((chk.amount ?? 0) + 0.01 < required) throw new OrderError('סכום הצ׳ק (₪' + (chk.amount ?? 0).toFixed(2) + ') נמוך מסכום ההזמנה (₪' + required.toFixed(2) + ')');

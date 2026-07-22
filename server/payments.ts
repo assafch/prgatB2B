@@ -24,6 +24,17 @@ fs.mkdirSync(CHECKS_DIR, { recursive: true });
 
 const DRAFT_TTL_HOURS = 48;
 
+/** Israeli cheques are presentable for 6 months from their written date; older ones
+ *  banks may refuse. Such a photo is a debt promise for the office, never an
+ *  auto-approval instrument. */
+export const STALE_CHECK_DAYS = 180;
+
+export function isStaleCheckDate(checkDate: string | null): boolean {
+  if (!checkDate || !/^\d{4}-\d{2}-\d{2}$/.test(checkDate)) return false;
+  const t = Date.parse(checkDate + 'T00:00:00Z');
+  return isFinite(t) && Date.now() - t > STALE_CHECK_DAYS * 86400_000;
+}
+
 function imageKey(): Buffer | null {
   const hex = (process.env.CHECK_IMAGE_KEY || '').trim();
   if (!/^[0-9a-fA-F]{64}$/.test(hex)) return null; // require exactly 32 bytes of hex
