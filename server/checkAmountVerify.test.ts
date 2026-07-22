@@ -75,7 +75,7 @@ test('pendingSettlement (debt-block offset) counts only OCR-verified cheques', (
   seedUser();
   // Unverified cheque with a big typed amount must NOT offset debt (the debt-block bypass).
   const c0 = createCheckDraft(1, '10001', img, null).id;
-  confirmCheck(1, c0, { amount: 20000, checkDate: '2020-01-01' }); // amount_verified=0
+  confirmCheck(1, c0, { amount: 20000, checkDate: RECENT_YMD }); // amount_verified=0, recent date so only amount_verified excludes it
   assert.equal(pendingSettlement('10001'), 0, 'unverified cheque must not lift the debt block');
   // A verified cheque does count.
   const c1 = createCheckDraft(1, '10001', img, { is_check: true, amount: 500, amount_words_match: true, date: RECENT_YMD, is_postdated: false, bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null }).id;

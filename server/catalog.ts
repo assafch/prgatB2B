@@ -16,8 +16,9 @@ import {
 import { UPLOADS_DIR } from './products.js';
 import { resolveDiscount, applyDiscount } from './discounts.js';
 
-/** Effective selling price for this customer: base list price minus their flat
- *  discount (flag-gated). Resolve the percent ONCE per request, not per row. */
+/** Effective selling price for this customer: base list price minus their per-part
+ *  discount (flag-gated). Resolution happens once per request (the DiscountResolution
+ *  object); the percent itself is per-part via forPart(). */
 function effectivePrice(listPrice: number | null, pct: number | null): number | null {
   return listPrice != null ? applyDiscount(listPrice, pct) : null;
 }

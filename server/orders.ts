@@ -314,6 +314,9 @@ async function submitOrderInner(
   if (cashHold) {
     const dup = findResumableHeldOrder(userId, custname, fast != null, lineRows);
     if (dup) {
+      // The retry may carry fresh delivery instructions — the office must see the
+      // latest ask, not the abandoned attempt's.
+      if (fullDetails) db.prepare('UPDATE orders_local SET details = ? WHERE id = ?').run(fullDetails, dup.id);
       clearCart(userId);
       return { orderId: dup.id, ordname: '', total, lines, needsPayment: true, amount: dup.amount };
     }

@@ -64,3 +64,17 @@ test('pendingSettlement excludes stale cheques', () => {
   submittedCheck(ymdDaysAgo(3), 200);    // fresh — counts
   assert.equal(pendingSettlement('10001'), 200);
 });
+
+test('customer cannot re-date a stale-OCR cheque forward at confirm', async () => {
+  seed();
+  const orderId = heldOrder(500);
+  const staleDate = ymdDaysAgo(365);
+  const { id } = createCheckDraft(1, '10001', img, {
+    is_check: true, amount: 500, amount_words_match: true, date: staleDate, is_postdated: false,
+    bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null,
+  });
+  assert.ok(confirmCheck(1, id, { amount: 500, checkDate: ymdDaysAgo(1) })); // tries to re-date forward
+  const row = db.prepare('SELECT check_date FROM payment_checks WHERE id = ?').get(id) as { check_date: string };
+  assert.equal(row.check_date, staleDate); // OCR date wins
+  await assert.rejects(() => payHeldOrderByCheck(1, '10001', orderId, id), (e: unknown) => e instanceof OrderError && /6 חודשים/.test((e as Error).message));
+});

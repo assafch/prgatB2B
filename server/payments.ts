@@ -165,8 +165,9 @@ const localToday = (): string => new Date().toLocaleDateString('en-CA', { timeZo
  *  is_postdated from OCR, and this UPDATE is the first thing to overwrite them),
  *  so we read that OCR baseline first and let the customer only CORRECT a misread
  *  DOWNWARD — never inflate the cheque beyond what the photo shows, nor downgrade
- *  an OCR-asserted post-dated cheque to current-dated. is_postdated is always
- *  derived server-side (never trusted from the client) and account is re-masked. */
+ *  an OCR-asserted post-dated cheque to current-dated, nor re-date an OCR-stale
+ *  cheque forward into freshness. is_postdated is always derived server-side
+ *  (never trusted from the client) and account is re-masked. */
 export function confirmCheck(userId: number, id: string, input: ConfirmInput): boolean {
   const draft = db
     .prepare(
@@ -177,6 +178,14 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
   if (!draft) return false;
 
   const today = localToday();
+
+  // Date: if OCR already read a stale date (>6 months old), the customer cannot
+  // re-date the cheque forward by editing the prefilled field — that's the same
+  // "typed input beats the photo" hole the amount-cap closes for amount. A cheque
+  // that photographs as stale stays stale no matter what the confirm form says.
+  // If OCR read no date (aiDate null), there is nothing to pin against, so the
+  // customer-entered date is used as before.
+  const checkDate = draft.aiDate != null && isStaleCheckDate(draft.aiDate) ? draft.aiDate : input.checkDate;
 
   // Amount: cap to the AI-extracted value. At/below the extracted amount is a
   // legitimate correction; above it is treated as inflation and clamped down to
@@ -198,7 +207,7 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
   // cheque presented as current-dated must stay flagged so it can't cover a held
   // order or offset an overdue-debt block.
   const aiPostdated = draft.aiPostdated === 1 || (draft.aiDate != null && draft.aiDate > today);
-  const isPostdated = input.checkDate > today || aiPostdated ? 1 : 0;
+  const isPostdated = checkDate > today || aiPostdated ? 1 : 0;
 
   const info = db
     .prepare(
@@ -211,7 +220,7 @@ export function confirmCheck(userId: number, id: string, input: ConfirmInput): b
     )
     .run(
       amount,
-      input.checkDate,
+      checkDate,
       isPostdated,
       amountVerified,
       input.bank?.slice(0, 80) ?? null,
