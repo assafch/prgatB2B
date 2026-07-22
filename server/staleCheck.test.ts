@@ -3,7 +3,7 @@
 // flight for the debt block. Real case: 10822 uploaded a cheque dated 2025-07-22 on
 // 2026-07-22; only its short amount stopped it from releasing the order.
 // Run: DATA_DIR=$(mktemp -d) node --import tsx --test server/staleCheck.test.ts
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from './db.js';
 import { createCheckDraft, confirmCheck, isStaleCheckDate, STALE_CHECK_DAYS } from './payments.js';
@@ -23,6 +23,10 @@ function heldOrder(required: number): number {
 
 const img = Buffer.from('not-a-real-image');
 const ymdDaysAgo = (days: number) => new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+
+// Leave no payment_checks or orders_local rows behind: they reference users (non-CASCADE FK),
+// so a later test file sharing this DATA_DIR would fail its `DELETE FROM users` seed otherwise.
+after(() => { db.exec('DELETE FROM payment_checks; DELETE FROM order_lines; DELETE FROM orders_local; DELETE FROM users;'); });
 
 function submittedCheck(dateYmd: string, amount: number): string {
   const { id } = createCheckDraft(1, '10001', img, {

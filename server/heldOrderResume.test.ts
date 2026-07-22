@@ -2,7 +2,7 @@
 // paid, and who then re-submits the SAME basket, must be routed back to the existing
 // held order — not given a second one (real case: 10822 orders #9/#10, 2026-07-22).
 // Run: DATA_DIR=$(mktemp -d) node --import tsx --test server/heldOrderResume.test.ts
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from './db.js';
 import { findResumableHeldOrder } from './orders.js';
@@ -23,6 +23,10 @@ function heldOrder(opts: { amount?: number; fast?: number; status?: string; crea
 }
 
 const SAME = [ { partname: 'PU001', quantity: 24, free: false }, { partname: 'HA04', quantity: 30, free: false } ];
+
+// Leave no orders_local rows behind: user_id has a non-CASCADE FK to users, so a later
+// test file sharing this DATA_DIR would fail its `DELETE FROM users` seed otherwise.
+after(() => { db.exec('DELETE FROM order_lines; DELETE FROM orders_local; DELETE FROM users;'); });
 
 test('identical basket → existing held order is returned', () => {
   wipe();
