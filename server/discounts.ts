@@ -126,8 +126,38 @@ export async function sweepCustomerDiscounts(): Promise<void> {
   }
 }
 
-// Implemented in the next task (per-part resolution); exported here so the shared
-// test file typechecks. Do not use yet.
-export function resolveDiscount(_custname: string | null): { blanket: number | null; uniform: boolean; forPart(partname: string): number | null } {
-  throw new Error('not implemented');
+export interface DiscountResolution {
+  blanket: number | null;
+  uniform: boolean;
+  forPart(partname: string): number | null;
+}
+
+const NO_DISCOUNT: DiscountResolution = { blanket: null, uniform: true, forPart: () => null };
+
+/** Per-request discount resolver. Uniform/manual customers get the blanket percent for
+ *  every part; non-uniform customers get their per-part derived percent, and parts we
+ *  have never seen them order get NO discount (base price) — the conservative direction:
+ *  if Priority does discount such a part, the invoice comes out LOWER than what the
+ *  customer saw and paid, and the office reconciles in the customer's favor (house rule:
+ *  the office is the safety net, never the customer). */
+export function resolveDiscount(custname: string | null): DiscountResolution {
+  if (!custname) return NO_DISCOUNT;
+  const row = db.prepare('SELECT percent, source, uniform FROM customer_discounts WHERE custname = ?').get(custname) as
+    | { percent: number; source: string; uniform: number } | undefined;
+  if (!row || !isValidPercent(row.percent)) return NO_DISCOUNT;
+  const blanket = row.percent;
+  if (row.source === 'manual' || row.uniform) {
+    return { blanket, uniform: true, forPart: () => blanket };
+  }
+  const parts = db.prepare('SELECT partname, percent FROM customer_part_discounts WHERE custname = ?').all(custname) as
+    Array<{ partname: string; percent: number }>;
+  const map = new Map(parts.map((p) => [p.partname, p.percent]));
+  return {
+    blanket,
+    uniform: false,
+    forPart(partname: string): number | null {
+      const pct = map.get(partname);
+      return pct != null && isValidPercent(pct) ? pct : null;
+    },
+  };
 }

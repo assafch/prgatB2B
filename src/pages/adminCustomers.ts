@@ -17,7 +17,7 @@ interface CustomerCard {
   policy: { kind: string; open_debt_threshold: number | null; allow_order_with_open_debt: number; enforced: number };
   resolvedKind: 'cash' | 'net'; users: CardUser[];
   finance: { priorityOk: boolean; paymentTerms: string | null; openTotal: number | null; creditLimit: number | null; obligo: number | null };
-  discount?: { percent: number | null; source: string | null; updated_at: string | null };
+  discount?: { percent: number | null; source: string | null; updated_at: string | null; uniform?: number };
 }
 
 const qs = { q: '', page: 0, pageSize: 50 };
@@ -123,7 +123,7 @@ async function openCustomerDrawer(custname: string, shell: HTMLElement): Promise
       <div class="adm-sect-label">הנחת לקוח</div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="adm-currency"><input id="dr-disc" type="number" min="0" max="60" step="0.5" style="width:64px" value="${d.discount?.percent ?? ''}" placeholder="—"/><i>%</i></span>
-        ${d.discount?.source ? `<span class="cust-pill pill-src">${d.discount.source === 'manual' ? 'ידני' : 'אוטו׳ מהזמנות'}</span>` : ''}
+        ${d.discount?.source ? `<span class="cust-pill pill-src">${d.discount.source === 'manual' ? 'ידני' : d.discount.uniform === 0 ? 'אוטו׳ לפי מוצר' : 'אוטו׳ מהזמנות'}</span>` : ''}
         <button type="button" id="dr-disc-refresh" class="adm-btn-ghost" style="padding:5px 10px">↻ משוך מהזמנות</button>
       </div>
     </div>
