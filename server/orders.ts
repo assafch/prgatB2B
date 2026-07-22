@@ -166,6 +166,39 @@ export async function submitOrder(
   }
 }
 
+/** An existing held order by the same user with the exact same line multiset, still
+ *  awaiting its first payment and young enough not to have been swept (48h TTL, see
+ *  sweepPendingOrders). Cash-hold clears the cart precisely so the customer can't
+ *  re-submit by accident — but a customer who rebuilds the same basket after a failed
+ *  payment attempt (real case: 10822 #9/#10) must resume the held order, not mint a
+ *  duplicate that later confuses the office and risks double payment. */
+export function findResumableHeldOrder(
+  userId: number,
+  custname: string,
+  fastTrack: boolean,
+  lineRows: Array<{ partname: string; quantity: number; free: boolean }>
+): { id: number; amount: number } | null {
+  const candidates = db.prepare(
+    `SELECT id, payment_required_amount FROM orders_local
+     WHERE user_id = ? AND custname = ? AND status = 'pending_payment'
+       AND linked_payment_id IS NULL AND fast_track = ?
+       AND created_at >= datetime('now', '-48 hours')
+     ORDER BY id DESC`
+  ).all(userId, custname, fastTrack ? 1 : 0) as Array<{ id: number; payment_required_amount: number | null }>;
+  if (candidates.length === 0) return null;
+  const key = (partname: string, quantity: number, free: boolean) => `${partname}:${quantity}:${free ? 1 : 0}`;
+  const want = lineRows.map((l) => key(l.partname, l.quantity, l.free)).sort().join('\n');
+  const readLines = db.prepare('SELECT partname, quantity, is_promotion_freebie FROM order_lines WHERE order_id = ?');
+  for (const c of candidates) {
+    const rows = readLines.all(c.id) as Array<{ partname: string; quantity: number; is_promotion_freebie: number }>;
+    const have = rows.map((r) => key(r.partname, r.quantity, r.is_promotion_freebie === 1)).sort().join('\n');
+    if (have === want && c.payment_required_amount != null && c.payment_required_amount > 0.005) {
+      return { id: c.id, amount: c.payment_required_amount };
+    }
+  }
+  return null;
+}
+
 async function submitOrderInner(
   userId: number,
   custname: string,
@@ -260,6 +293,32 @@ async function submitOrderInner(
   }
   const fullDetails = [details, noteParts.join(' | ')].filter(Boolean).join(' | ') || null;
 
+  // Materialize the exact rows that will be written (and later compared by the
+  // duplicate-resume guard): paid quantity minus capped bogo freebies, freebies and
+  // gifts as separate 0₪ rows.
+  const lineRows: Array<{ partname: string; pdes: string | null; quantity: number; price: number; free: boolean }> = [];
+  for (const ln of lines) {
+    // Clamp: overlapping bogo promos on one SKU must never free more units than were
+    // ordered, or the paid line (and its ERP TQUANT below) would go negative. Skip the
+    // paid line entirely when everything is free, so no zero-qty row is written.
+    const freeCapped = Math.min(freeQty.get(ln.partname) || 0, ln.quantity);
+    const paidQty = ln.quantity - freeCapped;
+    if (paidQty > 0) lineRows.push({ partname: ln.partname, pdes: ln.partdes, quantity: paidQty, price: ln.price ?? 0, free: false });
+    if (freeCapped > 0) lineRows.push({ partname: ln.partname, pdes: ln.partdes, quantity: freeCapped, price: 0, free: true }); // bogo freebie
+  }
+  for (const g of promotions.gifts) lineRows.push({ partname: g.partname, pdes: g.partdes, quantity: g.qty, price: 0, free: true }); // promo gift, free
+
+  // Duplicate-basket resume: an identical basket already held for payment means the
+  // customer is retrying, not re-ordering — send them back to pay the existing order,
+  // BEFORE writing anything new (no orphan orders_local row in 'submitting' state).
+  if (cashHold) {
+    const dup = findResumableHeldOrder(userId, custname, fast != null, lineRows);
+    if (dup) {
+      clearCart(userId);
+      return { orderId: dup.id, ordname: '', total, lines, needsPayment: true, amount: dup.amount };
+    }
+  }
+
   const config = getPriorityConfig();
   if (!config) throw new Error('Priority not configured');
 
@@ -277,18 +336,7 @@ async function submitOrderInner(
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   const tx = db.transaction(() => {
-    for (const ln of lines) {
-      // Clamp: overlapping bogo promos on one SKU must never free more units than were
-      // ordered, or the paid line (and its ERP TQUANT below) would go negative. Skip the
-      // paid line entirely when everything is free, so no zero-qty row is written.
-      const freeCapped = Math.min(freeQty.get(ln.partname) || 0, ln.quantity);
-      const paidQty = ln.quantity - freeCapped;
-      if (paidQty > 0) insertLine.run(localOrderId, ln.partname, ln.partdes, paidQty, ln.price ?? 0, 0, null);
-      if (freeCapped > 0) insertLine.run(localOrderId, ln.partname, ln.partdes, freeCapped, 0, 1, null); // bogo freebie
-    }
-    for (const g of promotions.gifts) {
-      insertLine.run(localOrderId, g.partname, g.partdes, g.qty, 0, 1, null); // promo gift, free
-    }
+    for (const r of lineRows) insertLine.run(localOrderId, r.partname, r.pdes, r.quantity, r.price, r.free ? 1 : 0, null);
   });
   tx();
 
