@@ -234,6 +234,17 @@ CREATE TABLE IF NOT EXISTS customer_discounts (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Per-part discount percents for customers whose Priority discount is NOT uniform
+-- across parts (derived from their own recent order lines; percent 0 is stored and
+-- meaningful: "this part is known to carry no discount").
+CREATE TABLE IF NOT EXISTS customer_part_discounts (
+  custname TEXT NOT NULL,
+  partname TEXT NOT NULL,
+  percent REAL NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (custname, partname)
+);
+
 CREATE TABLE IF NOT EXISTS customer_policies (
   custname TEXT PRIMARY KEY,
   kind TEXT NOT NULL DEFAULT 'auto',
@@ -482,6 +493,10 @@ try {
 // off-session against a saved PayPlus token (no hosted page); NULL = hosted-page flow
 // (unchanged, existing rows stay NULL forever). Additive, read by admin/reporting only.
 ensureColumn('card_payments', 'charge_source', 'TEXT');
+
+// Whether the derived discount was uniform across all recent order lines. 0 → price
+// per part from customer_part_discounts; unseen parts get the base price.
+ensureColumn('customer_discounts', 'uniform', 'INTEGER NOT NULL DEFAULT 1');
 
 export function getSetting(key: string): string | null {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;

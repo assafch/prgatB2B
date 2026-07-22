@@ -23,6 +23,9 @@ function heldOrder(required: number): number {
 }
 
 const img = Buffer.from('not-a-real-image'); // createCheckDraft encrypts bytes; content is irrelevant here
+// Recent (non-stale) date for fixtures that must pass the stale-cheque guard
+// (server/staleCheck.test.ts) to reach the behaviour under test here.
+const RECENT_YMD = new Date(Date.now() - 3 * 86400_000).toISOString().slice(0, 10);
 
 test('confirmCheck records amount_verified=0 when OCR read no amount', () => {
   seedUser();
@@ -57,8 +60,8 @@ test('payHeldOrderByCheck REJECTS an unverified-amount cheque (the bypass)', asy
 test('payHeldOrderByCheck passes the verify guard for a verified cheque and claims the order', async () => {
   seedUser();
   const orderId = heldOrder(300);
-  const { id } = createCheckDraft(1, '10001', img, { is_check: true, amount: 300, amount_words_match: true, date: '2020-01-01', is_postdated: false, bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null });
-  confirmCheck(1, id, { amount: 300, checkDate: '2020-01-01' }); // amount_verified=1
+  const { id } = createCheckDraft(1, '10001', img, { is_check: true, amount: 300, amount_words_match: true, date: RECENT_YMD, is_postdated: false, bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null });
+  confirmCheck(1, id, { amount: 300, checkDate: RECENT_YMD }); // amount_verified=1
   // Gets PAST every guard and is claimed by approveOrder. Priority is unconfigured in
   // tests, so approveOrder marks the order 'failed' (payment taken, admin-recoverable)
   // and returns true — the point is it left pending_payment via the verified cheque.
@@ -72,10 +75,10 @@ test('pendingSettlement (debt-block offset) counts only OCR-verified cheques', (
   seedUser();
   // Unverified cheque with a big typed amount must NOT offset debt (the debt-block bypass).
   const c0 = createCheckDraft(1, '10001', img, null).id;
-  confirmCheck(1, c0, { amount: 20000, checkDate: '2020-01-01' }); // amount_verified=0
+  confirmCheck(1, c0, { amount: 20000, checkDate: RECENT_YMD }); // amount_verified=0, recent date so only amount_verified excludes it
   assert.equal(pendingSettlement('10001'), 0, 'unverified cheque must not lift the debt block');
   // A verified cheque does count.
-  const c1 = createCheckDraft(1, '10001', img, { is_check: true, amount: 500, amount_words_match: true, date: '2020-01-01', is_postdated: false, bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null }).id;
-  confirmCheck(1, c1, { amount: 500, checkDate: '2020-01-01' }); // amount_verified=1
+  const c1 = createCheckDraft(1, '10001', img, { is_check: true, amount: 500, amount_words_match: true, date: RECENT_YMD, is_postdated: false, bank: null, branch: null, account: null, check_number: null, legible: true, confidence: 0.9, notes_he: null }).id;
+  confirmCheck(1, c1, { amount: 500, checkDate: RECENT_YMD }); // amount_verified=1
   assert.equal(pendingSettlement('10001'), 500);
 });

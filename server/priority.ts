@@ -218,7 +218,7 @@ export async function getCustomerRecentDiscountLines(
   config: PriorityConfig,
   custname: string,
   limit = 10
-): Promise<Array<{ percent: number }>> {
+): Promise<Array<{ partname: string; percent: number }>> {
   const safe = custname.replace(/'/g, "''");
   const endpoint =
     `ORDERS?$filter=CUSTNAME eq '${safe}'&$orderby=CURDATE desc&$top=${limit}` +
@@ -226,11 +226,12 @@ export async function getCustomerRecentDiscountLines(
     `&$select=ORDNAME,CUSTNAME,CURDATE`;
   const result = await priorityRequest(config, endpoint);
   const orders = (result.value || []) as Array<Record<string, unknown>>;
-  const out: Array<{ percent: number }> = [];
+  const out: Array<{ partname: string; percent: number }> = [];
   for (const order of orders) {
     for (const ln of (order.ORDERITEMS_SUBFORM || []) as Array<Record<string, unknown>>) {
       const percent = Number(ln.PERCENT);
-      if (isFinite(percent)) out.push({ percent });
+      const partname = typeof ln.PARTNAME === 'string' ? ln.PARTNAME : null;
+      if (partname && isFinite(percent)) out.push({ partname, percent });
     }
   }
   return out;
