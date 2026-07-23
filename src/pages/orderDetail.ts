@@ -13,6 +13,7 @@ interface OrderDetail {
   priority_ordname: string | null;
   status: string;
   total: number | null;
+  total_incl_vat: number | null;
   details: string | null;
   created_at: string;
   submitted_at: string | null;
@@ -58,8 +59,10 @@ export async function renderOrderDetail(shell: HTMLElement, id: number): Promise
               .join('')}
           </tbody>
           <tfoot>
-            <tr><td colspan="3" style="padding:0.75rem;text-align:left;font-weight:700">סה״כ:</td>
-                <td style="padding:0.75rem;font-weight:700;color:var(--brand)">₪${(o.total ?? 0).toFixed(2)}</td></tr>
+            <tr><td colspan="3" style="padding:0.4rem 0.75rem;text-align:left">סה״כ לפני מע״מ:</td>
+                <td style="padding:0.4rem 0.75rem">₪${(o.total ?? 0).toFixed(2)}</td></tr>
+            <tr><td colspan="3" style="padding:0.75rem;text-align:left;font-weight:700">סה״כ לתשלום (כולל מע״מ):</td>
+                <td style="padding:0.75rem;font-weight:700;color:var(--brand)">₪${(o.total_incl_vat ?? o.total ?? 0).toFixed(2)}</td></tr>
           </tfoot>
         </table>
         <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap">
