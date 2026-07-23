@@ -12,11 +12,13 @@ import { resolvePolicy, enforcedFor, computeBlockingNetDebt } from './paymentPol
 import { installmentsRange } from './cardPayments.js';
 import { tokenVaultReady } from './tokenVault.js';
 import { stockAlertsEnabled } from './stockAlerts.js';
+import { customerDisplayTotal } from './orders.js';
 
 export interface LastOrderView {
   id: number;
   ordname: string | null;
   status: string;
+  /** VAT-inclusive (customer-facing totals always include VAT; see customerDisplayTotal) */
   total: number | null;
   created_at: string;
   itemCount: number;
@@ -143,13 +145,13 @@ export async function getHomeData(
 
   const lastRow = db
     .prepare(
-      `SELECT id, priority_ordname, status, total, created_at
+      `SELECT id, priority_ordname, status, total, payment_required_amount, created_at
        FROM orders_local
        WHERE user_id = ? AND status = 'submitted'
        ORDER BY created_at DESC LIMIT 1`
     )
     .get(userId) as
-    | { id: number; priority_ordname: string | null; status: string; total: number | null; created_at: string }
+    | { id: number; priority_ordname: string | null; status: string; total: number | null; payment_required_amount: number | null; created_at: string }
     | undefined;
 
   // Newest order still awaiting payment (unified checkout: home resume banner).
@@ -170,7 +172,7 @@ export async function getHomeData(
       id: lastRow.id,
       ordname: lastRow.priority_ordname,
       status: lastRow.status,
-      total: lastRow.total,
+      total: customerDisplayTotal(lastRow),
       created_at: lastRow.created_at,
       itemCount: c,
     };

@@ -8,6 +8,7 @@ interface OrderRow {
   priority_ordname: string | null;
   status: string;
   total: number | null;
+  total_incl_vat: number | null;
   details: string | null;
   created_at: string;
   submitted_at: string | null;
@@ -78,7 +79,7 @@ function portalCard(o: OrderRow): string {
     <div class="card dash-row" style="margin-bottom:0.6rem">
       <div class="grow">
         <div style="font-weight:700">${escapeHtml(o.priority_ordname || 'הזמנה #' + o.id)}</div>
-        <div class="muted" style="font-size:0.83rem">${formatDateTime(o.created_at)} · ${o.total != null ? formatMoney(o.total) : '-'}</div>
+        <div class="muted" style="font-size:0.83rem">${formatDateTime(o.created_at)} · ${o.total_incl_vat != null ? formatMoney(o.total_incl_vat) + ' כולל מע״מ' : '-'}</div>
         <div style="margin-top:0.35rem">${statusChip(LOCAL_STATUS[o.status] || o.status)}</div>
         ${isPendingPayment ? `<div style="margin-top:0.35rem"><a href="#order-pay/${o.id}" style="color:var(--warn);font-weight:700">שלם ←</a></div>` : ''}
       </div>

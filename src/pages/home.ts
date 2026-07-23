@@ -239,7 +239,7 @@ export async function renderHome(shell: HTMLElement): Promise<void> {
       <div class="card dash-row">
         <div class="grow">
           <div style="font-weight:700">${lo.ordname ? escapeHtml(lo.ordname) : 'הזמנה #' + lo.id} · ${lo.itemCount} פריטים</div>
-          <div class="muted" style="font-size:0.85rem">${formatDateTime(lo.created_at)} · ${formatMoney(lo.total)}</div>
+          <div class="muted" style="font-size:0.85rem">${formatDateTime(lo.created_at)} · ${formatMoney(lo.total)} כולל מע״מ</div>
           <div style="margin-top:0.35rem">${statusChip(statusLabel(lo.status))}</div>
         </div>
         <button class="ghost" id="reorder-last" data-id="${lo.id}">הזמנה חוזרת</button>

@@ -8,6 +8,7 @@ import { enforcedFor, evaluate } from './paymentPolicy.js';
 import { fastTrackQualifies, fastTrackAmounts, fastTrackDiscountPct, type FastTrackAmounts } from './fastTrack.js';
 import { notifyUser } from './push.js';
 import { getCheckForUser, isStaleCheckDate } from './payments.js';
+import { withVat } from './money.js';
 
 export interface CartLine {
   partname: string;
@@ -421,8 +422,17 @@ async function submitOrderInner(
   return { orderId: localOrderId, ordname, total, lines };
 }
 
+/** The VAT-inclusive figure a customer should see for a local order (house rule:
+ *  customer-facing totals include VAT; orders_local.total is pre-VAT). When a payment
+ *  was required, that exact amount wins — it is what the customer actually paid and
+ *  already reflects fast-track prepay discounts. */
+export function customerDisplayTotal(row: { total: number | null; payment_required_amount?: number | null }): number | null {
+  if (row.payment_required_amount != null && row.payment_required_amount > 0) return row.payment_required_amount;
+  return row.total != null ? withVat(row.total) : null;
+}
+
 export function listLocalOrders(userId: number): Array<Record<string, unknown>> {
-  return db
+  const rows = db
     .prepare(
       `SELECT id, custname, priority_ordname, status, total, details, created_at, submitted_at,
               payment_status, payment_required_amount, approved_at
@@ -432,6 +442,10 @@ export function listLocalOrders(userId: number): Array<Record<string, unknown>> 
        LIMIT 100`
     )
     .all(userId) as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    ...r,
+    total_incl_vat: customerDisplayTotal(r as { total: number | null; payment_required_amount?: number | null }),
+  }));
 }
 
 export function getLocalOrder(userId: number, orderId: number): Record<string, unknown> | null {
@@ -442,7 +456,11 @@ export function getLocalOrder(userId: number, orderId: number): Record<string, u
   const lines = db
     .prepare('SELECT * FROM order_lines WHERE order_id = ? ORDER BY id')
     .all(orderId);
-  return { ...order, lines };
+  return {
+    ...order,
+    total_incl_vat: customerDisplayTotal(order as { total: number | null; payment_required_amount?: number | null }),
+    lines,
+  };
 }
 
 export async function listPriorityOrders(custname: string): Promise<Array<Record<string, unknown>>> {
